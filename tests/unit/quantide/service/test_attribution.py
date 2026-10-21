@@ -223,3 +223,45 @@ def test_explain_prediction_uses_result_cache(monkeypatch) -> None:
     assert first is not None
     assert second == first
     assert len(calls) == 1
+
+
+def test_load_holdings_at_restores_positions(monkeypatch) -> None:
+    """归因必须还原决策日持仓（选股池优先保留持仓）。"""
+    import polars as pl
+
+    monkeypatch.setattr(
+        attribution_service.db,
+        "query_positions",
+        lambda portfolio_id=None, start=None, end=None: pl.DataFrame(
+            {
+                "portfolio_id": ["pf-1", "pf-1", "pf-1"],
+                "dt": [
+                    dt.date(2024, 1, 2),
+                    dt.date(2024, 1, 3),
+                    dt.date(2024, 1, 3),
+                ],
+                "asset": ["000001.SZ", "000002.SZ", "000003.SZ"],
+                "shares": [100.0, 200.0, 0.0],
+                "avail": [100.0, 200.0, 0.0],
+                "price": [10.0, 20.0, 30.0],
+                "profit": [0.0, 0.0, 0.0],
+                "mv": [1000.0, 4000.0, 0.0],
+            }
+        ),
+    )
+
+    held = attribution_service.load_holdings_at("pf-1", dt.date(2024, 1, 4))
+
+    assert set(held) == {"000002.SZ"}
+    assert held["000002.SZ"].shares == 200.0
+
+
+def test_cache_version_changes_with_factor_or_pipeline(monkeypatch) -> None:
+    """改因子/改策略后，缓存版本随之变化（缓存自动失效）。"""
+    version = attribution_service._cache_version(_AttributionStrategy)
+    assert version.startswith(attribution_service.FACTOR_VERSION)
+
+    class _Other(_AttributionStrategy):
+        PIPELINE_VERSION = "deadbeef"
+
+    assert attribution_service._cache_version(_Other) != version

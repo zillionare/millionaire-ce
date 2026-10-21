@@ -1,6 +1,7 @@
 """因子库：原始 K 线 → 因子表，与策略解耦。"""
 
 from quantide.factors.alpha import (
+    FACTOR_VERSION,
     FEATURE_COLS,
     FEATURE_DOCS,
     FEATURE_GROUPS,
@@ -14,6 +15,7 @@ from quantide.factors.catalog import (
 )
 
 __all__ = [
+    "FACTOR_VERSION",
     "FEATURE_COLS",
     "FEATURE_DOCS",
     "FEATURE_GROUPS",

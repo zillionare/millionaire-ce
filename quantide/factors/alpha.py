@@ -10,8 +10,14 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 import numpy as np
 import polars as pl
+
+#: 因子计算版本（因子模块源码哈希）：因子公式变化时缓存自动失效
+FACTOR_VERSION: str = hashlib.sha1(Path(__file__).read_bytes()).hexdigest()[:12]
 
 #: 因子分组（顺序即 :data:`FEATURE_COLS` 的顺序），供 UI 分组展示。
 FEATURE_GROUPS: dict[str, list[str]] = {

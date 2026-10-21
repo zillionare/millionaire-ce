@@ -3752,26 +3752,6 @@ def backtest_result(req, session, portfolio_id: str):
         }}
         updateChart(seriesData);
 
-        function renderTrades(trades) {{
-            var body = document.getElementById('trade_table_body');
-            if (!body) return;
-            var html = "";
-            for (var i = 0; i < trades.length; i++) {{
-                var t = trades[i];
-                var color = t.side_value === 1 ? "text-red-500" : "text-green-500";
-                html += "<tr>" +
-                    "<td>" + t.tm + "</td>" +
-                    "<td>" + t.asset + "</td>" +
-                    "<td class='" + color + "'>" + t.side + "</td>" +
-                    "<td>" + fmtNumber(t.price) + "</td>" +
-                    "<td>" + fmtNumber(t.shares) + "</td>" +
-                    "<td>" + fmtNumber(t.amount) + "</td>" +
-                    "<td>" + fmtNumber(t.fee) + "</td>" +
-                    "</tr>";
-            }}
-            body.innerHTML = html;
-        }}
-
         function renderDailySummary(rows) {{
             var body = document.getElementById('daily_summary_body');
             if (!body) return;
@@ -3872,9 +3852,6 @@ def backtest_result(req, session, portfolio_id: str):
                     for (var key in formats) {{
                         updateMetric(key, data.metrics[key], formats[key]);
                     }}
-                }}
-                if (data.trades) {{
-                    renderTrades(data.trades);
                 }}
                 if (data.daily_summary) {{
                     renderDailySummary(data.daily_summary);
@@ -4066,7 +4043,6 @@ async def backtest_ws(websocket: WebSocket):
                 "error": backtest_error,
                 "metrics": _build_metrics_payload(portfolio_id),
                 "series": _build_series_payload(portfolio_id, date_axis),
-                "trades": _build_trade_rows(portfolio_id, limit=200),
                 "daily_summary": _build_daily_summary(portfolio_id),
                 "positions": _build_daily_positions(portfolio_id),
                 "logs": _build_log_rows(portfolio_id, limit=200),

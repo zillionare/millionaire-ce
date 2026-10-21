@@ -871,3 +871,29 @@ def test_filter_universe_holdings_do_not_change_size(monkeypatch):
 
     assert len(assets) == 8
     assert set(all_assets[:3]) <= set(assets)
+
+
+def test_explain_cache_keys_include_versions_and_holdings(monkeypatch) -> None:
+    """归因缓存键必须含流水线/因子版本与当时持仓，避免命中旧结果。"""
+    strategy = _make_strategy(
+        _FakeBroker(cash=0.0, positions={}), {"use_lightgbm": False}
+    )
+    cross_key, model_key = strategy._explain_cache_keys(dt.date(2024, 6, 3))
+
+    assert ml_momentum_reversal.PIPELINE_VERSION in cross_key
+    assert ml_momentum_reversal.FACTOR_VERSION in cross_key
+    assert () in cross_key  # 持仓元组
+    assert cross_key != model_key  # 模型键额外含 use_lightgbm
+
+
+def test_explain_cache_keys_change_with_holdings(monkeypatch) -> None:
+    """持仓不同 → 缓存键不同（选股池不同）。"""
+    position = SimpleNamespace(shares=100, avail=100, price=10.0, mv=1000.0)
+    empty = _make_strategy(_FakeBroker(cash=0.0, positions={}), {})
+    held = _make_strategy(
+        _FakeBroker(cash=0.0, positions={"600001.SH": position}), {}
+    )
+
+    assert empty._explain_cache_keys(dt.date(2024, 6, 3)) != held._explain_cache_keys(
+        dt.date(2024, 6, 3)
+    )

@@ -11,7 +11,10 @@ import datetime
 import json
 from typing import Any
 
+import polars as pl
+
 from quantide.data.sqlite import db
+from quantide.factors import FACTOR_VERSION
 from quantide.service.discovery import strategy_loader
 
 ATTRIBUTION_SHAP = "shap"
@@ -23,13 +26,36 @@ _EXPLAIN_FEATURE_CACHE: dict[tuple[Any, ...], list[tuple[str, float]] | None] = 
 _EXPLAIN_RESULT_CACHE_MAX = 64
 
 
-class _AttributionBroker:
-    """归因用的最小 broker 替身（只需要回测区间信息）。"""
+class _AttributionPosition:
+    """归因用的持仓替身（只需要股数）。"""
 
-    def __init__(self) -> None:
+    def __init__(self, shares: float) -> None:
+        self.shares = shares
+        self.avail = shares
+        self.price = 0.0
+        self.mv = 0.0
+
+
+class _AttributionBroker:
+    """归因用的最小 broker 替身。
+
+    ``positions`` 必须还原回测当时（决策日）的持仓：选股池会优先保留持仓，
+    若这里给空，选出的池子与回测当时不同，截面与归因都会失真。
+    """
+
+    def __init__(self, positions: dict[str, Any] | None = None) -> None:
         self._bt_end: datetime.date | None = None
-        self.positions: dict[str, Any] = {}
+        self.positions: dict[str, Any] = positions or {}
         self.cash: float = 0.0
+
+
+def _cache_version(strategy_cls: Any) -> str:
+    """缓存版本：因子版本 + 策略流水线版本（源码哈希）。
+
+    因子公式或策略逻辑变化后，版本随之变化，缓存自动失效；服务重启同样失效。
+    """
+    pipeline = str(getattr(strategy_cls, "PIPELINE_VERSION", "") or "")
+    return f"{FACTOR_VERSION}:{pipeline}"
 
 
 def attribution_kind(strategy_cls: Any) -> str | None:
@@ -54,6 +80,33 @@ def attribution_kind(strategy_cls: Any) -> str | None:
 def supports_attribution(strategy_cls: Any) -> bool:
     """策略是否支持逐次预测归因。"""
     return attribution_kind(strategy_cls) is not None
+
+
+def load_holdings_at(
+    portfolio_id: str, signal_date: datetime.date
+) -> dict[str, Any]:
+    """读取回测在决策日的持仓（用于还原当时的选股池）。
+
+    Args:
+        portfolio_id: 回测组合 ID。
+        signal_date: 决策日。
+
+    Returns:
+        dict: 资产代码 → 持仓替身。
+    """
+    try:
+        positions = db.query_positions(portfolio_id=portfolio_id, end=signal_date)
+    except Exception:
+        return {}
+    if positions is None or positions.is_empty():
+        return {}
+    latest = positions["dt"].max()
+    held: dict[str, Any] = {}
+    for row in positions.filter(pl.col("dt") == latest).iter_rows(named=True):
+        shares = float(row.get("shares") or 0)
+        if shares > 0:
+            held[str(row.get("asset") or "")] = _AttributionPosition(shares)
+    return held
 
 
 def load_backtest_config(portfolio_id: str) -> dict[str, Any]:
@@ -112,11 +165,14 @@ def explain_features(
         asset,
         signal_date,
         tuple(config.get("features") or ()),
+        _cache_version(strategy_cls),
     )
     if cache_key in _EXPLAIN_FEATURE_CACHE:
         return _EXPLAIN_FEATURE_CACHE[cache_key]
     try:
-        strategy = strategy_cls(_AttributionBroker(), config)
+        strategy = strategy_cls(
+            _AttributionBroker(load_holdings_at(portfolio_id, signal_date)), config
+        )
         explainer = getattr(strategy, "explain_features", None)
         if not callable(explainer):
             return None
@@ -156,11 +212,14 @@ def explain_prediction(
         asset,
         signal_date,
         tuple(config.get("features") or ()),
+        _cache_version(strategy_cls),
     )
     if cache_key in _EXPLAIN_RESULT_CACHE:
         return _EXPLAIN_RESULT_CACHE[cache_key]
     try:
-        strategy = strategy_cls(_AttributionBroker(), config)
+        strategy = strategy_cls(
+            _AttributionBroker(load_holdings_at(portfolio_id, signal_date)), config
+        )
         explainer = getattr(strategy, "explain_prediction", None)
         if not callable(explainer):
             return None

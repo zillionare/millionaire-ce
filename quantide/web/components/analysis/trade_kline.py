@@ -195,7 +195,7 @@ def _decision_features(
     portfolio_id: str,
     asset: str,
     decision_date: datetime.date,
-) -> list[tuple[str, float]] | None:
+) -> tuple[list[tuple[str, float]], str] | None:
     """计算决策日该股票的模型特征取值。
 
     优先使用策略自己的因子面板（同一选股池、同一复权口径 → 与模型输入一致）；
@@ -222,12 +222,12 @@ def _decision_features(
         signal_date = decision_date
     features = explain_features(portfolio_id, asset, signal_date)
     if features:
-        return features
+        return features, "策略选股池口径（与模型输入一致）"
 
     cache_key = (asset, decision_date.isoformat())
     cached = _MARKET_FEATURE_CACHE.get(cache_key)
     if cached is not None:
-        return cached
+        return cached, "全市场口径（该股不在策略选股池内）"
 
     try:
         panel = daily_bars.get_bars_in_range(
@@ -261,7 +261,7 @@ def _decision_features(
             if len(_MARKET_FEATURE_CACHE) >= 64:
                 _MARKET_FEATURE_CACHE.pop(next(iter(_MARKET_FEATURE_CACHE)))
             _MARKET_FEATURE_CACHE[cache_key] = result
-        return result or None
+        return (result, "全市场口径（该股不在策略选股池内）") if result else None
     except Exception:
         return None
 
@@ -399,8 +399,11 @@ def build_trade_kline_payload(
             sell_attribution = _decision_attribution(
                 portfolio_id, asset, sell_dt, pair.sell_tm
             )
+    features_scope = ""
     if active_panel == TRADE_KLINE_PANEL_FEATURES:
-        features = _decision_features(portfolio_id, asset, buy_dt)
+        feature_result = _decision_features(portfolio_id, asset, buy_dt)
+        if feature_result is not None:
+            features, features_scope = feature_result
 
     return {
         "asset": asset,
@@ -433,6 +436,7 @@ def build_trade_kline_payload(
         "post_start_dt": bars[len(bars) - post_trend_bars]["dt"] if post_trend_bars else "",
         "post_sell_trend": sell_dt is not None,
         "features": features or [],
+        "features_scope": features_scope,
         "attribution": attribution,
         "sell_attribution": sell_attribution,
         "available_panels": available_panels,
@@ -693,7 +697,12 @@ def _render_trade_panel(payload: dict[str, Any]) -> Any:
         )
     )
 
+    scope = payload.get("features_scope") or ""
     features = payload.get("features") or []
+    if scope:
+        sections.append(
+            P(scope, cls="text-xs text-gray-400 mb-1")
+        )
     if features:
         feature_rows = [
             _panel_row(name, f"{value:.4f}") for name, value in features
@@ -794,7 +803,11 @@ def _render_attribution_panel(
     )
     blocks = [header, legend]
     if sell_attribution:
-        blocks.append(_render_attribution_block(sell_attribution, "卖出归因"))
+        blocks.append(
+            _render_attribution_block(
+                sell_attribution, "卖出时点评分（模型）"
+            )
+        )
     return Div(*blocks)
 
 

@@ -27,6 +27,7 @@ from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.daily_basic import daily_basic
 from quantide.data.models.stocks import stock_list
 from quantide.factors.alpha import (
+    FACTOR_VERSION,
     FEATURE_COLS,
     _zscore_1d,
     compute_alpha_features,
@@ -42,11 +43,14 @@ except ImportError:  # pragma: no cover
     lgb = None  # type: ignore[assignment]
     _HAS_LIGHTGBM = False
 
-#: 归因用的模型缓存（按训练参数 + 截面日 + 面板规模键控）
+#: 流水线版本（策略源码哈希）：策略逻辑变化时归因缓存自动失效
+PIPELINE_VERSION: str = hashlib.sha1(Path(__file__).read_bytes()).hexdigest()[:12]
+
+#: 归因用的模型缓存（按训练参数 + 因子集 + 截面日 + 持仓键控）
 _EXPLAIN_MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, str]] = {}
 
-#: 归因用的因子面板缓存（键同上），避免每次切换页签都重算因子
-_EXPLAIN_PANEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
+#: 归因用的截面缓存（只保留当前这一条：约 2000 行、1MB）
+_EXPLAIN_CROSS_SECTION_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
 
 
 def _parse_custom_assets(config: dict[str, Any]) -> list[str] | None:
@@ -924,19 +928,20 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self._panel_start = signal_date
         self._panel_end = fetch_end
 
-    def _explain_panel(self, signal_date: datetime.date) -> pl.DataFrame:
-        """取归因用的标准化因子面板（带缓存）。
-
-        面板构建（抓取 + 因子计算 + 截面标准化）约 0.6s，页签来回切换会重复
-        触发；这里按 (训练参数, 特征集, 信号日) 缓存，命中即复用。
+    def _explain_cache_keys(
+        self, signal_date: datetime.date
+    ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+        """构造归因缓存的键。
 
         Args:
             signal_date: 决策日。
 
         Returns:
-            pl.DataFrame: 标准化后的因子面板（可能为空）。
+            tuple: (截面缓存键, 模型缓存键)。
         """
-        key = (
+        base = (
+            PIPELINE_VERSION,
+            FACTOR_VERSION,
             self.train_window,
             self.horizon,
             round(self.stop_loss_pct, 6),
@@ -945,48 +950,72 @@ class MLMomentumReversalStrategy(BaseStrategy):
             self.universe_mode,
             round(self.market_cap_trim_pct, 6),
             tuple(self.selected_features or FEATURE_COLS),
+            tuple(self._held_assets()),
             signal_date,
         )
-        cached = _EXPLAIN_PANEL_CACHE.get(key)
+        return base, base + (self.use_lightgbm,)
+
+    def _explain_cross_section(
+        self, signal_date: datetime.date
+    ) -> pl.DataFrame:
+        """取归因用的目标日截面（只缓存当前这一条）。
+
+        整张因子面板约 160k 行、100MB，不做缓存；这里只缓存目标日截面
+        （约 2000 行、1MB），够「同一次交易在特征页与 SHAP 页之间切换」
+        不重复计算；换一笔交易则重新计算。
+
+        Args:
+            signal_date: 决策日。
+
+        Returns:
+            pl.DataFrame: 目标日截面（含原始因子与 z 因子）；可能为空。
+        """
+        cross_key, _ = self._explain_cache_keys(signal_date)
+        cached = _EXPLAIN_CROSS_SECTION_CACHE.get(cross_key)
         if cached is not None:
             return cached
         self._ensure_backtest_panel(signal_date)
         panel = self._cached_norm_panel
-        if panel is None:
-            panel = pl.DataFrame()
-        if len(_EXPLAIN_PANEL_CACHE) >= 2:
-            _EXPLAIN_PANEL_CACHE.pop(next(iter(_EXPLAIN_PANEL_CACHE)))
-        _EXPLAIN_PANEL_CACHE[key] = panel
-        return panel
+        if panel is None or panel.is_empty():
+            return pl.DataFrame()
+        target_date = panel.filter(pl.col("date") <= pl.lit(signal_date))["date"].max()
+        if target_date is None:
+            return pl.DataFrame()
+        keep = ["date", "asset", "close"] + [
+            c for c in (self.selected_features or FEATURE_COLS)
+        ] + [f"{c}_z" for c in (self.selected_features or FEATURE_COLS)]
+        cross = panel.filter(pl.col("date") == target_date).select(
+            [c for c in keep if c in panel.columns]
+        )
+        _EXPLAIN_CROSS_SECTION_CACHE.clear()
+        _EXPLAIN_CROSS_SECTION_CACHE[cross_key] = cross
+        return cross
 
     def _attribution_model(
-        self, hist: pl.DataFrame, target_date: datetime.date
+        self, target_date: datetime.date
     ) -> tuple[Any, str]:
         """取（或训练）归因所需的模型，按决策日缓存。
 
+        模型缓存键含流水线版本、因子版本、训练参数、因子集与当时持仓；
+        命中即复用，未命中时临时构建训练面板（不常驻）。
+
         Args:
-            hist: 截至信号日的标准化特征面板。
             target_date: 截面日。
 
         Returns:
             tuple: (模型, 引擎名)。
         """
-        key = (
-            self.train_window,
-            self.horizon,
-            round(self.stop_loss_pct, 6),
-            round(self.take_profit_pct, 6),
-            self.use_lightgbm,
-            self.universe_size,
-            self.universe_mode,
-            round(self.market_cap_trim_pct, 6),
-            tuple(self.selected_features or FEATURE_COLS),
-            target_date,
-            int(hist.height),
-        )
+        _, key = self._explain_cache_keys(target_date)
         cached = _EXPLAIN_MODEL_CACHE.get(key)
         if cached is not None:
             return cached
+        self._ensure_backtest_panel(target_date)
+        panel = self._cached_norm_panel
+        if panel is None or panel.is_empty():
+            raise RuntimeError("归因面板为空，无法训练模型")
+        hist = panel.filter(pl.col("date") <= pl.lit(target_date))
+        if hist.is_empty():
+            raise RuntimeError("归因训练数据为空")
         model, engine = _fit_ml_model(
             hist,
             train_window=self.train_window,
@@ -996,7 +1025,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             down_barrier_pct=self.stop_loss_pct,
             feature_cols=self.selected_features or FEATURE_COLS,
         )
-        if len(_EXPLAIN_MODEL_CACHE) >= 16:
+        if len(_EXPLAIN_MODEL_CACHE) >= 8:
             _EXPLAIN_MODEL_CACHE.pop(next(iter(_EXPLAIN_MODEL_CACHE)))
         _EXPLAIN_MODEL_CACHE[key] = (model, engine)
         return model, engine
@@ -1017,18 +1046,12 @@ class MLMomentumReversalStrategy(BaseStrategy):
             list | None: (因子名, 取值) 列表；数据不足时返回 ``None``。
         """
         try:
-            panel = self._explain_panel(signal_date)
+            cross = self._explain_cross_section(signal_date)
         except Exception:
             return None
-        if panel is None or panel.is_empty():
+        if cross is None or cross.is_empty():
             return None
-        hist = panel.filter(pl.col("date") <= pl.lit(signal_date))
-        if hist.is_empty():
-            return None
-        target_date = hist["date"].max()
-        row = hist.filter(
-            (pl.col("date") == pl.lit(target_date)) & (pl.col("asset") == asset)
-        )
+        row = cross.filter(pl.col("asset") == asset)
         if row.is_empty():
             return None
         values = row.row(0, named=True)
@@ -1060,26 +1083,19 @@ class MLMomentumReversalStrategy(BaseStrategy):
             dict | None: 归因结果；数据不足或资产不在截面内时返回 ``None``。
         """
         try:
-            panel = self._explain_panel(signal_date)
+            cross = self._explain_cross_section(signal_date)
         except Exception:
             return None
-        if panel is None or panel.is_empty():
+        if cross is None or cross.is_empty():
             return None
 
-        hist = panel.filter(pl.col("date") <= pl.lit(signal_date))
-        if hist.is_empty():
-            return None
-        target_date = hist["date"].max()
-        cross = hist.filter(pl.col("date") == pl.lit(target_date))
-        if cross.is_empty():
-            return None
-
+        target_date = cross["date"][0]
         assets = cross["asset"].to_list()
         if asset not in assets:
             return None
         index = assets.index(asset)
 
-        model, engine = self._attribution_model(hist, target_date)
+        model, engine = self._attribution_model(target_date)
         feature_cols = self.selected_features or FEATURE_COLS
         z_cols = [f"{c}_z" for c in feature_cols]
         x = (

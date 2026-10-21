@@ -114,7 +114,7 @@ def _install(
     monkeypatch.setattr(
         trade_kline_module,
         "_decision_features",
-        lambda portfolio_id, asset, decision_date: features,
+        lambda portfolio_id, asset, decision_date: (features, "策略选股池口径"),
     )
 
 
@@ -478,6 +478,48 @@ def test_shap_panel_shows_buy_and_sell_attribution(monkeypatch) -> None:
 
     html = _html(render_trade_kline_chart(payload, {}))
 
-    assert "卖出归因" in html
+    assert "卖出时点评分" in html
     assert "#88 / 100" in html
     assert "#3 / 100" in html
+
+
+def test_shap_attribution_only_computed_on_shap_tab(monkeypatch) -> None:
+    """非 SHAP 页签时不应触发归因计算。"""
+    calls: list[str] = []
+
+    def _spy(portfolio_id, asset, decision_date, decision_tm=None):
+        calls.append(asset)
+        return {
+            "asset": asset,
+            "date": decision_date,
+            "engine": "LightGBM",
+            "score": 1.0,
+            "baseline": 0.0,
+            "rank": 1,
+            "cross_section": 100,
+            "features": [{"name": "bias_5", "z": 1.0, "total": 0.1}],
+        }
+
+    buy = _trade(tid="t1", tm=datetime.datetime(2024, 6, 3, 9, 30))
+    _install(
+        monkeypatch,
+        [buy],
+        _bars(datetime.date(2022, 1, 3), datetime.date(2024, 6, 3)),
+        store_end=datetime.date(2024, 6, 3),
+    )
+    monkeypatch.setattr(
+        trade_kline_module, "_portfolio_supports_attribution", lambda portfolio_id: True
+    )
+    monkeypatch.setattr(trade_kline_module, "_decision_attribution", _spy)
+
+    payload = build_trade_kline_payload("pf-1", "t1")
+    assert payload is not None
+    assert payload["active_panel"] == "features"
+    assert payload["attribution"] is None
+    assert calls == []
+
+    payload = build_trade_kline_payload("pf-1", "t1", panel="shap")
+    assert payload is not None
+    assert payload["active_panel"] == "shap"
+    assert payload["attribution"] is not None
+    assert calls == ["002078.SZ"]
