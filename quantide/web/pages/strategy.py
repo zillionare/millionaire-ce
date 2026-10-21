@@ -862,7 +862,34 @@ def _strategy_version(strategy_cls) -> str:
     """
     if strategy_cls is None:
         return "v1.0.0"
-    return getattr(strategy_cls, "VERSION", getattr(strategy_cls, "__version__", "v1.0.0"))
+    return getattr(
+        strategy_cls, "VERSION", getattr(strategy_cls, "__version__", "v1.0.0")
+    )
+
+
+def _get_strategy_default_params(strategy_cls: Any) -> dict[str, Any]:
+    """获取策略默认参数字典，兼容 PARAMS 属性与 default_config() 方法。"""
+    if strategy_cls is None:
+        return {}
+    params = getattr(strategy_cls, "PARAMS", None)
+    if isinstance(params, dict):
+        return dict(params)
+    default_config_fn = getattr(strategy_cls, "default_config", None)
+    if callable(default_config_fn):
+        try:
+            cfg = default_config_fn()
+            if isinstance(cfg, dict):
+                return dict(cfg)
+        except Exception:
+            pass
+    return {}
+
+
+def _supports_stock_selection(strategy_cls: Any) -> bool:
+    """检查策略类是否支持个股筛选接口 select_stocks。"""
+    if strategy_cls is None:
+        return False
+    return callable(getattr(strategy_cls, "select_stocks", None))
 
 
 def _build_backtest_name_cell(name: str, portfolio_id: str) -> Any:
@@ -1001,18 +1028,37 @@ def _build_strategy_rows(strategies: dict) -> list:
             else Span("--", cls="text-gray-400")
         )
 
+        action_controls: list[Any] = [
+            Button(
+                UkIcon("play", size=16, cls="text-blue-600"),
+                title="重新运行回测",
+                hx_get=f"/strategy/{name}/backtest/modal",
+                hx_target="#modal-container",
+                hx_indicator="#global-loading",
+                cls="w-8 h-8 flex items-center justify-center bg-transparent border-0 shadow-none p-0 hover:text-blue-800",
+                type="button",
+            )
+        ]
+        if _supports_stock_selection(cls):
+            action_controls.append(
+                Button(
+                    "选股",
+                    title="运行机器学习模型选出当日个股",
+                    hx_get=f"/strategy/{name}/select/modal",
+                    hx_target="#modal-container",
+                    hx_indicator="#global-loading",
+                    cls=(
+                        "px-2 py-1 text-xs font-medium text-emerald-700 "
+                        "bg-emerald-50 hover:bg-emerald-100 rounded border "
+                        "border-emerald-200"
+                    ),
+                    type="button",
+                )
+            )
+
         rows.append(
             Tr(
-                Td(
-                    Button(
-                        UkIcon("play", size=16, cls="text-blue-600"),
-                        title="重新运行回测",
-                        hx_get=f"/strategy/{name}/backtest/modal",
-                        hx_target="#modal-container",
-                        cls="w-8 h-8 flex items-center justify-center bg-transparent border-0 shadow-none p-0 hover:text-blue-800",
-                        type="button",
-                    )
-                ),
+                Td(Div(*action_controls, cls="flex items-center gap-2")),
                 Td(name, cls="text-gray-900 font-medium"),
                 Td(doc, cls="text-gray-600"),
                 Td(version, cls="text-gray-900"),
@@ -1065,7 +1111,7 @@ def _build_backtest_rows(
         version = _strategy_version(strategy_cls)
         info_params = _extract_params_from_info(row.get("info"))
         if not info_params and strategy_cls:
-            info_params = getattr(strategy_cls, "PARAMS", {})
+            info_params = _get_strategy_default_params(strategy_cls)
         params_text = _params_to_text(info_params)
         range_text = _format_range(row.get("start"), row.get("end"))
         deployment_modes = strategy_runtime_manager.backtest_deployment_modes(portfolio_id)
@@ -1334,6 +1380,8 @@ def index(req, session):
         ),
         section_toggle_script,
         _strategy_modal_script(),
+        _htmx_indicator_style(),
+        _global_loading_overlay(),
         Div(id="modal-container"),
         cls="space-y-6",
     )
@@ -1351,7 +1399,7 @@ def strategy_detail(req, session, name: str):
 
     cls = strategies[name]
     doc = cls.__doc__ or "暂无描述"
-    params = getattr(cls, "PARAMS", {})
+    params = _get_strategy_default_params(cls)
 
     # Get history
     portfolios = db.get_portfolios_by_strategy(name)
@@ -1373,56 +1421,104 @@ def strategy_detail(req, session, name: str):
                     Td(str(start)),
                     Td(str(end)),
                     Td(
-                        A("查看报告", href=f"/strategy/backtest/{pid}", cls="text-blue-600 hover:underline"),
-                    )
+                        A(
+                            "查看报告",
+                            href=f"/strategy/backtest/{pid}",
+                            cls="text-blue-600 hover:underline",
+                        ),
+                    ),
                 )
             )
 
     history_table = Table(
         Thead(Tr(Th("ID"), Th("开始时间"), Th("结束时间"), Th("操作"))),
         Tbody(*history_rows),
-        cls=TableT.striped
+        cls=TableT.striped,
     )
+
+    detail_actions: list[Any] = [
+        Button(
+            "运行回测",
+            type="button",
+            cls=(
+                "px-4 py-2 bg-blue-600 text-white rounded-lg "
+                "hover:bg-blue-700 text-sm font-medium"
+            ),
+            hx_get=f"/strategy/{name}/backtest/modal",
+            hx_target="#modal-container",
+            hx_indicator="#global-loading",
+        )
+    ]
+    if _supports_stock_selection(cls):
+        detail_actions.append(
+            Button(
+                "一键选股",
+                type="button",
+                cls=(
+                    "px-4 py-2 bg-emerald-600 text-white rounded-lg "
+                    "hover:bg-emerald-700 text-sm font-medium"
+                ),
+                hx_get=f"/strategy/{name}/select/modal",
+                hx_target="#modal-container",
+                hx_indicator="#global-loading",
+            )
+        )
 
     layout.main_block = lambda: Div(
         Div(
-            A("← 返回列表", href="/strategy", cls="text-gray-500 hover:text-gray-800 mb-4 inline-block"),
-            H1(name, cls="text-3xl font-bold mb-2"),
-            P(doc, cls="text-gray-600 mb-6"),
-
+            A(
+                "← 返回列表",
+                href="/strategy",
+                cls="text-gray-500 hover:text-gray-800 mb-4 inline-block",
+            ),
+            Div(
+                Div(
+                    H1(name, cls="text-3xl font-bold mb-2"),
+                    P(doc, cls="text-gray-600"),
+                ),
+                Div(*detail_actions, cls="flex items-center gap-3 shrink-0"),
+                cls=(
+                    "flex flex-col md:flex-row md:items-start "
+                    "md:justify-between gap-4 mb-6"
+                ),
+            ),
             Card(
                 CardHeader(H3("默认参数")),
                 CardBody(Pre(str(params), cls="bg-gray-50 p-4 rounded text-sm")),
-                cls="mb-6"
+                cls="mb-6",
             ),
-
             Div(
                 H3("回测历史", cls="text-xl font-bold mb-4"),
                 history_table,
-                cls="bg-white p-6 rounded-lg shadow-sm border border-gray-100"
+                cls="bg-white p-6 rounded-lg shadow-sm border border-gray-100",
             ),
-
-            cls="max-w-4xl mx-auto py-8"
+            _strategy_modal_script(),
+            _htmx_indicator_style(),
+            _global_loading_overlay(),
+            Div(id="modal-container"),
+            cls="max-w-4xl mx-auto py-8",
         )
     )
 
     return layout.render()
 
+
 # --- Backtest Modal & Runner ---
+
 
 def _parse_params(form, prefix="param_"):
     config = {}
     for k, v in form.items():
         if k.startswith(prefix):
-            param_name = k[len(prefix):]
+            param_name = k[len(prefix) :]
             # Try to infer type
-            if v.lower() == 'true':
+            if v.lower() == "true":
                 v = True
-            elif v.lower() == 'false':
+            elif v.lower() == "false":
                 v = False
             else:
                 try:
-                    if '.' in v:
+                    if "." in v:
                         v = float(v)
                     else:
                         v = int(v)
@@ -1431,6 +1527,7 @@ def _parse_params(form, prefix="param_"):
             config[param_name] = v
     return config
 
+
 @rt("/{name}/backtest/modal")
 def backtest_modal(name: str):
     strategies = strategy_loader.load_from_cache()
@@ -1438,7 +1535,7 @@ def backtest_modal(name: str):
     if not cls:
         return "Strategy not found"
 
-    default_params = getattr(cls, "PARAMS", {})
+    default_params = _get_strategy_default_params(cls)
 
     param_inputs = []
     for k, v in default_params.items():
@@ -1597,6 +1694,550 @@ async def run_backtest(req, name: str):
             Button("关闭", cls="btn btn-secondary", onclick="this.closest('.modal').remove()"),
             cls="p-4 bg-white rounded shadow"
         )
+
+
+# --- Stock Selection Modal & Runner ---
+
+
+def _get_default_selection_date() -> str:
+    """获取选股默认基准日期字符串 (YYYY-MM-DD)。"""
+    try:
+        max_dt = getattr(daily_bars, "max_date", None) or getattr(
+            daily_bars, "end", None
+        )
+        if isinstance(max_dt, (datetime.date, datetime.datetime)):
+            return max_dt.strftime("%Y-%m-%d")
+        if isinstance(max_dt, str) and max_dt.strip():
+            return max_dt.strip()[:10]
+    except Exception:
+        pass
+    return "2024-12-31"
+
+
+def _format_signed_pct(value: Any) -> tuple[str, str]:
+    """格式化带正负号的涨跌幅文本及 A 股红涨绿跌样式。"""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return "--", "text-gray-500"
+    cls = "text-red-600 font-medium" if num >= 0 else "text-green-600 font-medium"
+    return f"{num:+.2%}", cls
+
+
+def _format_score(value: Any) -> str:
+    """格式化机器学习打分 (3 位小数)。"""
+    try:
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return "--"
+
+
+def _htmx_indicator_style() -> Any:
+    """提供 htmx 请求进行中的 loading 指示器样式。"""
+    return Style(
+        ".htmx-indicator{display:none !important;opacity:1 !important}"
+        ".htmx-request.htmx-indicator,"
+        ".htmx-request .htmx-indicator{display:flex !important;opacity:1 !important}"
+    )
+
+
+def _global_loading_overlay() -> Any:
+    """页面级请求进行中提示（右下角浮层）。"""
+    return Div(
+        Span(
+            cls=(
+                "inline-block h-4 w-4 animate-spin rounded-full "
+                "border-2 border-white border-t-transparent"
+            )
+        ),
+        Span("正在打开，请稍候…"),
+        id="global-loading",
+        cls=(
+            "htmx-indicator fixed bottom-5 right-5 z-[70] items-center gap-2 "
+            "rounded-lg bg-gray-900/90 px-4 py-2.5 text-xs text-white shadow-xl"
+        ),
+    )
+
+
+def _resolve_selection_date_notice(
+    requested_date: str,
+    resolved_date: str,
+    latest_available: str,
+    has_picks: bool,
+) -> str:
+    """生成选股日期回退提示；日期一致或无法解析时返回空字符串。"""
+    try:
+        requested_dt = datetime.date.fromisoformat(requested_date[:10])
+        latest_dt = datetime.date.fromisoformat(latest_available[:10])
+    except ValueError:
+        return ""
+
+    if requested_dt > latest_dt:
+        if has_picks:
+            return (
+                f"请求日期 {requested_date} 晚于本地最新行情 {latest_available}，"
+                f"已自动使用最近可用交易日 {resolved_date} 选股。"
+            )
+        return (
+            f"请求日期 {requested_date} 晚于本地最新行情 {latest_available}，"
+            "本地暂无可用行情，未选出个股。"
+        )
+
+    if has_picks and requested_date != resolved_date:
+        return (
+            f"请求日期 {requested_date} 不是可用交易日，"
+            f"已自动使用最近可用交易日 {resolved_date} 选股。"
+        )
+    return ""
+
+
+def _normalize_selection_output(
+    raw_result: Any,
+    default_date: str,
+    merged_config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str, str]:
+    """标准化策略 select_stocks 返回结果为 (picks, as_of_date, model_engine)。"""
+    resolved_date = default_date
+    use_lgb = bool(merged_config.get("use_lightgbm", True))
+    model_engine = "LightGBM" if use_lgb else "Ridge-ICIR"
+    picks_raw: Any = raw_result
+
+    if isinstance(raw_result, dict):
+        picks_raw = raw_result.get(
+            "picks", raw_result.get("items", raw_result.get("stocks", []))
+        )
+        if raw_result.get("as_of_date"):
+            resolved_date = _format_date(raw_result.get("as_of_date"))
+        if raw_result.get("model_engine"):
+            model_engine = str(raw_result.get("model_engine"))
+
+    picks: list[dict[str, Any]] = []
+    if isinstance(picks_raw, pl.DataFrame):
+        picks = [dict(row) for row in picks_raw.to_dicts()]
+    elif hasattr(picks_raw, "to_dict"):
+        try:
+            records = picks_raw.to_dict(orient="records")
+            if isinstance(records, list):
+                picks = [dict(r) for r in records if isinstance(r, dict)]
+        except Exception:
+            picks = []
+    elif isinstance(picks_raw, list):
+        picks = [dict(item) for item in picks_raw if isinstance(item, dict)]
+
+    if picks:
+        first = picks[0]
+        if first.get("as_of_date") or first.get("date"):
+            resolved_date = _format_date(first.get("as_of_date") or first.get("date"))
+        if first.get("model_engine"):
+            model_engine = str(first.get("model_engine"))
+
+    return picks, resolved_date, model_engine
+
+
+def _render_stock_selection_modal(
+    name: str,
+    strategy_cls: Any,
+    *,
+    as_of_date: str | None = None,
+    config: dict[str, Any] | None = None,
+    auto_run: bool = True,
+) -> Any:
+    """渲染策略个股筛选弹窗及选股结果表。"""
+    merged_config = _get_strategy_default_params(strategy_cls)
+    if config:
+        merged_config.update(config)
+
+    latest_available = _get_default_selection_date()
+    requested_date = (as_of_date or "").strip() or latest_available
+    resolved_date = requested_date
+    top_k = int(merged_config.get("top_k", 10))
+    universe_size = int(merged_config.get("universe_size", 300))
+    train_window = int(merged_config.get("train_window", 60))
+    horizon = int(merged_config.get("horizon", 5))
+    take_profit_pct = float(merged_config.get("take_profit_pct", 0.15))
+    stop_loss_pct = float(merged_config.get("stop_loss_pct", 0.06))
+    use_lgb = bool(merged_config.get("use_lightgbm", True))
+    model_engine = "LightGBM" if use_lgb else "Ridge-ICIR"
+
+    picks: list[dict[str, Any]] = []
+    error_msg = ""
+
+    if auto_run:
+        try:
+            raw_res = strategy_cls.select_stocks(
+                as_of_date=resolved_date,
+                config=merged_config,
+            )
+            picks, resolved_date, model_engine = _normalize_selection_output(
+                raw_res, resolved_date, merged_config
+            )
+        except Exception as exc:
+            logger.error(f"Failed to run stock selection for {name}: {exc}")
+            error_msg = str(exc)
+
+    date_notice = _resolve_selection_date_notice(
+        requested_date,
+        resolved_date,
+        latest_available,
+        bool(picks),
+    )
+    if not picks and date_notice:
+        resolved_date = latest_available
+
+    table_rows: list[Any] = []
+    for idx, row in enumerate(picks, start=1):
+        rank_val = row.get("rank", idx)
+        asset_code = str(row.get("asset") or row.get("symbol") or "--")
+        asset_name = str(row.get("name") or row.get("asset_name") or asset_code)
+        board_name = str(row.get("board") or row.get("sector") or "主板")
+        close_text = _format_number(row.get("close"))
+        tb_barrier_text = row.get("tb_barrier_text")
+        tp_raw = row.get("tp_price")
+        sl_raw = row.get("sl_price")
+        close_val = row.get("close")
+        if tp_raw is None and isinstance(close_val, (int, float)):
+            tp_raw = float(close_val) * (1.0 + take_profit_pct)
+        if sl_raw is None and isinstance(close_val, (int, float)):
+            sl_raw = float(close_val) * (1.0 - stop_loss_pct)
+        b_horizon = row.get("barrier_horizon", horizon)
+        ret1_text, ret1_cls = _format_signed_pct(row.get("ret_1d"))
+        ret5_text, ret5_cls = _format_signed_pct(row.get("ret_5d"))
+        ret20_text, ret20_cls = _format_signed_pct(row.get("ret_20d"))
+        rs_text, rs_cls = _format_signed_pct(row.get("rs_board_20d"))
+        pattern_text = str(
+            row.get("kline_pattern") or row.get("pattern") or "均线多头"
+        )
+        ml_score_val = (
+            row.get("ml_score")
+            if row.get("ml_score") is not None
+            else row.get("score")
+        )
+        score_text = _format_score(ml_score_val)
+        reason_text = str(row.get("signal_reason") or row.get("reason") or "--")
+
+        table_rows.append(
+            Tr(
+                Td(f"#{rank_val}", cls="px-3 py-2 font-semibold text-gray-700"),
+                Td(
+                    Code(asset_code),
+                    cls="px-3 py-2 font-mono text-xs text-blue-700",
+                ),
+                Td(asset_name, cls="px-3 py-2 font-medium text-gray-900"),
+                Td(
+                    Span(
+                        board_name,
+                        cls="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-xs",
+                    ),
+                    cls="px-3 py-2",
+                ),
+                Td(close_text, cls="px-3 py-2 font-mono text-gray-900"),
+                Td(ret1_text, cls=f"px-3 py-2 font-mono {ret1_cls}"),
+                Td(
+                    Span(ret5_text, cls=ret5_cls),
+                    Span(" / ", cls="text-gray-400"),
+                    Span(ret20_text, cls=ret20_cls),
+                    cls="px-3 py-2 font-mono text-xs",
+                ),
+                Td(rs_text, cls=f"px-3 py-2 font-mono {rs_cls}"),
+                (
+                    Td(
+                        tb_barrier_text,
+                        cls="px-3 py-2 font-mono text-xs whitespace-nowrap",
+                    )
+                    if isinstance(tb_barrier_text, str) and tb_barrier_text.strip()
+                    else Td(
+                        Span(f"↑{_format_number(tp_raw)}", cls="text-red-600 font-medium"),
+                        Span(" / ", cls="text-gray-300"),
+                        Span(f"↓{_format_number(sl_raw)}", cls="text-green-600 font-medium"),
+                        Span(f" ({b_horizon}d)", cls="text-gray-500"),
+                        cls="px-3 py-2 font-mono text-xs whitespace-nowrap",
+                    )
+                ),
+                Td(
+                    Span(
+                        pattern_text,
+                        cls=(
+                            "px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 "
+                            "border border-amber-200 text-xs"
+                        ),
+                    ),
+                    cls="px-3 py-2",
+                ),
+                Td(
+                    score_text,
+                    cls="px-3 py-2 font-mono font-semibold text-indigo-700",
+                ),
+                Td(reason_text, cls="px-3 py-2 text-xs text-gray-600 max-w-xs"),
+                cls="border-b border-gray-100 hover:bg-gray-50",
+            )
+        )
+
+    if not table_rows:
+        table_rows.append(
+            Tr(
+                Td(
+                    "暂无符合条件的候选个股",
+                    colspan="12",
+                    cls="px-4 py-8 text-center text-gray-400 text-sm",
+                )
+            )
+        )
+
+    selection_table = Table(
+        Thead(
+            Tr(
+                Th("排名", cls="px-3 py-2 font-medium"),
+                Th("代码", cls="px-3 py-2 font-medium"),
+                Th("名称", cls="px-3 py-2 font-medium"),
+                Th("板块", cls="px-3 py-2 font-medium"),
+                Th("最新价", cls="px-3 py-2 font-medium"),
+                Th("当日涨跌", cls="px-3 py-2 font-medium"),
+                Th("5日/20日涨幅", cls="px-3 py-2 font-medium"),
+                Th("板块相对强弱(20D)", cls="px-3 py-2 font-medium"),
+                Th("三重障碍(止盈/止损/期)", cls="px-3 py-2 font-medium"),
+                Th("短线与均线形态", cls="px-3 py-2 font-medium"),
+                Th("ML得分", cls="px-3 py-2 font-medium"),
+                Th("核心选股逻辑", cls="px-3 py-2 font-medium"),
+                cls="text-left text-xs text-gray-600 bg-gray-50 border-b border-gray-200",
+            )
+        ),
+        Tbody(*table_rows, cls="text-xs"),
+        id="stock-selection-table",
+        cls="w-full",
+    )
+
+    error_banner = (
+        Div(
+            f"选股执行异常: {error_msg}",
+            cls="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600",
+        )
+        if error_msg
+        else None
+    )
+
+    body = Div(
+        Form(
+            Div(
+                Div(
+                    Span("基准日期", cls="block text-xs text-gray-500 mb-1"),
+                    Input(
+                        type="date",
+                        name="as_of_date",
+                        value=resolved_date,
+                        cls="input input-sm w-36",
+                    ),
+                ),
+                Div(
+                    Span("选股数量 (Top K)", cls="block text-xs text-gray-500 mb-1"),
+                    Input(
+                        type="number",
+                        name="param_top_k",
+                        value=str(top_k),
+                        min="1",
+                        max="50",
+                        cls="input input-sm w-24",
+                    ),
+                ),
+                Div(
+                    Span("股票池规模", cls="block text-xs text-gray-500 mb-1"),
+                    Input(
+                        type="number",
+                        name="param_universe_size",
+                        value=str(universe_size),
+                        min="20",
+                        max="2000",
+                        cls="input input-sm w-28",
+                    ),
+                ),
+                Div(
+                    Span("训练窗口(日)", cls="block text-xs text-gray-500 mb-1"),
+                    Input(
+                        type="number",
+                        name="param_train_window",
+                        value=str(train_window),
+                        min="20",
+                        max="250",
+                        cls="input input-sm w-24",
+                    ),
+                ),
+                Div(
+                    Span("时间屏障(日)", cls="block text-xs text-gray-500 mb-1"),
+                    Input(
+                        type="number",
+                        name="param_horizon",
+                        value=str(horizon),
+                        min="1",
+                        max="30",
+                        cls="input input-sm w-24",
+                    ),
+                ),
+                Div(
+                    Span("上轨止盈比例", cls="block text-xs text-gray-500 mb-1"),
+                    Input(
+                        type="number",
+                        name="param_take_profit_pct",
+                        value=str(take_profit_pct),
+                        step="0.01",
+                        min="0.01",
+                        max="1.0",
+                        cls="input input-sm w-24",
+                    ),
+                ),
+                Div(
+                    Span("下轨止损比例", cls="block text-xs text-gray-500 mb-1"),
+                    Input(
+                        type="number",
+                        name="param_stop_loss_pct",
+                        value=str(stop_loss_pct),
+                        step="0.01",
+                        min="0.01",
+                        max="1.0",
+                        cls="input input-sm w-24",
+                    ),
+                ),
+                Div(
+                    Span("模型引擎", cls="block text-xs text-gray-500 mb-1"),
+                    fh.Select(
+                        fh.Option(
+                            "LightGBM (GBDT 截面排序)",
+                            value="true",
+                            selected="selected" if use_lgb else None,
+                        ),
+                        fh.Option(
+                            "Ridge-ICIR 线性集成",
+                            value="false",
+                            selected=None if use_lgb else "selected",
+                        ),
+                        name="param_use_lightgbm",
+                        cls="uk-select uk-form-small text-gray-700 w-52",
+                    ),
+                ),
+                Div(
+                    Button(
+                        "立即选股",
+                        type="button",
+                        cls=(
+                            "px-4 py-1.5 bg-emerald-600 text-white rounded-lg "
+                            "hover:bg-emerald-700 text-xs font-medium mt-5 "
+                            "disabled:opacity-50 disabled:cursor-wait"
+                        ),
+                        hx_post=f"/strategy/{name}/select/run",
+                        hx_target="#modal-container",
+                        hx_include="closest form",
+                        hx_indicator="#select-loading",
+                        hx_disabled_elt="this",
+                    ),
+                ),
+                cls=(
+                    "flex flex-wrap items-center gap-3 p-3 rounded-lg "
+                    "bg-gray-50 border border-gray-200 mb-4"
+                ),
+            )
+        ),
+        Div(
+            Span(
+                cls=(
+                    "inline-block h-3.5 w-3.5 animate-spin rounded-full "
+                    "border-2 border-emerald-600 border-t-transparent"
+                )
+            ),
+            Span("正在拉取行情、计算 24 个因子并运行模型，请稍候…"),
+            id="select-loading",
+            cls="htmx-indicator items-center gap-2 text-xs text-emerald-700 mb-3",
+        ),
+        Div(
+            Span(
+                f"选股基准日: {resolved_date}",
+                cls="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium",
+            ),
+            Span(
+                f"模型引擎: {model_engine}",
+                cls="px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 text-xs font-medium",
+            ),
+            Span(
+                f"入选个股数: {len(picks)} 只",
+                cls="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium",
+            ),
+            Span(
+                f"三重障碍: +{take_profit_pct * 100:.0f}% / "
+                f"-{stop_loss_pct * 100:.0f}% / {horizon}日",
+                cls="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-medium",
+            ),
+            cls="flex flex-wrap items-center gap-2 mb-3",
+        ),
+        (
+            Div(
+                date_notice,
+                cls=(
+                    "mb-3 rounded-lg border border-amber-200 bg-amber-50 "
+                    "px-3 py-2 text-xs text-amber-800"
+                ),
+            )
+            if date_notice
+            else None
+        ),
+        error_banner,
+        Div(
+            selection_table,
+            cls="max-h-[460px] overflow-auto rounded-lg border border-gray-200",
+        ),
+        _htmx_indicator_style(),
+    )
+
+    footer = Div(
+        Button(
+            "关闭",
+            type="button",
+            cls="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm",
+            onclick=STRATEGY_MODAL_CLOSE_JS,
+        ),
+        cls="flex justify-end gap-2",
+    )
+
+    return _strategy_dialog_modal(
+        f"一键选股 - {name}",
+        body,
+        footer,
+        modal_id="stock-selection-modal",
+        width_cls="max-w-6xl",
+    )
+
+
+@rt("/{name}/select/modal")
+def strategy_select_modal(name: str):
+    """打开策略个股筛选弹窗并默认执行一次选股。"""
+    strategies = strategy_loader.load_from_cache()
+    cls = strategies.get(name)
+    if not _supports_stock_selection(cls):
+        return "Strategy does not support stock selection"
+    default_date_str = _get_default_selection_date()
+    default_params = _get_strategy_default_params(cls)
+    return _render_stock_selection_modal(
+        name,
+        cls,
+        as_of_date=default_date_str,
+        config=default_params,
+        auto_run=True,
+    )
+
+
+@rt("/{name}/select/run", methods=["POST"])
+async def run_strategy_select(req, name: str):
+    """根据用户提交的参数重新运行个股筛选。"""
+    strategies = strategy_loader.load_from_cache()
+    cls = strategies.get(name)
+    if not _supports_stock_selection(cls):
+        return "Strategy does not support stock selection"
+    form = await req.form()
+    as_of_date = str(form.get("as_of_date") or "").strip() or None
+    config = _parse_params(form)
+    return _render_stock_selection_modal(
+        name,
+        cls,
+        as_of_date=as_of_date,
+        config=config,
+        auto_run=True,
+    )
 
 
 def _get_runtime(req):
@@ -2210,7 +2851,7 @@ def grid_search_modal(name: str):
     if not cls:
         return "Strategy not found"
 
-    default_params = getattr(cls, "PARAMS", {})
+    default_params = _get_strategy_default_params(cls)
 
     param_inputs = []
     for k, v in default_params.items():
