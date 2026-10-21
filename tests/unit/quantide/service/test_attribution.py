@@ -24,7 +24,13 @@ class _AttributionStrategy:
         self.broker = broker
         self.config = config
 
-    def explain_prediction(self, asset: str, signal_date: dt.date):
+    def explain_prediction(
+        self,
+        asset: str,
+        signal_date: dt.date,
+        bt_start: dt.date | None = None,
+        bt_end: dt.date | None = None,
+    ):
         return {"asset": asset, "date": signal_date, "features": []}
 
 
@@ -202,7 +208,13 @@ def test_explain_prediction_uses_result_cache(monkeypatch) -> None:
     calls: list[str] = []
 
     class _CountingStrategy(_AttributionStrategy):
-        def explain_prediction(self, asset: str, signal_date: dt.date):
+        def explain_prediction(
+            self,
+            asset: str,
+            signal_date: dt.date,
+            bt_start: dt.date | None = None,
+            bt_end: dt.date | None = None,
+        ):
             calls.append(asset)
             return {"asset": asset, "date": signal_date, "features": []}
 

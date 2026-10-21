@@ -897,3 +897,94 @@ def test_explain_cache_keys_change_with_holdings(monkeypatch) -> None:
     assert empty._explain_cache_keys(dt.date(2024, 6, 3)) != held._explain_cache_keys(
         dt.date(2024, 6, 3)
     )
+
+
+# ---------------------------------------------------------------------------
+# 7. 精确归因：回放选池/训练节奏
+# ---------------------------------------------------------------------------
+
+
+class _StubCalendar:
+    """仅支持工作日的交易日历替身。"""
+
+    def __init__(self, days: list[dt.date]):
+        self._days = sorted(days)
+
+    def _index(self, day: dt.date) -> int:
+        for index, value in enumerate(self._days):
+            if value >= day:
+                return index
+        return len(self._days)
+
+    def day_shift(self, day: dt.date, offset: int) -> dt.date:
+        index = self._index(day) + offset
+        index = max(0, min(len(self._days) - 1, index))
+        return self._days[index]
+
+    def shift(self, day: dt.date, offset: int, frame_type=None) -> dt.date:
+        return self.day_shift(day, offset)
+
+    def get_frames(self, start: dt.date, end: dt.date, frame_type=None) -> list[dt.date]:
+        return [d for d in self._days if start <= d <= end]
+
+
+def _stub_strategy(monkeypatch, days: list[dt.date], **overrides):
+    from quantide.strategies.example import ml_momentum_reversal as module
+
+    monkeypatch.setattr(module, "calendar", _StubCalendar(days))
+    broker = SimpleNamespace(_bt_end=None, positions={}, cash=0.0)
+    config = {"universe_size": 10, "universe_rebalance_days": 5, "retrain_days": 2}
+    config.update(overrides)
+    return module.MLMomentumReversalStrategy(broker, config)
+
+
+def _weekdays(start: dt.date, count: int) -> list[dt.date]:
+    days: list[dt.date] = []
+    current = start
+    while len(days) < count:
+        if current.weekday() < 5:
+            days.append(current)
+        current += dt.timedelta(days=1)
+    return days
+
+
+def test_replay_panel_builds_follow_rebalance_grid(monkeypatch) -> None:
+    """面板按 universe_rebalance_days 刷新，回放序列与回测一致。"""
+    days = _weekdays(dt.date(2024, 1, 1), 40)
+    strategy = _stub_strategy(monkeypatch, days, universe_rebalance_days=5)
+
+    builds = strategy._replay_panel_builds(days[0], days[-1])
+
+    # 首个 bar 的信号日是前一个交易日；窗口为 [信号日, 信号日+5]，
+    # 因此下一次重建发生在信号日越过窗口的那一根 bar（滞后一根 → 每 6 个 bar）
+    assert builds[0][0] == days[0]
+    assert [b[0] for b in builds][:3] == [days[0], days[6], days[12]]
+
+
+def test_replay_context_finds_panel_and_refit(monkeypatch) -> None:
+    """目标信号日能定位到当次面板构建日与最近一次模型重训。"""
+    days = _weekdays(dt.date(2024, 1, 1), 40)
+    strategy = _stub_strategy(monkeypatch, days, universe_rebalance_days=5, retrain_days=2)
+
+    target_signal = days[6]
+    target_build, refit_build, refit_signal = strategy._replay_context(
+        target_signal, days[0], days[-1]
+    )
+
+    assert target_build == days[6]  # 该信号日正是第 2 个面板窗口的构建日
+    # retrain_days=2 → 在 bar 1,3,5,7... 重训；目标信号日最近的一次重训在 days[5]
+    # （该 bar 的信号日），它落在第 1 个面板窗口里
+    assert refit_signal == days[5]
+    assert refit_build == days[0]
+
+
+def test_explain_cache_keys_include_build_signal(monkeypatch) -> None:
+    """缓存键必须包含面板构建日，避免不同窗口互相污染。"""
+    days = _weekdays(dt.date(2024, 1, 1), 20)
+    strategy = _stub_strategy(monkeypatch, days)
+
+    cross_key, model_key = strategy._explain_cache_keys(days[3], days[0])
+
+    assert days[0] in cross_key
+    assert days[3] in cross_key
+    assert model_key != cross_key

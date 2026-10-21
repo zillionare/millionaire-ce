@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 import polars as pl
+from loguru import logger
 
 from quantide.data.sqlite import db
 from quantide.factors import FACTOR_VERSION
@@ -39,12 +40,17 @@ class _AttributionPosition:
 class _AttributionBroker:
     """归因用的最小 broker 替身。
 
-    ``positions`` 必须还原回测当时（决策日）的持仓：选股池会优先保留持仓，
-    若这里给空，选出的池子与回测当时不同，截面与归因都会失真。
+    - ``positions``：回测当时的持仓，选股池会优先保留持仓；
+    - ``bt_end``：回测结束日，面板抓取窗口依赖它（否则窗口会被截断到信号日，
+      截面就取不到目标日期了）。
     """
 
-    def __init__(self, positions: dict[str, Any] | None = None) -> None:
-        self._bt_end: datetime.date | None = None
+    def __init__(
+        self,
+        positions: dict[str, Any] | None = None,
+        bt_end: datetime.date | None = None,
+    ) -> None:
+        self._bt_end: datetime.date | None = bt_end
         self.positions: dict[str, Any] = positions or {}
         self.cash: float = 0.0
 
@@ -82,6 +88,31 @@ def supports_attribution(strategy_cls: Any) -> bool:
     return attribution_kind(strategy_cls) is not None
 
 
+def backtest_range(portfolio: Any) -> tuple[datetime.date, datetime.date] | None:
+    """回测实际的 bar 区间。
+
+    组合的 ``start`` 记录的是回测首个交易日的前一交易日（broker 时钟），
+    ``end`` 即回测最后一个交易日。
+
+    Args:
+        portfolio: 回测组合。
+
+    Returns:
+        tuple | None: (起始 bar 日, 结束 bar 日)；信息缺失时返回 ``None``。
+    """
+    from quantide.data.models.calendar import calendar
+
+    start = getattr(portfolio, "start", None)
+    end = getattr(portfolio, "end", None)
+    if not isinstance(start, datetime.date) or not isinstance(end, datetime.date):
+        return None
+    try:
+        bt_start = calendar.day_shift(start, 1)
+    except Exception:
+        bt_start = start
+    return bt_start, end
+
+
 def load_holdings_at(
     portfolio_id: str, signal_date: datetime.date
 ) -> dict[str, Any]:
@@ -107,6 +138,35 @@ def load_holdings_at(
         if shares > 0:
             held[str(row.get("asset") or "")] = _AttributionPosition(shares)
     return held
+
+
+def load_positions_by_date(portfolio_id: str) -> dict[datetime.date, dict[str, float]]:
+    """读取回测期间的每日持仓快照（日期 → 资产 → 股数）。
+
+    选股池会优先保留当时的持仓，归因必须用同一份持仓才能复现当时的选股池。
+
+    Args:
+        portfolio_id: 回测组合 ID。
+
+    Returns:
+        dict: 持仓快照。
+    """
+    try:
+        positions = db.query_positions(portfolio_id=portfolio_id)
+    except Exception:
+        return {}
+    if positions is None or positions.is_empty():
+        return {}
+    snapshot: dict[datetime.date, dict[str, float]] = {}
+    for row in positions.iter_rows(named=True):
+        day = row.get("dt")
+        if not isinstance(day, datetime.date):
+            continue
+        shares = float(row.get("shares") or 0)
+        if shares <= 0:
+            continue
+        snapshot.setdefault(day, {})[str(row.get("asset") or "")] = shares
+    return snapshot
 
 
 def load_backtest_config(portfolio_id: str) -> dict[str, Any]:
@@ -140,6 +200,8 @@ def explain_features(
     portfolio_id: str,
     asset: str,
     signal_date: datetime.date,
+    bt_start: datetime.date | None = None,
+    bt_end: datetime.date | None = None,
 ) -> list[tuple[str, float]] | None:
     """按策略能力动态取该资产在决策日的因子取值。
 
@@ -159,6 +221,10 @@ def explain_features(
         return None
     if not callable(getattr(strategy_cls, "explain_features", None)):
         return None
+    if bt_start is None or bt_end is None:
+        rng = backtest_range(portfolio)
+        if rng is not None:
+            bt_start, bt_end = rng
     config = load_backtest_config(portfolio_id)
     cache_key = (
         portfolio_id,
@@ -171,13 +237,20 @@ def explain_features(
         return _EXPLAIN_FEATURE_CACHE[cache_key]
     try:
         strategy = strategy_cls(
-            _AttributionBroker(load_holdings_at(portfolio_id, signal_date)), config
+            _AttributionBroker(
+                load_holdings_at(portfolio_id, signal_date), bt_end
+            ),
+            config,
         )
+        strategy._positions_by_date = load_positions_by_date(portfolio_id)
         explainer = getattr(strategy, "explain_features", None)
         if not callable(explainer):
             return None
         result = explainer(asset, signal_date)
     except Exception:
+        logger.exception(
+            f"因子取值计算失败: portfolio={portfolio_id} asset={asset} signal={signal_date}"
+        )
         return None
     if len(_EXPLAIN_FEATURE_CACHE) >= _EXPLAIN_RESULT_CACHE_MAX:
         _EXPLAIN_FEATURE_CACHE.pop(next(iter(_EXPLAIN_FEATURE_CACHE)))
@@ -189,6 +262,8 @@ def explain_prediction(
     portfolio_id: str,
     asset: str,
     signal_date: datetime.date,
+    bt_start: datetime.date | None = None,
+    bt_end: datetime.date | None = None,
 ) -> dict[str, Any] | None:
     """按策略能力动态计算某笔交易的预测归因。
 
@@ -196,6 +271,8 @@ def explain_prediction(
         portfolio_id: 回测组合 ID。
         asset: 证券代码。
         signal_date: 决策日。
+        bt_start: 回测起始交易日；缺省时从组合记录推导。
+        bt_end: 回测结束交易日；缺省时从组合记录推导。
 
     Returns:
         dict | None: 归因结果；策略不支持或数据不足时返回 ``None``。
@@ -206,6 +283,10 @@ def explain_prediction(
     strategy_cls = strategy_loader.load_from_cache().get(portfolio.name or "")
     if not supports_attribution(strategy_cls):
         return None
+    if bt_start is None or bt_end is None:
+        rng = backtest_range(portfolio)
+        if rng is not None:
+            bt_start, bt_end = rng
     config = load_backtest_config(portfolio_id)
     cache_key = (
         portfolio_id,
@@ -218,13 +299,20 @@ def explain_prediction(
         return _EXPLAIN_RESULT_CACHE[cache_key]
     try:
         strategy = strategy_cls(
-            _AttributionBroker(load_holdings_at(portfolio_id, signal_date)), config
+            _AttributionBroker(
+                load_holdings_at(portfolio_id, signal_date), bt_end
+            ),
+            config,
         )
+        strategy._positions_by_date = load_positions_by_date(portfolio_id)
         explainer = getattr(strategy, "explain_prediction", None)
         if not callable(explainer):
             return None
-        result = explainer(asset, signal_date)
+        result = explainer(asset, signal_date, bt_start, bt_end)
     except Exception:
+        logger.exception(
+            f"归因计算失败: portfolio={portfolio_id} asset={asset} signal={signal_date}"
+        )
         return None
     if len(_EXPLAIN_RESULT_CACHE) >= _EXPLAIN_RESULT_CACHE_MAX:
         _EXPLAIN_RESULT_CACHE.pop(next(iter(_EXPLAIN_RESULT_CACHE)))

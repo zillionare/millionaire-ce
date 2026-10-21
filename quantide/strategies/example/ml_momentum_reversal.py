@@ -706,6 +706,8 @@ class MLMomentumReversalStrategy(BaseStrategy):
 
         self._model: Any = None
         self._model_engine: str = "LightGBM" if self.use_lightgbm else "Prior-Ridge"
+        #: 归因用：回测期间的每日持仓快照（日期 → 资产 → 股数）
+        self._positions_by_date: dict[datetime.date, dict[str, float]] = {}
         self._bars_since_train: int = 0
         self._cached_norm_panel: pl.DataFrame | None = None
         self._panel_start: datetime.date | None = None
@@ -846,8 +848,23 @@ class MLMomentumReversalStrategy(BaseStrategy):
             return cur_date - datetime.timedelta(days=1)
         return cur_date
 
-    def _held_assets(self) -> list[str]:
-        """返回当前持仓的证券代码列表。"""
+    def _held_assets(self, as_of: datetime.date | None = None) -> list[str]:
+        """返回持仓的证券代码列表。
+
+        Args:
+            as_of: 持仓快照日期；给出时优先使用 ``_positions_by_date`` 中该日期
+                （含之前最近一个交易日）的持仓，用于归因时还原回测当时的选股池。
+
+        Returns:
+            list[str]: 持仓代码（已排序）。
+        """
+        if as_of is not None and self._positions_by_date:
+            latest: datetime.date | None = None
+            for day in self._positions_by_date:
+                if day <= as_of and (latest is None or day > latest):
+                    latest = day
+            if latest is not None:
+                return sorted(self._positions_by_date[latest])
         positions = getattr(self.broker, "positions", None) or {}
         held: list[str] = []
         for asset, position in positions.items():
@@ -898,7 +915,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 self.universe_size,
                 mode=self.universe_mode,
                 trim_pct=self.market_cap_trim_pct,
-                holdings=self._held_assets(),
+                holdings=self._held_assets(latest_init_dt),
             )
             self.log(
                 f"Universe selected on {latest_init_dt}: "
@@ -929,7 +946,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self._panel_end = fetch_end
 
     def _explain_cache_keys(
-        self, signal_date: datetime.date
+        self, signal_date: datetime.date, build_signal: datetime.date | None = None
     ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
         """构造归因缓存的键。
 
@@ -952,11 +969,90 @@ class MLMomentumReversalStrategy(BaseStrategy):
             tuple(self.selected_features or FEATURE_COLS),
             tuple(self._held_assets()),
             signal_date,
+            build_signal or signal_date,
         )
         return base, base + (self.use_lightgbm,)
 
+    # ---------------- 精确归因：回放回测的选池/训练节奏 ----------------
+
+    def _backtest_bar_dates(
+        self, bt_start: datetime.date, bt_end: datetime.date
+    ) -> list[datetime.date]:
+        """回测逐日推进的 bar 日期序列（交易日）。"""
+        try:
+            frames = calendar.get_frames(bt_start, bt_end, FrameType.DAY)
+        except Exception:
+            return []
+        return [f for f in frames if isinstance(f, datetime.date)]
+
+    def _replay_panel_builds(
+        self, bt_start: datetime.date, bt_end: datetime.date
+    ) -> list[tuple[datetime.date, datetime.date]]:
+        """回放回测过程中每次重建因子面板的 (构建信号日, 窗口结束信号日)。
+
+        面板按 ``universe_rebalance_days`` 刷新一次，因此选股池在两次刷新之间
+        保持不变；归因必须用同一个构建日，才能复现当时的选池。
+        """
+        builds: list[tuple[datetime.date, datetime.date]] = []
+        window_end: datetime.date | None = None
+        for bar_date in self._backtest_bar_dates(bt_start, bt_end):
+            try:
+                signal_date = calendar.day_shift(bar_date, -1)
+            except Exception:
+                continue
+            if window_end is None or signal_date > window_end:
+                rebalance_end = calendar.shift(
+                    signal_date, self.universe_rebalance_days, FrameType.DAY
+                )
+                window_end = max(signal_date, min(rebalance_end, bt_end))
+                builds.append((signal_date, window_end))
+        return builds
+
+    def _replay_context(
+        self,
+        target_signal: datetime.date,
+        bt_start: datetime.date,
+        bt_end: datetime.date,
+    ) -> tuple[datetime.date, datetime.date, datetime.date]:
+        """定位某信号日在回测中对应的面板构建日与最近一次模型重训。
+
+        Args:
+            target_signal: 目标信号日（成交日的前一交易日）。
+            bt_start: 回测起始交易日。
+            bt_end: 回测结束交易日。
+
+        Returns:
+            tuple: (目标截面所用面板的构建信号日, 重训所用面板的构建信号日,
+            重训的信号日)。
+        """
+        builds = self._replay_panel_builds(bt_start, bt_end)
+
+        def _build_for(signal_date: datetime.date) -> datetime.date:
+            for build_signal, window_end in builds:
+                if build_signal <= signal_date <= window_end:
+                    return build_signal
+            return signal_date
+
+        target_build = _build_for(target_signal)
+
+        bar_dates = self._backtest_bar_dates(bt_start, bt_end)
+        refit_signal = target_signal
+        refit_build = target_build
+        for index, bar_date in enumerate(bar_dates):
+            try:
+                signal_date = calendar.day_shift(bar_date, -1)
+            except Exception:
+                continue
+            if signal_date > target_signal:
+                break
+            position = index + 1
+            if (position - 1) % max(1, self.retrain_days) == 0:
+                refit_signal = signal_date
+                refit_build = _build_for(signal_date)
+        return target_build, refit_build, refit_signal
+
     def _explain_cross_section(
-        self, signal_date: datetime.date
+        self, signal_date: datetime.date, build_signal: datetime.date | None = None
     ) -> pl.DataFrame:
         """取归因用的目标日截面（只缓存当前这一条）。
 
@@ -970,11 +1066,12 @@ class MLMomentumReversalStrategy(BaseStrategy):
         Returns:
             pl.DataFrame: 目标日截面（含原始因子与 z 因子）；可能为空。
         """
-        cross_key, _ = self._explain_cache_keys(signal_date)
+        build_signal = build_signal or signal_date
+        cross_key, _ = self._explain_cache_keys(signal_date, build_signal)
         cached = _EXPLAIN_CROSS_SECTION_CACHE.get(cross_key)
         if cached is not None:
             return cached
-        self._ensure_backtest_panel(signal_date)
+        self._ensure_backtest_panel(build_signal)
         panel = self._cached_norm_panel
         if panel is None or panel.is_empty():
             return pl.DataFrame()
@@ -992,7 +1089,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
         return cross
 
     def _attribution_model(
-        self, target_date: datetime.date
+        self, target_date: datetime.date, build_signal: datetime.date | None = None
     ) -> tuple[Any, str]:
         """取（或训练）归因所需的模型，按决策日缓存。
 
@@ -1005,11 +1102,12 @@ class MLMomentumReversalStrategy(BaseStrategy):
         Returns:
             tuple: (模型, 引擎名)。
         """
-        _, key = self._explain_cache_keys(target_date)
+        build_signal = build_signal or target_date
+        _, key = self._explain_cache_keys(target_date, build_signal)
         cached = _EXPLAIN_MODEL_CACHE.get(key)
         if cached is not None:
             return cached
-        self._ensure_backtest_panel(target_date)
+        self._ensure_backtest_panel(build_signal)
         panel = self._cached_norm_panel
         if panel is None or panel.is_empty():
             raise RuntimeError("归因面板为空，无法训练模型")
@@ -1067,7 +1165,11 @@ class MLMomentumReversalStrategy(BaseStrategy):
         return result or None
 
     def explain_prediction(
-        self, asset: str, signal_date: datetime.date
+        self,
+        asset: str,
+        signal_date: datetime.date,
+        bt_start: datetime.date | None = None,
+        bt_end: datetime.date | None = None,
     ) -> dict[str, Any] | None:
         """返回该资产在决策日的最终得分归因。
 
@@ -1078,12 +1180,25 @@ class MLMomentumReversalStrategy(BaseStrategy):
         Args:
             asset: 证券代码。
             signal_date: 决策日（信号日，即成交日的前一交易日）。
+            bt_start: 回测起始交易日；给出时按回测节奏回放选池与训练，得到与
+                当次决策完全一致的截面与模型。
+            bt_end: 回测结束交易日。
 
         Returns:
             dict | None: 归因结果；数据不足或资产不在截面内时返回 ``None``。
         """
+        build_signal: datetime.date | None = None
+        refit_build: datetime.date | None = None
+        refit_signal: datetime.date | None = None
+        if bt_start is not None and bt_end is not None:
+            try:
+                build_signal, refit_build, refit_signal = self._replay_context(
+                    signal_date, bt_start, bt_end
+                )
+            except Exception:
+                build_signal = refit_build = refit_signal = None
         try:
-            cross = self._explain_cross_section(signal_date)
+            cross = self._explain_cross_section(signal_date, build_signal)
         except Exception:
             return None
         if cross is None or cross.is_empty():
@@ -1095,7 +1210,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
             return None
         index = assets.index(asset)
 
-        model, engine = self._attribution_model(target_date)
+        model, engine = self._attribution_model(
+            refit_signal or target_date, refit_build or build_signal
+        )
         feature_cols = self.selected_features or FEATURE_COLS
         z_cols = [f"{c}_z" for c in feature_cols]
         x = (
