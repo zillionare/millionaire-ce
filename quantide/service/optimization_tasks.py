@@ -31,24 +31,33 @@ STATUS_FAILED = "failed"
 def _init_table() -> None:
     """初始化任务表。"""
     if OPTIMIZATION_TABLE in db.table_names():
+        _drop_placeholder_row()
         return
-    db[OPTIMIZATION_TABLE].insert(
+    db[OPTIMIZATION_TABLE].create(
         {
-            "task_id": "init",
-            "strategy_name": "",
-            "spec": "{}",
-            "status": STATUS_PENDING,
-            "objective": "sharpe",
-            "total": 0,
-            "done": 0,
-            "results": "[]",
-            "started_at": datetime.datetime.now().isoformat(),
-            "finished_at": "",
-            "error": "",
+            "task_id": str,
+            "strategy_name": str,
+            "spec": str,
+            "status": str,
+            "objective": str,
+            "total": int,
+            "done": int,
+            "results": str,
+            "started_at": str,
+            "finished_at": str,
+            "error": str,
         },
         pk="task_id",
-        replace=True,
+        if_not_exists=True,
     )
+
+
+def _drop_placeholder_row() -> None:
+    """删除早期版本用于建表的占位行。"""
+    try:
+        db[OPTIMIZATION_TABLE].delete_where("task_id = ?", ("init",))
+    except Exception:  # pragma: no cover - 清理失败不影响主流程
+        pass
 
 
 def _row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
