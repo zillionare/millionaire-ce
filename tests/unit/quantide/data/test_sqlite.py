@@ -557,6 +557,19 @@ def test_foreign_key_constraint_in_init_tables(setup):
     ), "Foreign key constraint from trades.qtoid to orders.qtoid should exist"
 
 
+def test_foreign_key_child_columns_are_indexed(setup):
+    """外键子表列应有索引，避免删除父表行时逐行全表扫描。"""
+    for table_name, column in (
+        ("trades", "qtoid"),
+        ("strategy_logs", "portfolio_id"),
+        ("backtest_logs", "portfolio_id"),
+    ):
+        indexed_columns = {
+            index.columns[0] for index in db[table_name].indexes if index.columns
+        }
+        assert column in indexed_columns, f"{table_name}.{column} 缺少索引"
+
+
 def test_assets(setup):
     assert len(db.assets_all()) == 0
     # 01 save/query

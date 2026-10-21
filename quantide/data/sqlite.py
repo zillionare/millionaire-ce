@@ -162,6 +162,14 @@ class SQLiteDB:
                     if len(fk) == 3:  # (from_column, to_table, to_column)
                         from_col, to_table, to_col = fk
                         t.add_foreign_key(from_col, to_table, to_col, ignore=True)
+                        self._ensure_index_for_column(t, from_col)
+
+    @staticmethod
+    def _ensure_index_for_column(table: su.db.Table, column: str) -> None:
+        """确保外键子表列有索引，避免删除父表行时逐行全表扫描。"""
+        indexed_columns = {index.columns[0] for index in table.indexes if index.columns}
+        if column not in indexed_columns:
+            table.create_index([column], if_not_exists=True)
 
     def _drop_obsolete_market_tables(self, db: su.Database) -> None:
         """删除不再允许保存在 SQLite 中的行情和板块/指数元数据表。"""
