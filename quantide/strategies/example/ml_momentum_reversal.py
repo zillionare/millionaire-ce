@@ -13,7 +13,7 @@ Universe selection:
 from __future__ import annotations
 
 import datetime
-import random
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -493,6 +493,22 @@ def _format_candidate_rows(
     return results
 
 
+def _stable_universe_rank(asset: str, mode: str) -> str:
+    """返回资产的稳定随机序（与调仓日无关，仅依赖代码与模式）。
+
+    Args:
+        asset: 证券代码。
+        mode: 选池模式。
+
+    Returns:
+        str: 十六进制哈希串，可直接用于排序。
+    """
+    digest = hashlib.blake2b(
+        f"{mode}:{asset}".encode(), digest_size=8
+    ).hexdigest()
+    return digest
+
+
 def _filter_universe(
     bars_df: pl.DataFrame,
     target_date: datetime.date,
@@ -504,8 +520,9 @@ def _filter_universe(
 
     ``market_cap_trim`` first removes the largest and smallest ``trim_pct`` of
     the cross-section by ``total_mv``, then removes suspended and ST stocks
-    from the remaining set, and finally draws ``universe_size`` stocks at
-    random (seeded by the rebalance date, so the universe is reproducible;
+    from the remaining set, and finally keeps ``universe_size`` stocks chosen
+    by a per-asset stable hash (size is exact, membership does not rotate with
+    the rebalance date, and it is uncorrelated with market cap;
     ``universe_size <= 0`` means no cap).  ``liquidity`` keeps the legacy
     top-N by 20-day mean amount.
     """
@@ -550,14 +567,18 @@ def _filter_universe(
             if "is_st" in cols:
                 cap = cap.filter(~pl.col("is_st").fill_null(False))
             cap = _drop_st_names(cap)
-            # 裁剪后按市值随机抽样 universe_size 只（universe_size<=0 表示不限制）。
-            # 随机种子与调仓日绑定，保证同一调仓日的结果可复现。
+            # 裁剪后按「每资产稳定哈希」排序取前 universe_size 只：
+            # - 规模精确等于 universe_size；
+            # - 成员与调仓日无关（同一只股票只要仍在合格池中就一直在池内），
+            #   不会因为重新抽样而被强制卖出；
+            # - 与市值大小无关，避免市值偏置。
             if universe_size > 0 and cap.height > universe_size:
-                rng = random.Random(f"{target_date.isoformat()}:{mode}")
-                # unique() 不保序，必须排序后再抽样，否则同一日期结果不可复现
                 assets = sorted(cap["asset"].unique().to_list())
-                picked = rng.sample(assets, universe_size)
-                cap = cap.filter(pl.col("asset").is_in(picked))
+                ranked = sorted(
+                    assets,
+                    key=lambda asset: _stable_universe_rank(asset, mode),
+                )
+                cap = cap.filter(pl.col("asset").is_in(ranked[:universe_size]))
             return sorted(cap["asset"].unique().to_list())
 
     cond = (pl.col("close") > 0) & (pl.col("volume") > 0)

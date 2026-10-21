@@ -765,3 +765,29 @@ def test_filter_universe_market_cap_trim_draws_random_sample(monkeypatch):
     # 不是简单取市值最大的 N 只
     largest = set(sorted(market_caps, key=lambda a: market_caps[a])[-3:])
     assert set(assets) != largest
+
+
+def test_filter_universe_membership_is_stable_across_rebalance_dates(monkeypatch):
+    """稳定哈希抽样：成员不随调仓日轮换（避免持仓被"未入池"强制卖出）。"""
+    monkeypatch.setattr(
+        ml_momentum_reversal.stock_list, "_data", pl.DataFrame()
+    )
+    panel = _make_synthetic_panel(n_assets=20, n_days=3)
+    market_caps = {
+        asset: float(index + 1) * 1e8
+        for index, asset in enumerate(sorted(panel["asset"].unique().to_list()))
+    }
+    panel = panel.with_columns(
+        pl.col("asset").replace_strict(market_caps, default=0.0).alias("total_mv")
+    )
+    dates = sorted(panel["date"].unique().to_list())
+
+    first = ml_momentum_reversal._filter_universe(
+        panel, dates[0], 5, mode="market_cap_trim", trim_pct=0.0
+    )
+    last = ml_momentum_reversal._filter_universe(
+        panel, dates[-1], 5, mode="market_cap_trim", trim_pct=0.0
+    )
+
+    assert len(first) == 5
+    assert first == last
