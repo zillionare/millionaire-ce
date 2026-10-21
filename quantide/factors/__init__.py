@@ -13,6 +13,11 @@ from quantide.factors.catalog import (
     list_feature_specs,
     resolve_feature_selection,
 )
+from quantide.factors.single_factor import (
+    SingleFactorResult,
+    load_factor_panel,
+    study_single_factor,
+)
 
 __all__ = [
     "FACTOR_VERSION",
@@ -20,6 +25,9 @@ __all__ = [
     "FEATURE_DOCS",
     "FEATURE_GROUPS",
     "FeatureSpec",
+    "SingleFactorResult",
+    "load_factor_panel",
+    "study_single_factor",
     "compute_alpha_features",
     "list_feature_specs",
     "resolve_feature_selection",
