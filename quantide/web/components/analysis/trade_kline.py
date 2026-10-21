@@ -189,29 +189,44 @@ def _build_markers(
 
 
 def _decision_features(
+    portfolio_id: str,
     asset: str,
     decision_date: datetime.date,
 ) -> list[tuple[str, float]] | None:
     """计算决策日该股票的模型特征取值。
 
+    优先使用策略自己的因子面板（同一选股池、同一复权口径 → 与模型输入一致）；
+    策略不支持时退化为全市场计算。
+
     Args:
+        portfolio_id: 回测组合 ID。
         asset: 证券代码。
         decision_date: 决策日。
 
     Returns:
-        list | None: (特征名, 取值) 列表；策略不支持特征时返回 ``None``。
+        list | None: (特征名, 取值) 列表；无法计算时返回 ``None``。
     """
     try:
         from quantide.factors import FEATURE_COLS, compute_alpha_features
     except Exception:
         return None
 
+    from quantide.service.attribution import explain_features
+
+    try:
+        signal_date = _signal_date_for(decision_date, None)
+    except Exception:
+        signal_date = decision_date
+    features = explain_features(portfolio_id, asset, signal_date)
+    if features:
+        return features
+
     try:
         panel = daily_bars.get_bars_in_range(
             decision_date - datetime.timedelta(days=TRADE_KLINE_FEATURE_LOOKBACK_DAYS),
             decision_date,
             assets=None,
-            adjust="qfq",
+            adjust=None,
             eager_mode=True,
         )
         if isinstance(panel, pl.LazyFrame):
@@ -373,7 +388,7 @@ def build_trade_kline_payload(
                 portfolio_id, asset, sell_dt, pair.sell_tm
             )
     if active_panel == TRADE_KLINE_PANEL_FEATURES:
-        features = _decision_features(asset, buy_dt)
+        features = _decision_features(portfolio_id, asset, buy_dt)
 
     return {
         "asset": asset,

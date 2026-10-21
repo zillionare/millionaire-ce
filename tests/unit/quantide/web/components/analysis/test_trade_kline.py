@@ -114,7 +114,7 @@ def _install(
     monkeypatch.setattr(
         trade_kline_module,
         "_decision_features",
-        lambda asset, decision_date: features,
+        lambda portfolio_id, asset, decision_date: features,
     )
 
 

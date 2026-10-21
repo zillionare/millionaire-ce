@@ -4,7 +4,8 @@
 策略负责「因子 → 训练 → 选股 → 下单」。每个因子的计算方法、含义与示例
 见 :data:`FEATURE_DOCS`，因子清单见 :data:`FEATURE_GROUPS`。
 
-复权口径：因子在**前复权**价格上计算（``adjust="qfq"``），与行情层一致。
+复权口径：因子层内部统一做**后复权**换算（``调整后价 = 原始价 × 绝对累计复权
+因子``），输入应为原始价日线；该口径与抓取窗口无关，因子可增量计算并入库复用。
 """
 
 from __future__ import annotations
@@ -250,10 +251,15 @@ def compute_alpha_features(
     ``ma20_support_bounce`` / ``shadow_bias_reversal`` / ``clv_money_flow``
     一并改用 ATR 归一后的影线与 CLV。
 
+    复权口径：输入应为**原始价**（不复权）日线，因子层内部按
+    ``调整后价 = 原始价 × 绝对累计复权因子``（后复权）换算；累计因子与抓取
+    窗口无关，故同一日期的因子取值稳定、可增量入库复用。调用方不要再做前复权。
+
     Args:
         df: Daily bar DataFrame containing at least
             ``[date, asset, open, high, low, close, volume]``.  ``up_limit`` /
-            ``down_limit`` 可选，提供时才能计算涨跌停限口径的影线。
+            ``down_limit`` 可选，提供时才能计算涨跌停限口径的影线；``adjust``
+            为累计复权因子（缺省视为 1）。
         stock_meta: Optional metadata DataFrame with ``[asset, industry]``.
 
     Returns:
@@ -263,13 +269,22 @@ def compute_alpha_features(
         return df
 
     cols = set(df.columns)
+    # 因子层统一用「后复权」口径：调整后价格 = 原始价 × 绝对累计复权因子。
+    # 累计因子由数据源给出、与抓取窗口无关，因此同一日期的因子取值在任何
+    # 窗口下都一致（可增量计算并入库复用）；而所有因子都是比例/收益口径，
+    # 与整体缩放无关，切换口径不改变因子取值。
+    adjust_expr = (
+        pl.col("adjust").cast(pl.Float64).fill_null(1.0)
+        if "adjust" in cols
+        else pl.lit(1.0)
+    )
     norm_exprs: list[pl.Expr] = [
         pl.col("date").cast(pl.Date).alias("date"),
         pl.col("asset").cast(pl.Utf8).alias("asset"),
-        pl.col("open").cast(pl.Float64).alias("open"),
-        pl.col("high").cast(pl.Float64).alias("high"),
-        pl.col("low").cast(pl.Float64).alias("low"),
-        pl.col("close").cast(pl.Float64).alias("close"),
+        (pl.col("open").cast(pl.Float64) * adjust_expr).alias("open"),
+        (pl.col("high").cast(pl.Float64) * adjust_expr).alias("high"),
+        (pl.col("low").cast(pl.Float64) * adjust_expr).alias("low"),
+        (pl.col("close").cast(pl.Float64) * adjust_expr).alias("close"),
         pl.col("volume").cast(pl.Float64).fill_null(0.0).alias("volume"),
     ]
     if "amount" in cols:
@@ -304,14 +319,18 @@ def compute_alpha_features(
 
     if "up_limit" in cols:
         norm_exprs.append(
-            pl.col("up_limit").cast(pl.Float64).fill_null(0.0).alias("up_limit")
+            (pl.col("up_limit").cast(pl.Float64).fill_null(0.0) * adjust_expr).alias(
+                "up_limit"
+            )
         )
     else:
         norm_exprs.append(pl.lit(0.0).alias("up_limit"))
 
     if "down_limit" in cols:
         norm_exprs.append(
-            pl.col("down_limit").cast(pl.Float64).fill_null(0.0).alias("down_limit")
+            (pl.col("down_limit").cast(pl.Float64).fill_null(0.0) * adjust_expr).alias(
+                "down_limit"
+            )
         )
     else:
         norm_exprs.append(pl.lit(0.0).alias("down_limit"))

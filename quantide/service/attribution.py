@@ -77,6 +77,40 @@ def load_backtest_config(portfolio_id: str) -> dict[str, Any]:
     return {}
 
 
+def explain_features(
+    portfolio_id: str,
+    asset: str,
+    signal_date: datetime.date,
+) -> list[tuple[str, float]] | None:
+    """按策略能力动态取该资产在决策日的因子取值。
+
+    Args:
+        portfolio_id: 回测组合 ID。
+        asset: 证券代码。
+        signal_date: 决策日。
+
+    Returns:
+        list | None: (因子名, 取值) 列表；策略不支持或数据不足时返回 ``None``。
+    """
+    portfolio = db.get_portfolio(portfolio_id)
+    if portfolio is None:
+        return None
+    strategy_cls = strategy_loader.load_from_cache().get(portfolio.name or "")
+    if strategy_cls is None:
+        return None
+    if not callable(getattr(strategy_cls, "explain_features", None)):
+        return None
+    config = load_backtest_config(portfolio_id)
+    try:
+        strategy = strategy_cls(_AttributionBroker(), config)
+        explainer = getattr(strategy, "explain_features", None)
+        if not callable(explainer):
+            return None
+        return explainer(asset, signal_date)
+    except Exception:
+        return None
+
+
 def explain_prediction(
     portfolio_id: str,
     asset: str,

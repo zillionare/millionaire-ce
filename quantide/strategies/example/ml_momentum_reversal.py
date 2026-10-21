@@ -13,6 +13,7 @@ Universe selection:
 from __future__ import annotations
 
 import datetime
+import random
 from pathlib import Path
 from typing import Any
 
@@ -503,9 +504,10 @@ def _filter_universe(
 
     ``market_cap_trim`` first removes the largest and smallest ``trim_pct`` of
     the cross-section by ``total_mv``, then removes suspended and ST stocks
-    from the remaining set, and finally keeps the largest ``universe_size``
-    stocks by market cap (``universe_size <= 0`` means no cap).  ``liquidity``
-    keeps the legacy top-N by 20-day mean amount.
+    from the remaining set, and finally draws ``universe_size`` stocks at
+    random (seeded by the rebalance date, so the universe is reproducible;
+    ``universe_size <= 0`` means no cap).  ``liquidity`` keeps the legacy
+    top-N by 20-day mean amount.
     """
     on_date = bars_df.filter(pl.col("date") == target_date)
     if on_date.is_empty():
@@ -548,9 +550,14 @@ def _filter_universe(
             if "is_st" in cols:
                 cap = cap.filter(~pl.col("is_st").fill_null(False))
             cap = _drop_st_names(cap)
-            # 裁剪后按市值取前 universe_size 只（universe_size<=0 表示不限制）。
+            # 裁剪后按市值随机抽样 universe_size 只（universe_size<=0 表示不限制）。
+            # 随机种子与调仓日绑定，保证同一调仓日的结果可复现。
             if universe_size > 0 and cap.height > universe_size:
-                cap = cap.tail(universe_size)
+                rng = random.Random(f"{target_date.isoformat()}:{mode}")
+                # unique() 不保序，必须排序后再抽样，否则同一日期结果不可复现
+                assets = sorted(cap["asset"].unique().to_list())
+                picked = rng.sample(assets, universe_size)
+                cap = cap.filter(pl.col("asset").is_in(picked))
             return sorted(cap["asset"].unique().to_list())
 
     cond = (pl.col("close") > 0) & (pl.col("volume") > 0)
@@ -605,7 +612,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
     PARAMS: dict[str, Any] = {
         "top_k": 5,
         "keep_top_n": 15,
-        "universe_size": 300,
+        "universe_size": 2000,
         "universe_mode": "market_cap_trim",
         "market_cap_trim_pct": 0.05,
         "universe_rebalance_days": 20,
@@ -631,7 +638,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self.top_k = max(1, int(self.config.get("top_k", 5)))
         self.keep_top_n = max(self.top_k, int(self.config.get("keep_top_n", 15)))
         self.universe_size = max(
-            self.keep_top_n, int(self.config.get("universe_size", 300))
+            self.keep_top_n, int(self.config.get("universe_size", 2000))
         )
         self.universe_mode = str(
             self.config.get("universe_mode", "market_cap_trim")
@@ -694,7 +701,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
         """
         cfg = {**cls.default_config(), **(config or {})}
         top_k = max(1, int(cfg.get("top_k", 5)))
-        universe_size = max(top_k, int(cfg.get("universe_size", 300)))
+        universe_size = max(top_k, int(cfg.get("universe_size", 2000)))
         train_window = max(10, int(cfg.get("train_window", 45)))
         horizon = max(1, int(cfg.get("horizon", 3)))
         take_profit_pct = float(cfg.get("take_profit_pct", 0.15))
@@ -726,7 +733,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 n=lookback,
                 end=query_end,
                 assets=custom_assets,
-                adjust="qfq",
+                adjust=None,
                 eager_mode=True,
             )
             assert isinstance(raw_df, pl.DataFrame)
@@ -824,7 +831,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             init_bars = daily_bars.get_bars_in_range(
                 calendar.shift(signal_date, -25, FrameType.DAY),
                 signal_date,
-                adjust="qfq",
+                adjust=None,
                 eager_mode=True,
             )
             assert isinstance(init_bars, pl.DataFrame)
@@ -853,7 +860,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             fetch_start,
             fetch_end,
             assets=universe_assets,
-            adjust="qfq",
+            adjust=None,
             eager_mode=True,
         )
         assert isinstance(raw_panel, pl.DataFrame)
@@ -910,6 +917,49 @@ class MLMomentumReversalStrategy(BaseStrategy):
             _EXPLAIN_MODEL_CACHE.pop(next(iter(_EXPLAIN_MODEL_CACHE)))
         _EXPLAIN_MODEL_CACHE[key] = (model, engine)
         return model, engine
+
+    def explain_features(
+        self, asset: str, signal_date: datetime.date
+    ) -> list[tuple[str, float]] | None:
+        """返回该资产在决策日的因子取值（与模型输入同源）。
+
+        使用策略自己的面板（同一选股池、同一复权口径），因此展示的数值就是
+        模型当时看到的值。
+
+        Args:
+            asset: 证券代码。
+            signal_date: 决策日。
+
+        Returns:
+            list | None: (因子名, 取值) 列表；数据不足时返回 ``None``。
+        """
+        try:
+            self._ensure_backtest_panel(signal_date)
+        except Exception:
+            return None
+        panel = self._cached_norm_panel
+        if panel is None or panel.is_empty():
+            return None
+        hist = panel.filter(pl.col("date") <= pl.lit(signal_date))
+        if hist.is_empty():
+            return None
+        target_date = hist["date"].max()
+        row = hist.filter(
+            (pl.col("date") == pl.lit(target_date)) & (pl.col("asset") == asset)
+        )
+        if row.is_empty():
+            return None
+        values = row.row(0, named=True)
+        result: list[tuple[str, float]] = []
+        for col in FEATURE_COLS:
+            value = values.get(col)
+            if value is None:
+                continue
+            try:
+                result.append((col, float(value)))
+            except (TypeError, ValueError):
+                continue
+        return result or None
 
     def explain_prediction(
         self, asset: str, signal_date: datetime.date

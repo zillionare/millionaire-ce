@@ -737,8 +737,8 @@ def test_filter_universe_respects_universe_size_in_market_cap_trim_mode(monkeypa
     assert len(assets) == 5
 
 
-def test_filter_universe_market_cap_trim_keeps_largest_by_market_cap(monkeypatch):
-    """裁剪后按市值取最大的 N 只。"""
+def test_filter_universe_market_cap_trim_draws_random_sample(monkeypatch):
+    """裁剪后随机抽取 N 只（种子与日期绑定，可复现）。"""
     monkeypatch.setattr(
         ml_momentum_reversal.stock_list, "_data", pl.DataFrame()
     )
@@ -755,6 +755,13 @@ def test_filter_universe_market_cap_trim_keeps_largest_by_market_cap(monkeypatch
     assets = ml_momentum_reversal._filter_universe(
         panel, total_date, 3, mode="market_cap_trim", trim_pct=0.0
     )
+    again = ml_momentum_reversal._filter_universe(
+        panel, total_date, 3, mode="market_cap_trim", trim_pct=0.0
+    )
 
     assert len(assets) == 3
-    assert set(assets) == set(sorted(market_caps, key=lambda a: market_caps[a])[-3:])
+    # 同一日期重复调用必须得到同一批股票
+    assert assets == again
+    # 不是简单取市值最大的 N 只
+    largest = set(sorted(market_caps, key=lambda a: market_caps[a])[-3:])
+    assert set(assets) != largest
