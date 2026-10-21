@@ -14,7 +14,7 @@
 
 用法::
 
-    from quantide.factors.single_factor import load_factor_panel, study_single_factor
+    from quantide.factors.alphatest import load_factor_panel, study_single_factor
 
     panel = load_factor_panel(datetime.date(2022, 6, 1), datetime.date(2026, 10, 19))
     result = study_single_factor(panel, "ma20_slope", holding_days=1)
@@ -22,7 +22,7 @@
 
 命令行::
 
-    python -m quantide.factors.single_factor --factors ma20_slope --holdings 1 3 5 10 20
+    python -m quantide.factors.alphatest --factors ma20_slope --holdings 1 3 5 10 20
 """
 
 from __future__ import annotations

@@ -8,15 +8,15 @@ from quantide.factors.alpha import (
     compute_alpha_features,
     standardize_features,
 )
+from quantide.factors.alphatest import (
+    SingleFactorResult,
+    load_factor_panel,
+    study_single_factor,
+)
 from quantide.factors.catalog import (
     FeatureSpec,
     list_feature_specs,
     resolve_feature_selection,
-)
-from quantide.factors.single_factor import (
-    SingleFactorResult,
-    load_factor_panel,
-    study_single_factor,
 )
 
 __all__ = [

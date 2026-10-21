@@ -1,4 +1,4 @@
-"""单因子检验模块（quantide.factors.single_factor）单元测试。"""
+"""单因子检验模块（quantide.factors.alphatest）单元测试。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from quantide.factors.single_factor import (
+from quantide.factors.alphatest import (
     MIN_CROSS_SECTION,
     RankIcSummary,
     adjacent_trading_day_expr,
