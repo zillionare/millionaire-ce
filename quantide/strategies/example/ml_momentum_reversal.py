@@ -45,6 +45,9 @@ except ImportError:  # pragma: no cover
 #: 归因用的模型缓存（按训练参数 + 截面日 + 面板规模键控）
 _EXPLAIN_MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, str]] = {}
 
+#: 归因用的因子面板缓存（键同上），避免每次切换页签都重算因子
+_EXPLAIN_PANEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
+
 
 def _parse_custom_assets(config: dict[str, Any]) -> list[str] | None:
     """Extract custom asset list from strategy config if specified."""
@@ -649,6 +652,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
         "slippage_pct": 0.001,
         "use_lightgbm": True,
         "use_broker_barriers": True,
+        "use_alpha_exit": True,
     }
     params = PARAMS
 
@@ -684,6 +688,13 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self.use_broker_barriers = bool(
             self.config.get("use_broker_barriers", True)
         )
+        # alpha 排名卖出开关：关闭后只剩三重障碍出场
+        self.use_alpha_exit = bool(self.config.get("use_alpha_exit", True))
+        if not self.use_alpha_exit and not self.use_broker_barriers:
+            self.log(
+                "use_alpha_exit 与 use_broker_barriers 同时关闭，持仓将没有自动卖出条件",
+                level="WARNING",
+            )
         self.selected_features: list[str] = resolve_feature_selection(
             self.config.get("features")
         )
@@ -704,7 +715,8 @@ class MLMomentumReversalStrategy(BaseStrategy):
             f"universe_mode={self.universe_mode}, "
             f"market_cap_trim_pct={self.market_cap_trim_pct}, "
             f"train_window={self.train_window}, horizon={self.horizon}, "
-            f"use_lightgbm={self.use_lightgbm}"
+            f"use_lightgbm={self.use_lightgbm}, "
+            f"use_alpha_exit={self.use_alpha_exit}"
         )
 
     @classmethod
@@ -912,6 +924,41 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self._panel_start = signal_date
         self._panel_end = fetch_end
 
+    def _explain_panel(self, signal_date: datetime.date) -> pl.DataFrame:
+        """取归因用的标准化因子面板（带缓存）。
+
+        面板构建（抓取 + 因子计算 + 截面标准化）约 0.6s，页签来回切换会重复
+        触发；这里按 (训练参数, 特征集, 信号日) 缓存，命中即复用。
+
+        Args:
+            signal_date: 决策日。
+
+        Returns:
+            pl.DataFrame: 标准化后的因子面板（可能为空）。
+        """
+        key = (
+            self.train_window,
+            self.horizon,
+            round(self.stop_loss_pct, 6),
+            round(self.take_profit_pct, 6),
+            self.universe_size,
+            self.universe_mode,
+            round(self.market_cap_trim_pct, 6),
+            tuple(self.selected_features or FEATURE_COLS),
+            signal_date,
+        )
+        cached = _EXPLAIN_PANEL_CACHE.get(key)
+        if cached is not None:
+            return cached
+        self._ensure_backtest_panel(signal_date)
+        panel = self._cached_norm_panel
+        if panel is None:
+            panel = pl.DataFrame()
+        if len(_EXPLAIN_PANEL_CACHE) >= 2:
+            _EXPLAIN_PANEL_CACHE.pop(next(iter(_EXPLAIN_PANEL_CACHE)))
+        _EXPLAIN_PANEL_CACHE[key] = panel
+        return panel
+
     def _attribution_model(
         self, hist: pl.DataFrame, target_date: datetime.date
     ) -> tuple[Any, str]:
@@ -970,10 +1017,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
             list | None: (因子名, 取值) 列表；数据不足时返回 ``None``。
         """
         try:
-            self._ensure_backtest_panel(signal_date)
+            panel = self._explain_panel(signal_date)
         except Exception:
             return None
-        panel = self._cached_norm_panel
         if panel is None or panel.is_empty():
             return None
         hist = panel.filter(pl.col("date") <= pl.lit(signal_date))
@@ -1014,10 +1060,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
             dict | None: 归因结果；数据不足或资产不在截面内时返回 ``None``。
         """
         try:
-            self._ensure_backtest_panel(signal_date)
+            panel = self._explain_panel(signal_date)
         except Exception:
             return None
-        panel = self._cached_norm_panel
         if panel is None or panel.is_empty():
             return None
 
@@ -1230,7 +1275,8 @@ class MLMomentumReversalStrategy(BaseStrategy):
 
         # 1. Alpha exits only. Price/time barriers are owned by the shared
         # triple-barrier risk policy (backtest overlay or live risk strategy).
-        for asset, pos in current_positions.items():
+        # use_alpha_exit=False 时完全关闭 alpha 排名卖出，只保留三重障碍出场。
+        for asset, pos in (current_positions.items() if self.use_alpha_exit else ()):
             avail = (
                 int(pos.avail)
                 if hasattr(pos, "avail")

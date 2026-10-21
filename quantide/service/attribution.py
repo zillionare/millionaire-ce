@@ -16,6 +16,12 @@ from quantide.service.discovery import strategy_loader
 
 ATTRIBUTION_SHAP = "shap"
 
+#: 归因结果缓存（键：组合/资产/决策日/因子集），避免页签来回切换时重复计算
+_EXPLAIN_RESULT_CACHE: dict[tuple[Any, ...], dict[str, Any] | None] = {}
+#: 因子取值缓存（同样的键），特征页与 SHAP 页共用
+_EXPLAIN_FEATURE_CACHE: dict[tuple[Any, ...], list[tuple[str, float]] | None] = {}
+_EXPLAIN_RESULT_CACHE_MAX = 64
+
 
 class _AttributionBroker:
     """归因用的最小 broker 替身（只需要回测区间信息）。"""
@@ -101,14 +107,26 @@ def explain_features(
     if not callable(getattr(strategy_cls, "explain_features", None)):
         return None
     config = load_backtest_config(portfolio_id)
+    cache_key = (
+        portfolio_id,
+        asset,
+        signal_date,
+        tuple(config.get("features") or ()),
+    )
+    if cache_key in _EXPLAIN_FEATURE_CACHE:
+        return _EXPLAIN_FEATURE_CACHE[cache_key]
     try:
         strategy = strategy_cls(_AttributionBroker(), config)
         explainer = getattr(strategy, "explain_features", None)
         if not callable(explainer):
             return None
-        return explainer(asset, signal_date)
+        result = explainer(asset, signal_date)
     except Exception:
         return None
+    if len(_EXPLAIN_FEATURE_CACHE) >= _EXPLAIN_RESULT_CACHE_MAX:
+        _EXPLAIN_FEATURE_CACHE.pop(next(iter(_EXPLAIN_FEATURE_CACHE)))
+    _EXPLAIN_FEATURE_CACHE[cache_key] = result
+    return result
 
 
 def explain_prediction(
@@ -133,11 +151,23 @@ def explain_prediction(
     if not supports_attribution(strategy_cls):
         return None
     config = load_backtest_config(portfolio_id)
+    cache_key = (
+        portfolio_id,
+        asset,
+        signal_date,
+        tuple(config.get("features") or ()),
+    )
+    if cache_key in _EXPLAIN_RESULT_CACHE:
+        return _EXPLAIN_RESULT_CACHE[cache_key]
     try:
         strategy = strategy_cls(_AttributionBroker(), config)
         explainer = getattr(strategy, "explain_prediction", None)
         if not callable(explainer):
             return None
-        return explainer(asset, signal_date)
+        result = explainer(asset, signal_date)
     except Exception:
         return None
+    if len(_EXPLAIN_RESULT_CACHE) >= _EXPLAIN_RESULT_CACHE_MAX:
+        _EXPLAIN_RESULT_CACHE.pop(next(iter(_EXPLAIN_RESULT_CACHE)))
+    _EXPLAIN_RESULT_CACHE[cache_key] = result
+    return result

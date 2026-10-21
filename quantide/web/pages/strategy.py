@@ -1719,6 +1719,7 @@ TRADE_PARAM_KEYS = (
     "sell_fraction",
     "slippage_pct",
     "use_broker_barriers",
+    "use_alpha_exit",
     "cheat_on_close",
 )
 
@@ -1731,6 +1732,7 @@ TRADE_PARAM_LABELS = {
     "sell_fraction": "卖出比例",
     "slippage_pct": "滑点比例",
     "use_broker_barriers": "由 Broker 执行障碍",
+    "use_alpha_exit": "启用 alpha 排名卖出",
     "cheat_on_close": "按收盘价成交",
     "commission": "佣金率(单边)",
     "stamp_duty": "印花税率(卖出)",

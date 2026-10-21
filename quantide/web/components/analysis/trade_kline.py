@@ -30,6 +30,9 @@ TRADE_KLINE_PANEL_ID = "trade-kline-panel"
 TRADE_KLINE_FEATURE_LOOKBACK_DAYS = 150
 TRADE_KLINE_PANEL_FEATURES = "features"
 TRADE_KLINE_PANEL_SHAP = "shap"
+#: 全市场兜底计算的因子缓存（键：资产 + 决策日）
+_MARKET_FEATURE_CACHE: dict[tuple[str, str], list[tuple[str, float]]] = {}
+
 TRADE_KLINE_PANEL_LABELS = {
     TRADE_KLINE_PANEL_FEATURES: "特征",
     TRADE_KLINE_PANEL_SHAP: "SHAP",
@@ -221,6 +224,11 @@ def _decision_features(
     if features:
         return features
 
+    cache_key = (asset, decision_date.isoformat())
+    cached = _MARKET_FEATURE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         panel = daily_bars.get_bars_in_range(
             decision_date - datetime.timedelta(days=TRADE_KLINE_FEATURE_LOOKBACK_DAYS),
@@ -249,6 +257,10 @@ def _decision_features(
                 result.append((column, float(value)))
             except (TypeError, ValueError):
                 continue
+        if result:
+            if len(_MARKET_FEATURE_CACHE) >= 64:
+                _MARKET_FEATURE_CACHE.pop(next(iter(_MARKET_FEATURE_CACHE)))
+            _MARKET_FEATURE_CACHE[cache_key] = result
         return result or None
     except Exception:
         return None

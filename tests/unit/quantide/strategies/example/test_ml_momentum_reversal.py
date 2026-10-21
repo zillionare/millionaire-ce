@@ -529,6 +529,31 @@ async def test_on_bar_keeps_rank_exit_when_broker_barriers_enabled() -> None:
     assert any("排名跌出" in message for message in strategy.logs)
 
 
+async def test_on_bar_skips_alpha_exit_when_disabled() -> None:
+    """use_alpha_exit=False 时不做 alpha 排名卖出（只留三重障碍）。"""
+    position = SimpleNamespace(shares=100, avail=100, price=10.0, mv=1000.0)
+    broker = _FakeBroker(cash=0.0, positions={"600001.SH": position})
+    strategy = _make_strategy(
+        broker,
+        {"use_lightgbm": False, "use_broker_barriers": True, "use_alpha_exit": False},
+    )
+    strategy._rank_for_bar = lambda tm: (
+        [],
+        {"600001.SH": 10.0, "600002.SH": 10.0},
+        {"600001.SH": 99, "600002.SH": 1},
+    )
+
+    await strategy.on_bar(dt.datetime(2024, 6, 3, 10, 0))
+
+    assert broker.sell_calls == []
+    assert not any("排名跌出" in message for message in strategy.logs)
+
+
+def test_default_config_exposes_alpha_exit_switch() -> None:
+    assert "use_alpha_exit" in ml_momentum_reversal.MLMomentumReversalStrategy.PARAMS
+    assert ml_momentum_reversal.MLMomentumReversalStrategy.PARAMS["use_alpha_exit"] is True
+
+
 # ---------------------------------------------------------------------------
 # 6. Web stock-selection modal & routes
 # ---------------------------------------------------------------------------
