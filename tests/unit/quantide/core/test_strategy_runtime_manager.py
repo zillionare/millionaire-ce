@@ -411,15 +411,15 @@ def test_strategy_loop_live_wires_broker_config_and_uses_real_time(monkeypatch):
         async def init(self):
             pass
 
-        async def on_start(self, tm):
-            self._on_start_tm = tm
+        async def on_start(self):
+            self._on_start_tm = None
 
         async def on_bar(self, tm) -> None:
             self.on_bar_calls.append((tm, self.interval))
             self.broker._spy_stop = True
             raise RuntimeError("stop loop")
 
-        async def on_stop(self, tm):
+        async def on_stop(self):
             pass
 
     class _SpyBroker:

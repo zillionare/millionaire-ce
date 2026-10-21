@@ -465,6 +465,9 @@ async def test_live_broker_defers_order_when_cheat_on_close_false():
         live_execution_window="auction",
         live_execution_slippage=0.001,
     )
+    # The test calendar ends at 2024-12-31; pin the clock so "next trade day"
+    # is deterministic instead of depending on the wall clock.
+    wrapper.set_clock(datetime.datetime(2024, 12, 30, 15, 0))
 
     result = await wrapper.buy_amount("000001.SZ", 5000, price=10)
 
@@ -476,7 +479,7 @@ async def test_live_broker_defers_order_when_cheat_on_close_false():
     assert deferred["value"] == 5000.0
     assert deferred["execution_window"] == "auction"
     assert deferred["slippage"] == 0.001
-    assert deferred["scheduled_at"] > datetime.datetime.now()
+    assert deferred["scheduled_at"] > wrapper._now()
 
 
 @pytest.mark.asyncio
