@@ -2,7 +2,7 @@
 
 - **Spec ID**: v0.2-001-strategy-framework
 - **分册**: strategy (策略对象、SDK、内置策略、驱动契约、风控契约、调度)
-- **FR 范围**: FR-010 ~ FR-130, FR-185, FR-200, FR-230 ~ FR-260
+- **FR 范围**: FR-010 ~ FR-135, FR-185, FR-200, FR-230 ~ FR-260
 - **根 spec**: [spec.md](./spec.md)
 
 ## 功能需求
@@ -114,7 +114,7 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 风控策略的基类，继承自抽象根 `Strategy`。**与独立策略是结构性差异，不是"共享+约束"关系**：无账户、操作宿主持仓、只算超额收益。
 
 - **资金账户**：❌ 无。不创建 `portfolio_id`，不持有资金
-- **可回测**：❌ 否。v0.2 不支持 RiskStrategy 回测。BacktestRunner 在启动时检测到 RiskStrategy 实例则拒绝（类型层 / 启动检查，关联 AC-013-05）。风控策略仅在 paper/live 下验证
+- **可回测**：❌ 否。v0.2 不支持 RiskStrategy 回测。BacktestRunner 在启动时检测到 RiskStrategy 实例则拒绝（类型层 / 启动检查，关联 AC-013-05）。风控策略仅在 paper/live 下验证。若需要在回测中执行 Triple Barrier，使用 FR-135 的 broker 层 overlay；本 FR 仍是 paper/live-only
 - **不可独立 paper/live**：无宿主即无可监控的持仓；仅在宿主进入 paper/live 时由 FR-250 自动激活跟随。用户若想在 paper/live 阶段验证风控策略，必须先挂载到宿主
 - **宿主挂载**：每个 `RiskStrategy` 实例绑定一个宿主 `BaseStrategy`（独立策略）。宿主进入 paper/live 时，其关联的 `RiskStrategy` 自动激活（FR-250）。绑定关系在运行配置中建立（可热调），不在策略代码中以类属性声明
 - **可随时停止和重新启动**：停止后不再监控宿主持仓，已发出的订单不撤回；重新启动后开启新的"开启区间"，新开启区间的超额收益独立计算（见下方）
@@ -128,7 +128,7 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
   - 上述两个方法**类层不存在**于 `BaseStrategy`，由"RiskStrategy 继承结构"保证独立策略不可调用（不是运行时拦截）
 - **驱动契约**：见 FR-125（事件驱动）。`on_check(positions, tm)` 由框架在每个 tick（paper/live）触发，`positions` 为宿主当日可卖持仓快照（只读）
 - **评估指标**：✅ paper/live 下完整计算（见 FR-360）
-- **内置实现**：`DrawbackSellStrategy`（FR-100）、`CostStopStrategy`（FR-110）
+- **内置实现**：`DrawbackSellStrategy`（FR-100）、`CostStopStrategy`（FR-110）、`TripleBarrierRiskStrategy`（FR-135）
 
 > **超额收益公式 — Triple Barrier**（FR-013/FR-360 共用，story §1.9）—— **✅ 已固化**：
 >
@@ -508,11 +508,76 @@ on_day_close(tm)                              ← 收盘后停止监控，记录
 
 - 无独立资金账户，监控其它策略的持仓
 - 只统计超额收益（Triple Barrier 公式，定义见 FR-013 / story §1.9），不统计其他指标
-- **可回测**：❌ 否。v0.2 不支持 RiskStrategy 回测（与 FR-013 一致）。BacktestRunner 启动时检测到 RiskStrategy 实例则拒绝
+- **可回测**：❌ 否。v0.2 不支持 RiskStrategy 回测（与 FR-013 一致）。BacktestRunner 启动时检测到 RiskStrategy 实例则拒绝。回测中的 Triple Barrier 执行由 FR-135 的 broker 层 overlay 承担，不改变本 FR 的 paper/live 契约
 - **不可独立 paper/live**：无宿主即无可监控的持仓；仅在宿主进入 paper/live 时由 FR-250 自动激活跟随
 - **可随时停止和重新启动**：每次重新启动记一个新"开启区间"，超额收益按开启区间独立累计（详见 FR-013）
 - 操作他人持仓时不改变持仓归属、不改变原策略的收益计算
 - 自动叠加：宿主独立策略进入 paper/live 时其关联风控策略自动激活（见 FR-230/240/250）
+
+
+<a id="fr-135"></a>
+### FR-135 可回测的 Broker 层风控 Overlay（Triple Barrier）
+
+| 有效需求 | 可测性 | 是否已决定 |
+| -------- | ------ | ---------- |
+| ✅        | ✅      | ✅          |
+
+FR-013 / FR-130 的 `RiskStrategy` 仍是 paper/live-only，v0.2 不可回测。为了在回测中执行同一套 Triple Barrier 规则，框架提供 **broker 层风控 overlay**：它不是策略实例、不创建独立账户。`BacktestRunner` 在 T 日开盘、宿主 `on_bar` **之前**先执行 gap/时间检查；`on_bar` 结束后同步新持仓并检查 T 日 intraday barrier。paper/live 由 `TripleBarrierRiskStrategy` 使用同一 `TripleBarrierPolicy`，按最新价/市价执行。两套执行器共享决策逻辑，但成交模型不同。
+
+#### 与 RiskStrategy 的边界
+
+- **回测执行**：本 FR 的 overlay；宿主必须是 `BaseStrategy`，数据粒度为日线。
+- **paper/live**：使用 `TripleBarrierRiskStrategy`（`RiskStrategy` 子类，FR-013 / FR-125 / FR-250），按最新价触发、即时市价卖出；它与本 FR 的 overlay 共享 `quantide.service.triple_barrier` 决策函数。
+- **Triple Barrier 公式**：评估口径见 FR-360；本 FR 的 overlay 复用 `evaluate_day` 作为执行判断，但**不产生** `excess_return` 指标。
+- **宿主 opt-in**：宿主声明 `RISK_OVERLAY = "triple_barrier"` 且 `use_broker_barriers=True`。开启时宿主只保留 alpha 退出（排名/得分等），价格/时间 barrier 全部交给 overlay（回测）或 `TripleBarrierRiskStrategy`（paper/live）；宿主不再保留第二套 barrier 实现。
+- **关闭**：`use_broker_barriers=False` 表示显式关闭三重障碍风控；不会回退到宿主自身的价格/时间 barrier。
+
+#### 配置
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `up_pct` / `down_pct` | 0.15 / 0.06（宿主可覆盖） | 小数，止盈/止损 |
+| `horizon` | 3（宿主可覆盖） | 交易日数，时间屏障 |
+| `sell_fraction` | 1.0 | 触发后卖出比例 |
+| `slippage` | 0.001（10bp） | 回测卖出滑点；paper/live 用实际成交 |
+| `use_broker_barriers` | 由策略声明决定；未声明 false | 是否启用三重障碍风控 |
+
+仅支持日线回测；分钟级/日内回测不支持（FR-115 数据约束）。overlay 只作用于日线宿主，不对 paper/live 的 `RiskStrategy` 生效。
+
+#### 执行时点（日线）
+
+- **T0（买入日）**：当天不能卖。若 T0 的 low/high 触达下/上轨，记为 pending，在 T1 开盘卖出。
+- **Tn（n≥1）开盘**：先于宿主 `on_bar` 检查 gap 与时间屏障：
+  - `open <= cost×(1−down_pct)` / `open >= cost×(1+up_pct)` → 按 Tn 开盘价卖出；
+  - 持有满 `horizon` → 按 Tn 开盘价卖出。
+- **Tn 盘中/收盘后**：宿主 `on_bar` 结束后，用 Tn 的 high/low 模拟**已挂出的条件止损/止盈单**：
+  - low 触达下轨 → 按 `cost×(1−down_pct)` 卖出；
+  - high 触达上轨 → 按 `cost×(1+up_pct)` 卖出；
+  - 同日上下轨都触发 → 以 Tn 开盘价离上/下轨更近者为准；等距时 down 优先。
+- 回测卖出价再扣 `slippage`；若开盘跳空越过 barrier，则按开盘价（再扣 slippage）而不是 barrier 价成交。
+- 这是日线数据下对盘中条件单的近似：不使用 Tn 收盘价决定 Tn 开盘成交；收盘后才用 Tn OHLC 模拟盘中触发。真实盘中路径仍需分钟/tick 数据。
+- T+1：只卖出 `avail`；涨跌停/停牌/无流动性导致卖单失败时保留仓位，下一交易日重试；部分成交保留剩余仓位。
+- 日志：`[风控卖出]` / `[风控挂起]`，含原因、触发价、成交价、执行日、股数。
+- paper/live 当前由 `StrategyRuntime._strategy_loop` 每 2 秒调用一次 `on_check`；它按最新价判断，但不等同于 FR-125 的逐 tick 驱动，后者的 tick 级契约仍是目标态。
+
+#### 公司行为与成本
+
+- 数据源只提供累计复权因子，无法可靠区分现金分红与拆股。broker 统一按**拆股假设**处理：
+  - `r = adjust_t / adjust_{t-1}`
+  - `shares *= r`，`cost /= r`，`cash` 不变。
+  - 除权前后总市值连续；现金分红等价于分红再投资。
+- overlay 必须使用 broker 的复权后成本，不得使用策略侧 qfq/raw 的另一套成本基准。
+- 卖出已实现盈亏按 broker 成交价与复权后成本计算，避免“qfq 现价 vs raw 成本”的假止损。
+- 回测默认按当前 A 股实际费率计费：佣金 0.01%/边（单笔最低 5 元）、卖方印花税 0.05%、过户费 0.001%/边；可通过 `BacktestBroker` 参数覆盖。
+
+#### 叠加与复用
+
+- 叠加 = **宿主策略 + broker overlay**；不是两个策略实例，也没有第二个 `portfolio_id`。
+- 宿主负责选股/买入/alpha 退出；overlay 负责价格/时间风险退出。
+- 同一 overlay 可被任意声明 `RISK_OVERLAY` 的 `BaseStrategy` 复用；策略无需重复实现公司行为、T+1、涨跌停处理。
+- 回测中不计算 `RiskStrategy` 的超额收益指标；若需要 paper/live 的超额收益评估，仍走 FR-360。
+
+> **实现落点**：`quantide/service/triple_barrier.py`（共享 `TripleBarrierPolicy` / `plan_*_exit`）、`quantide/service/risk_overlay.py`（回测 `TripleBarrierOverlay`）、`quantide/service/backtest_broker.py`（`run_risk_overlay` / `execute_exit` / 复权持仓）、`quantide/service/runner.py`（按 `RISK_OVERLAY` 装配）、`quantide/strategies/triple_barrier_risk.py`（paper/live 风控策略）、`quantide/strategies/example/ml_momentum_reversal.py`（示例宿主）。
 
 
 <a id="fr-185"></a>
@@ -556,6 +621,10 @@ cost_basis ← buy_price   # 按本次买入价初始化
 
 - **同日反复买卖**（同一 asset）: 所有买入按 F-CB-1 累加更新；卖出按 F-CB-2/F-CB-3 处理
 - **多次部分卖出后再次买入**: 先 F-CB-2 保留成本，再 F-CB-1 加权更新
+- **除权日（T 日）的内存口径**: `set_clock(T)` 在 `_fill_history_gaps(T-1)` 之后、放开 T+1 可卖之前，立即把 `r_T = adjust_T / adjust_{T-1}` 应用到内存持仓（`shares×r_T`、`cost÷r_T`、`cash` 不变）。这样 T 日的 raw 行情与 `cost_basis` 处于同一价格空间，风控 overlay/成本止损不会在送转或大额分红日产生假止损；不得等到 T+1 展仓才调整。
+- **整数股**: A 股股数必须为整数；除权/分红按拆股近似得到的小数股按四舍五入取整，并用「总成本不变」反推每股成本（`cost = old_shares×old_cost / new_shares`）。否则宿主 `int(avail)` 清仓会因零股被 broker 拒绝，导致持仓卡死。
+- **红利税**: 回测假设**无红利税**。数据源只有累计复权因子，无法可靠区分现金分红与拆股，因此统一按拆股（分红再投资）处理，不扣红利税。
+- **实盘避税**: paper/live 应检索分红公告，在登记日当天不持有该股票，以规避红利税（后续实现；不改变回测口径）。
 - **停牌/退市/退市后重新上市**: 现有实现会清空该 asset 的持仓（具体行为见 FR-170，本 FR 不重复定义）
 - **融资融券**: v0.2 不涉及（成本基准不包含融资费用）
 

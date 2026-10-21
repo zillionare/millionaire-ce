@@ -583,6 +583,40 @@
 
 ---
 
+<a id="fr-135"></a>
+<a id="ac-fr-135"></a>
+### FR-135 可回测的 Broker 层风控 Overlay
+
+> 契约见 [spec-strategy.md §FR-135](./spec-strategy.md)；本 FR 是回测执行路径，不改变 FR-013/FR-130 的 paper/live-only 定位。
+
+#### AC-135-01 宿主 opt-in 装配与职责分离
+- ⬜ 宿主声明 `RISK_OVERLAY="triple_barrier"` 且 `use_broker_barriers=True` → BacktestRunner 创建 overlay；paper/live 自动装配 `TripleBarrierRiskStrategy`
+- ⬜ 每个日线 bar 先执行 overlay gap/时间检查，再执行宿主 `on_bar`；`on_bar` 结束后同步新持仓并执行 intraday 检查
+- ⬜ 同一回测中宿主不再执行价格/时间 barrier；排名/得分 alpha 退出仍执行
+- ⬜ `use_broker_barriers=False` → 不创建 overlay / 不装配 live 风控；不回退到宿主自身 barrier
+- ⬜ overlay 不创建新 `portfolio_id`，不实例化 `RiskStrategy`
+
+#### AC-135-02 日线 barrier 执行
+- ⬜ T0 不卖；T0 触达 barrier → pending；T1 开盘卖出
+- ⬜ Tn 开盘 gap 越过 barrier → 按 Tn open 卖出；时间屏障 → Tn open 卖出
+- ⬜ Tn 盘中 low/high 触达 barrier → 按 barrier 价卖出（扣 slippage）
+- ⬜ 同日上下轨都触发 → 以 Tn open 更近者优先；等距 down
+- ⬜ 使用 broker 复权后成本，不使用策略 qfq/raw 成本
+
+#### AC-135-03 T+1 / 涨跌停 / 部分成交
+- ⬜ `avail=0` 时不卖；涨跌停/停牌/无流动性卖单失败时保留仓位并在下一日重试
+- ⬜ 部分成交后剩余仓位保留
+- ⬜ pending T0 barrier 在 T1 开盘补卖；失败则保留 pending 重试
+
+#### AC-135-04 拆股假设
+- ⬜ `adjust_t / adjust_{t-1}=r` → `shares×r`、`cost÷r`、`cash` 不变
+- ⬜ 除权前后 `total` 连续；不产生现金分红补偿
+- ⬜ T 日 `set_clock(T)` 即应用 `r_T`，overlay 在 T 日盘中比较的是已调整 cost，不等到 T+1 展仓
+- ⬜ 除权后股数取整为整数且总成本守恒；宿主 `int(avail)` 全仓卖出可成交，不因零股被拒
+- ⬜ overlay 使用调整后的 cost，不出现 qfq/raw 混用导致的假止损
+
+---
+
 <a id="fr-125"></a>
 <a id="ac-fr-125"></a>
 ### FR-125 风控策略驱动契约

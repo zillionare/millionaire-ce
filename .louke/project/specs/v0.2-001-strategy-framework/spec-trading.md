@@ -243,6 +243,8 @@
 
 风控策略在 paper/live 下产生的评估指标。**仅在 paper/live 下计算**（v0.2 不支持 RiskStrategy 回测，评估自然仅 paper/live）。
 
+> **执行 vs 评估**：本节的公式在 paper/live 由 `RiskStrategy` 用于超额收益评估；FR-135 的 broker 层 overlay 在回测中复用 `evaluate_day` 作为执行规则。回测不计算本节的超额收益指标，只记录风控卖出事件。
+
 #### 公式定义（其他文档通过 [F-TB-N] 引用）
 
 **F-TB-1** up 屏障触发后的超额收益

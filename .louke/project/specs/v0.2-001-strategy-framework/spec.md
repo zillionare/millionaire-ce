@@ -2,7 +2,7 @@
 
 - **Spec ID**: v0.2-001-strategy-framework
 - **创建日期**: 2026-06-15
-- **状态**: v0.2-001 spec 覆盖 FR-010 ~ FR-360 范围; tag `v0.2-001-internal-locked` 标记基线; **AC 闭环** 至 FR-010/013/014/015/020/125/360 + NFR-060; **AC 待补** FR-030~080/090~130/140~180/200/230~260/440/450(按 P2 分域推进); FR-185 占位(算法见 spec-strategy.md §FR-185, P1 推进)
+- **状态**: v0.2-001 spec 覆盖 FR-010 ~ FR-360 范围; tag `v0.2-001-internal-locked` 标记基线; **AC 闭环** 至 FR-010/013/014/015/020/125/135/360 + NFR-060; **AC 待补** FR-030~080/090~130/140~180/200/230~260/440/450(按 P2 分域推进); FR-185 占位(算法见 spec-strategy.md §FR-185, P1 推进)
 
 ## 用户故事
 
@@ -68,6 +68,10 @@ priority: P0
 
 独立策略"双均线"进入实盘时，其绑定的"成本止损"风控策略自动激活。持仓跌破买入价 5% 时风控策略发卖出单，成交归属宿主策略的虚拟账本，不影响宿主收益计算，但贡献一条超额收益记录（按 Triple Barrier 计算：从卖出日起监控 N 日，期间若标的价格上涨到 `P_sell * (1 + up_threshold)` / 下跌到 `P_sell * (1 - down_threshold)` / N 日内未触发则按收盘价退出，分别记 `−up_threshold` / `+down_threshold` / `P_sell/Close_N − 1`，N=0 即当日收盘）。此条贡献属于"双均线进入实盘 → 停止"这一开启区间；风控若被重新开启，则另起新开启区间独立计算。
 
+### scenario-031 回测中的 Broker 层风控 Overlay
+
+独立策略在日线回测中声明 `RISK_OVERLAY="triple_barrier"` 并开启 `use_broker_barriers`。每个交易日开盘先检查 T 日 open 的 gap/时间屏障；宿主 `on_bar` 结束后再用 T 日 OHLC 模拟盘中屏障。T0 触发的 barrier 延到 T1 开盘卖出；宿主保留 alpha 退出。overlay 与宿主共用 `portfolio_id`，不创建 `RiskStrategy` 实例，也不产生超额收益指标。公司行为按拆股假设处理：`shares×r`、`cost÷r`、`cash` 不变；回测不扣红利税。
+
 
 ## 索引
 
@@ -119,6 +123,7 @@ priority: P0
 | [FR-115](./spec-strategy.md#fr-115) | BaseStrategy 驱动契约（独立策略默认） | spec-strategy.md#fr-115 | [#69](https://github.com/zillionare/millionaire/issues/69) |
 | [FR-125](./spec-strategy.md#fr-125) | 风控策略驱动契约 | spec-strategy.md#fr-125 | [#70](https://github.com/zillionare/millionaire/issues/70) |
 | [FR-130](./spec-strategy.md#fr-130) | 风控策略契约（生命周期 + 不可回测） | spec-strategy.md#fr-130 | [#71](https://github.com/zillionare/millionaire/issues/71) |
+| [FR-135](./spec-strategy.md#fr-135) | 可回测的 Broker 层风控 Overlay | spec-strategy.md#fr-135 | 本 FR 新增，issue 待建 |
 | [FR-140](./spec-trading.md#fr-140) | 交易规则 — 价格（涨跌停） | spec-trading.md#fr-140 | [#72](https://github.com/zillionare/millionaire/issues/72) |
 | [FR-150](./spec-trading.md#fr-150) | 交易规则 — 数量 | spec-trading.md#fr-150 | [#73](https://github.com/zillionare/millionaire/issues/73) |
 | [FR-160](./spec-trading.md#fr-160) | 交易规则 — 时间 | spec-trading.md#fr-160 | [#74](https://github.com/zillionare/millionaire/issues/74) |
