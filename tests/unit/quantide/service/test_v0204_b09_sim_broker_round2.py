@@ -15,13 +15,12 @@ from __future__ import annotations
 
 import datetime as dt
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import polars as pl
 import pytest
 
 import quantide.service.sim_broker as sb_mod
-from quantide.core.enums import OrderSide
 from quantide.core.ports.broker import ExecutionResult
 from quantide.data.models import Position
 from quantide.service.sim_broker import PaperBroker
@@ -235,7 +234,7 @@ async def test_sell_percent_returns_empty_when_asset_not_held():
 
 
 def test_persist_updates_logs_and_reraises_on_db_error(monkeypatch):
-    """[AC-NFR1101-01] _persist_updates logs and re-raises when db.upsert_positions raises."""
+    """[AC-NFR1101-01] _persist_updates logs and re-raises when db.replace_positions raises."""
     broker = _make_broker()
     broker._positions = {
         "000001.SZ": Position(
@@ -254,7 +253,7 @@ def test_persist_updates_logs_and_reraises_on_db_error(monkeypatch):
     def _boom(*_args, **_kwargs):
         raise RuntimeError("db write failed")
 
-    monkeypatch.setattr(sb_mod.db, "upsert_positions", _boom)
+    monkeypatch.setattr(sb_mod.db, "replace_positions", _boom)
     with pytest.raises(RuntimeError, match="db write failed"):
         broker._persist_updates({"000001.SZ"})
 

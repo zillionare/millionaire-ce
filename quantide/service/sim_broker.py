@@ -546,7 +546,7 @@ class PaperBroker(AbstractBroker):
 
         维护 avail (可卖) + shares (总持仓) 分别记账; 调用此方法 (一般 day_end scheduler 触发) 把当日 buy 的 in-transit shares 转入 avail.
         """
-        for asset, pos in self._positions.items():
+        for _asset, pos in self._positions.items():
             if pos.shares > pos.avail:
                 pos.avail = pos.shares
 
@@ -745,11 +745,12 @@ class PaperBroker(AbstractBroker):
         try:
             today = self._get_today()
 
-            # 1. 持久化 Positions
-            to_upsert = [self._positions[a] for a in traded_assets]
-            for p in to_upsert:
+            # 1. 持久化 Positions。按完整快照写入，避免已清仓标的残留在当天记录中。
+            for p in self._positions.values():
                 p.dt = today
-            db.upsert_positions(to_upsert)
+            db.replace_positions(
+                self.portfolio_id, today, list(self._positions.values())
+            )
 
             # 2. 持久化 Asset (Cash)
             # 计算当前总市值
@@ -1398,8 +1399,7 @@ class PaperBroker(AbstractBroker):
                 snapshot_positions.append(pos)
                 market_value += pos.mv
 
-            if snapshot_positions:
-                db.upsert_positions(snapshot_positions)
+            db.replace_positions(self.portfolio_id, today, snapshot_positions)
 
             # Update Asset
             total_asset = self._cash + market_value

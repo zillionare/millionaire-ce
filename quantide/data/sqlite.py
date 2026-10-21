@@ -689,7 +689,7 @@ class SQLiteDB:
         where = " AND ".join(where_clauses) if where_clauses else None
 
         rows = self["assets"].rows_where(where, params)
-        df = pl.DataFrame(rows)
+        df = pl.DataFrame(rows, infer_schema_length=None)
         if len(df) == 0:
             return pl.DataFrame()
 
