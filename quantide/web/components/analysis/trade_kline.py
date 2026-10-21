@@ -747,6 +747,10 @@ def _render_attribution_panel(
         Div(
             Span(item["name"], cls="text-xs text-gray-600 truncate"),
             Span(
+                f"z {float(item.get('z') or 0):+.2f}",
+                cls="text-xs text-gray-400 text-right tabular-nums w-16",
+            ),
+            Span(
                 f"{float(item.get('total') or 0):+.4f}",
                 cls="text-xs text-gray-900 font-medium text-right tabular-nums",
             ),
@@ -784,6 +788,10 @@ def _render_attribution_block(
     feature_rows = [
         Div(
             Span(item["name"], cls="text-xs text-gray-600 truncate"),
+            Span(
+                f"z {float(item.get('z') or 0):+.2f}",
+                cls="text-xs text-gray-400 text-right tabular-nums w-16",
+            ),
             Span(
                 f"{float(item.get('total') or 0):+.4f}",
                 cls="text-xs text-gray-900 font-medium text-right tabular-nums",
