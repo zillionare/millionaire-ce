@@ -503,8 +503,9 @@ def _filter_universe(
 
     ``market_cap_trim`` first removes the largest and smallest ``trim_pct`` of
     the cross-section by ``total_mv``, then removes suspended and ST stocks
-    from the remaining set.  ``liquidity`` keeps the legacy top-N by 20-day
-    mean amount.
+    from the remaining set, and finally keeps the largest ``universe_size``
+    stocks by market cap (``universe_size <= 0`` means no cap).  ``liquidity``
+    keeps the legacy top-N by 20-day mean amount.
     """
     on_date = bars_df.filter(pl.col("date") == target_date)
     if on_date.is_empty():
@@ -547,6 +548,9 @@ def _filter_universe(
             if "is_st" in cols:
                 cap = cap.filter(~pl.col("is_st").fill_null(False))
             cap = _drop_st_names(cap)
+            # 裁剪后按市值取前 universe_size 只（universe_size<=0 表示不限制）。
+            if universe_size > 0 and cap.height > universe_size:
+                cap = cap.tail(universe_size)
             return sorted(cap["asset"].unique().to_list())
 
     cond = (pl.col("close") > 0) & (pl.col("volume") > 0)

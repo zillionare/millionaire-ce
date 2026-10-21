@@ -717,3 +717,44 @@ def test_build_strategy_rows_marks_global_loading_indicator(monkeypatch) -> None
     html = to_xml(rows[0])
 
     assert 'hx-indicator="#global-loading"' in html
+
+
+def test_filter_universe_respects_universe_size_in_market_cap_trim_mode(monkeypatch):
+    """market_cap_trim 模式必须遵守 universe_size（之前被忽略，导致截面是全市场）。"""
+    monkeypatch.setattr(
+        ml_momentum_reversal.stock_list, "_data", pl.DataFrame()
+    )
+    panel = _make_synthetic_panel(n_assets=20, n_days=3)
+    total_date = panel["date"].max()
+    panel = panel.with_columns(
+        (pl.col("close") * (pl.arange(pl.len()).cast(pl.Float64) + 1.0)).alias("total_mv")
+    )
+
+    assets = ml_momentum_reversal._filter_universe(
+        panel, total_date, 5, mode="market_cap_trim", trim_pct=0.0
+    )
+
+    assert len(assets) == 5
+
+
+def test_filter_universe_market_cap_trim_keeps_largest_by_market_cap(monkeypatch):
+    """裁剪后按市值取最大的 N 只。"""
+    monkeypatch.setattr(
+        ml_momentum_reversal.stock_list, "_data", pl.DataFrame()
+    )
+    panel = _make_synthetic_panel(n_assets=20, n_days=3)
+    total_date = panel["date"].max()
+    market_caps = {
+        asset: float(index + 1) * 1e8
+        for index, asset in enumerate(sorted(panel["asset"].unique().to_list()))
+    }
+    panel = panel.with_columns(
+        pl.col("asset").replace_strict(market_caps, default=0.0).alias("total_mv")
+    )
+
+    assets = ml_momentum_reversal._filter_universe(
+        panel, total_date, 3, mode="market_cap_trim", trim_pct=0.0
+    )
+
+    assert len(assets) == 3
+    assert set(assets) == set(sorted(market_caps, key=lambda a: market_caps[a])[-3:])
