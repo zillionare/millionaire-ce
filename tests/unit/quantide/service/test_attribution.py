@@ -11,10 +11,8 @@ from quantide.core.enums import BrokerKind
 from quantide.data.models.entities import Portfolio
 from quantide.service import attribution as attribution_service
 from quantide.strategies.example import ml_momentum_reversal
-from quantide.strategies.example.ml_momentum_reversal import (
-    FEATURE_COLS,
-    MLMomentumReversalStrategy,
-)
+from quantide.factors import FEATURE_COLS
+from quantide.strategies.example.ml_momentum_reversal import MLMomentumReversalStrategy
 
 
 class _AttributionStrategy:

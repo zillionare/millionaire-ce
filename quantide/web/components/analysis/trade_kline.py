@@ -185,10 +185,7 @@ def _decision_features(
         list | None: (特征名, 取值) 列表；策略不支持特征时返回 ``None``。
     """
     try:
-        from quantide.strategies.example.ml_momentum_reversal import (
-            FEATURE_COLS,
-            compute_alpha_features,
-        )
+        from quantide.factors import FEATURE_COLS, compute_alpha_features
     except Exception:
         return None
 
