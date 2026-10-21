@@ -6,6 +6,7 @@ import pytest
 from fasthtml.common import to_xml
 
 from quantide.data.models import Portfolio
+from quantide.factors import FEATURE_COLS
 from quantide.web.pages import strategy as strategy_page
 from tests.e2e.support.system_settings_session import system_settings_e2e_session
 
@@ -1093,3 +1094,70 @@ def test_trade_kline_modal_title_exposes_prev_next_arrows(monkeypatch):
     assert "下一笔成交对" in html
     assert "buy_tid=buy-1" in html
     assert "buy_tid=buy-3" in html
+
+
+class _ModalDemoStrategy:
+    """演示用策略：同时包含策略参数与交易参数。"""
+
+    @staticmethod
+    def default_config():
+        return {
+            "top_k": 5,
+            "universe_size": 300,
+            "take_profit_pct": 0.15,
+            "stop_loss_pct": 0.06,
+            "horizon": 3,
+            "slippage_pct": 0.001,
+            "use_broker_barriers": True,
+        }
+
+
+def test_backtest_modal_is_two_step_wizard_with_factor_selection(monkeypatch):
+    """回测弹窗为两步向导：参数 + 因子勾选。"""
+    monkeypatch.setattr(
+        strategy_page.strategy_loader,
+        "load_from_cache",
+        lambda: {"DemoStrategy": _ModalDemoStrategy},
+    )
+
+    html = to_xml(strategy_page.backtest_modal("DemoStrategy"))
+
+    assert 'data-bt-step="1"' in html
+    assert 'data-bt-step="2"' in html
+    assert "选择因子" in html
+    # 因子勾选项：全部因子默认勾选
+    assert html.count('name="param_features"') == len(FEATURE_COLS)
+    assert 'value="bias_5"' in html
+    # 步骤切换脚本
+    assert "showBacktestStep" in html
+    assert "下一步：选择因子" in html
+    assert "开始运行" in html
+
+
+def test_parse_params_collects_repeated_feature_values():
+    """同名多值字段（因子勾选）解析成列表。"""
+    form = {
+        "param_features": ["bias_5", "ma20_slope"],
+        "param_top_k": "3",
+    }
+
+    class _Form(dict):
+        def getlist(self, key):
+            value = self[key]
+            return value if isinstance(value, list) else [value]
+
+    config = strategy_page._parse_params(_Form(form))
+
+    assert config["features"] == ["bias_5", "ma20_slope"]
+    assert config["top_k"] == 3
+
+
+def test_parse_params_keeps_single_value_as_scalar():
+    """单值字段仍然是标量。"""
+    class _Form(dict):
+        def getlist(self, key):
+            return [self[key]]
+
+    config = strategy_page._parse_params(_Form({"param_top_k": "5"}))
+
+    assert config == {"top_k": 5}

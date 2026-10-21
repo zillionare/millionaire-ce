@@ -19,6 +19,7 @@ from quantide.core.enums import BrokerKind, FrameType, OrderSide
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.sqlite import db
+from quantide.factors import FEATURE_DOCS, FEATURE_GROUPS
 from quantide.service.backtest_logs import (
     delete_saved_backtest_log,
     list_backtest_logs,
@@ -1674,26 +1675,38 @@ def strategy_detail(req, session, name: str):
 
 
 def _parse_params(form, prefix="param_"):
+    """解析回测表单参数。
+
+    同名多值字段（例如因子勾选）会解析成列表。
+    """
     config = {}
-    for k, v in form.items():
-        if k.startswith(prefix):
-            param_name = k[len(prefix) :]
-            if isinstance(v, str) and not v.strip():
-                continue
-            # Try to infer type
-            if v.lower() == "true":
-                v = True
-            elif v.lower() == "false":
-                v = False
-            else:
-                try:
-                    if "." in v:
-                        v = float(v)
-                    else:
-                        v = int(v)
-                except (TypeError, ValueError):
-                    pass
-            config[param_name] = v
+    getlist = getattr(form, "getlist", None)
+    for k in form.keys():
+        if not k.startswith(prefix):
+            continue
+        param_name = k[len(prefix) :]
+        values = list(getlist(k)) if callable(getlist) else [form[k]]
+        values = [v for v in values if not (isinstance(v, str) and not v.strip())]
+        if not values:
+            continue
+        if len(values) > 1:
+            config[param_name] = values
+            continue
+        v = values[0]
+        # Try to infer type
+        if v.lower() == "true":
+            v = True
+        elif v.lower() == "false":
+            v = False
+        else:
+            try:
+                if "." in v:
+                    v = float(v)
+                else:
+                    v = int(v)
+            except (TypeError, ValueError):
+                pass
+        config[param_name] = v
     return config
 
 
@@ -1766,8 +1779,72 @@ def _build_param_inputs(params: dict[str, Any], *, labeled: bool) -> list[Any]:
     return inputs
 
 
+
+def _build_feature_selection_panel() -> Any:
+    """构建因子勾选面板（向导第二步）。"""
+    groups: list[Any] = []
+    for group, names in FEATURE_GROUPS.items():
+        items: list[Any] = []
+        for name in names:
+            doc = FEATURE_DOCS.get(name, "")
+            items.append(
+                Div(
+                    fh.Label(
+                        fh.Input(
+                            type="checkbox",
+                            name="param_features",
+                            value=name,
+                            checked=True,
+                            cls="checkbox checkbox-sm",
+                        ),
+                        Span(name, cls="text-xs font-medium text-gray-700"),
+                        title=doc,
+                        cls="flex items-center gap-2 cursor-pointer",
+                    ),
+                    cls="py-0.5",
+                )
+            )
+        groups.append(
+            Div(
+                Div(group, cls="text-xs font-semibold text-gray-600 mb-1"),
+                Div(*items, cls="grid grid-cols-2 gap-x-3"),
+                cls="mb-3",
+            )
+        )
+    return Div(
+        Div(
+            H4("选择因子", cls="text-sm font-semibold text-gray-600 mb-1"),
+            P(
+                "取消勾选即不参与训练与打分（全部取消表示使用全部因子）。鼠标悬停因子名可查看计算方法、含义与示例。",
+                cls="text-xs text-gray-500 mb-3",
+            ),
+            *groups,
+        )
+    )
+
+
+BACKTEST_WIZARD_SCRIPT = """
+(function () {
+    function showStep(step) {
+        var steps = document.querySelectorAll('[data-bt-step]');
+        for (var i = 0; i < steps.length; i++) {
+            steps[i].classList.toggle('hidden', steps[i].getAttribute('data-bt-step') !== String(step));
+        }
+        var buttons = document.querySelectorAll('[data-bt-show]');
+        for (var j = 0; j < buttons.length; j++) {
+            buttons[j].classList.toggle('hidden', buttons[j].getAttribute('data-bt-show') !== String(step));
+        }
+        var indicator = document.getElementById('backtest-step-indicator');
+        if (indicator) { indicator.textContent = '第 ' + step + ' / 2 步'; }
+    }
+    window.showBacktestStep = showStep;
+    showStep(1);
+})();
+"""
+
 @rt("/{name}/backtest/modal")
 def backtest_modal(name: str):
+    """运行回测向导：第一步参数，第二步因子选择。"""
     strategies = strategy_loader.load_from_cache()
     cls = strategies.get(name)
     if not cls:
@@ -1779,80 +1856,120 @@ def backtest_modal(name: str):
     param_inputs = _build_param_inputs(strategy_params, labeled=False)
     trade_param_inputs = _build_param_inputs(trade_params, labeled=True)
 
+    step1 = Div(
+        Div(
+            Span("开始日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            Input(
+                name="start_date",
+                type="date",
+                value="2024-01-01",
+                required=True,
+                cls="input input-sm w-full",
+            ),
+            cls="flex items-center gap-3 mb-3",
+        ),
+        Div(
+            Span("结束日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            Input(
+                name="end_date",
+                type="date",
+                value=arrow.now().format("YYYY-MM-DD"),
+                required=True,
+                cls="input input-sm w-full",
+            ),
+            cls="flex items-center gap-3 mb-3",
+        ),
+        Div(
+            Span("初始资金", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            Input(
+                name="initial_cash",
+                type="number",
+                value="1000000",
+                cls="input input-sm w-full",
+            ),
+            cls="flex items-center gap-3 mb-3",
+        ),
+        Div(
+            Span("周期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            fh.Select(
+                fh.Option("日线", value="1d", selected="selected"),
+                fh.Option("1分钟", value="1m"),
+                name="interval",
+                cls="uk-select uk-form-small flex-1 text-gray-700",
+            ),
+            cls="flex items-center gap-3 mb-3",
+        ),
+        Div(
+            Span("日志保存", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            fh.Label(
+                fh.Input(name="save_logs", type="checkbox", cls="checkbox checkbox-sm"),
+                Span("保存回测日志到本地文件", cls="text-sm text-gray-700"),
+                cls="flex items-center gap-2",
+            ),
+            cls="flex items-center gap-3 mb-1",
+        ),
+        P(
+            "开启后会在回测运行时同步写入本地 backtest_logs 目录，报告页可反复加载。",
+            cls="ml-[6.75rem] mb-3 text-xs text-gray-500",
+        ),
+        Div(H4("策略参数", cls="text-sm font-semibold text-gray-600 mt-4 mb-2"), *param_inputs),
+        Details(
+            Summary(
+                "交易参数（三重障碍 / 滑点 / 手续费，一般无需修改）",
+                cls="cursor-pointer text-sm font-semibold text-gray-600",
+            ),
+            P(
+                "这些参数决定成交与费用口径，默认按上次使用的值。修改三重障碍会影响训练标签，需要重新训练模型。",
+                cls="text-xs text-gray-500 mt-2 mb-3",
+            ),
+            *trade_param_inputs,
+            cls="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2",
+        ),
+        data_bt_step="1",
+    )
+
+    step2 = Div(
+        _build_feature_selection_panel(),
+        data_bt_step="2",
+        cls="hidden",
+    )
+
     return Div(
         Div(
-            H3(f"运行回测 - {name}", cls="text-lg font-bold mb-4"),
+            Div(
+                H3(f"运行回测 - {name}", cls="text-lg font-bold"),
+                Span(
+                    "第 1 / 2 步",
+                    id="backtest-step-indicator",
+                    cls="text-xs text-gray-500 ml-2",
+                ),
+                cls="flex items-center mb-4",
+            ),
             Form(
+                step1,
+                step2,
                 Div(
-                    Span("开始日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                    Input(
-                        name="start_date",
-                        type="date",
-                        value="2024-01-01",
-                        required=True,
-                        cls="input input-sm w-full"
+                    Button(
+                        "取消",
+                        type="button",
+                        cls="btn btn-ghost",
+                        onclick=STRATEGY_MODAL_CLOSE_JS,
+                        data_bt_show="1",
                     ),
-                    cls="flex items-center gap-3 mb-3"
-                ),
-                Div(
-                    Span("结束日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                    Input(
-                        name="end_date",
-                        type="date",
-                        value=arrow.now().format("YYYY-MM-DD"),
-                        required=True,
-                        cls="input input-sm w-full"
+                    Button(
+                        "上一步",
+                        type="button",
+                        cls="btn btn-ghost",
+                        onclick="showBacktestStep(1)",
+                        data_bt_show="2",
                     ),
-                    cls="flex items-center gap-3 mb-3"
-                ),
-                Div(
-                    Span("初始资金", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                    Input(
-                        name="initial_cash",
-                        type="number",
-                        value="1000000",
-                        cls="input input-sm w-full"
+                    Button(
+                        "下一步：选择因子",
+                        type="button",
+                        cls="btn btn-primary",
+                        onclick="showBacktestStep(2)",
+                        data_bt_show="1",
                     ),
-                    cls="flex items-center gap-3 mb-3"
-                ),
-                Div(
-                    Span("周期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                    fh.Select(
-                        fh.Option("日线", value="1d", selected="selected"),
-                        fh.Option("1分钟", value="1m"),
-                        name="interval",
-                        cls="uk-select uk-form-small flex-1 text-gray-700",
-                    ),
-                    cls="flex items-center gap-3 mb-3"
-                ),
-                Div(
-                    Span("日志保存", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                    fh.Label(
-                        fh.Input(name="save_logs", type="checkbox", cls="checkbox checkbox-sm"),
-                        Span("保存回测日志到本地文件", cls="text-sm text-gray-700"),
-                        cls="flex items-center gap-2",
-                    ),
-                    cls="flex items-center gap-3 mb-1"
-                ),
-                P(
-                    "开启后会在回测运行时同步写入本地 backtest_logs 目录，报告页可反复加载。",
-                    cls="ml-[6.75rem] mb-3 text-xs text-gray-500",
-                ),
-                Div(H4("策略参数", cls="text-sm font-semibold text-gray-600 mt-4 mb-2"), *param_inputs),
-                Details(
-                    Summary(
-                        "交易参数（三重障碍 / 滑点 / 手续费，一般无需修改）",
-                        cls="cursor-pointer text-sm font-semibold text-gray-600",
-                    ),
-                    P(
-                        "这些参数决定成交与费用口径，默认按上次使用的值。修改三重障碍会影响训练标签，需要重新训练模型。",
-                        cls="text-xs text-gray-500 mt-2 mb-3",
-                    ),
-                    *trade_param_inputs,
-                    cls="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2",
-                ),
-                Div(
-                    Button("取消", type="button", cls="btn btn-ghost", onclick=STRATEGY_MODAL_CLOSE_JS),
                     Button(
                         "开始运行",
                         type="button",
@@ -1860,16 +1977,19 @@ def backtest_modal(name: str):
                         onclick="this.disabled=true;this.setAttribute('aria-busy','true');this.textContent='启动中...';",
                         hx_post=f"/strategy/{name}/backtest/run",
                         hx_target="#modal-container",
-                        hx_include="closest form"
+                        hx_include="closest form",
+                        data_bt_show="2",
                     ),
-                    cls="flex justify-end gap-2 mt-6"
+                    cls="flex justify-end gap-2 mt-6",
                 ),
             ),
-            cls="bg-white p-6 rounded-xl shadow-xl max-w-lg w-full"
+            cls="bg-white p-6 rounded-xl shadow-xl max-w-2xl w-full",
         ),
+        Script(BACKTEST_WIZARD_SCRIPT),
         cls="fixed inset-0 bg-black/50 flex items-center justify-center z-50",
-        id="strategy-modal"
+        id="strategy-modal",
     )
+
 
 @rt("/{name}/backtest/run", methods=["POST"])
 async def run_backtest(req, name: str):
