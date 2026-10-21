@@ -713,7 +713,6 @@ def test_build_backtest_sidebar_menu_has_all_tabs():
 
 from quantide.web.pages.strategy import (
     backtest_modal,
-    grid_search_modal,
     run_backtest,
 )
 
@@ -745,18 +744,6 @@ def test_backtest_modal_no_params():
     assert out is not None
 
 
-def test_grid_search_modal():
-    """[AC-NFR1101-01] test_grid_search_modal."""
-    out = grid_search_modal("TestStrat")
-    assert out is not None
-
-
-def test_grid_search_modal_unknown():
-    """[AC-NFR1101-01] test_grid_search_modal_unknown."""
-    with patch.object(strategy_mod_alias, "strategy_loader") as mock_loader:
-        mock_loader.load_from_cache = MagicMock(return_value={})
-        out = grid_search_modal("missing")
-    assert out is not None
 
 
 @pytest.mark.asyncio
@@ -1212,18 +1199,6 @@ def test_backtest_modal_no_params():
     assert out is not None
 
 
-def test_grid_search_modal():
-    """[AC-NFR1101-01] test_grid_search_modal."""
-    out = grid_search_modal("TestStrat")
-    assert out is not None
-
-
-def test_grid_search_modal_unknown():
-    """[AC-NFR1101-01] test_grid_search_modal_unknown."""
-    with patch.object(strategy_mod_alias, "strategy_loader") as mock_loader:
-        mock_loader.load_from_cache = MagicMock(return_value={})
-        out = grid_search_modal("missing")
-    assert out is not None
 
 
 # ---------------------------------------------------------------------------
@@ -1373,61 +1348,3 @@ def test_load_backtest_run_config_no_default_config():
 
 
 # ---------------------------------------------------------------------------
-# run_grid_search async route
-# ---------------------------------------------------------------------------
-
-
-from quantide.web.pages.strategy import run_grid_search
-
-
-@pytest.mark.asyncio
-async def test_run_grid_search_unknown_strategy():
-    with patch.object(strategy_mod_alias, "strategy_loader") as mock_loader:
-        mock_loader.load_from_cache = MagicMock(return_value={})
-        req = MagicMock()
-        req.form = AsyncMock(return_value={})
-        resp = await run_grid_search(req, name="missing")
-    assert resp is not None
-
-
-@pytest.mark.asyncio
-async def test_run_grid_search_no_dates_returns_400():
-    with patch.object(strategy_mod_alias, "strategy_loader") as mock_loader:
-        mock_loader.load_from_cache = MagicMock(return_value={"x": MagicMock()})
-        req = MagicMock()
-        req.form = AsyncMock(return_value={"start_date": "", "end_date": ""})
-        resp = await run_grid_search(req, name="x")
-    assert resp is not None
-
-
-@pytest.mark.asyncio
-async def test_run_grid_search_bad_dates_returns_400():
-    with patch.object(strategy_mod_alias, "strategy_loader") as mock_loader:
-        mock_loader.load_from_cache = MagicMock(return_value={"x": MagicMock()})
-        req = MagicMock()
-        req.form = AsyncMock(return_value={"start_date": "garbage", "end_date": "ok"})
-        resp = await run_grid_search(req, name="x")
-    assert resp is not None
-
-
-@pytest.mark.asyncio
-async def test_run_grid_search_with_params():
-    """When strategy found and dates valid, calls GridSearch.run."""
-    import asyncio as _asyncio
-
-    fake_gs = MagicMock()
-    fake_gs.run = MagicMock(return_value=MagicMock(to_json=lambda **k: "[]"))
-    with patch.object(strategy_mod_alias, "strategy_loader") as mock_loader, \
-         patch.object(strategy_mod_alias, "GridSearch", return_value=fake_gs):
-        mock_loader.load_from_cache = MagicMock(return_value={"x": MagicMock()})
-        req = MagicMock()
-        req.form = AsyncMock(return_value={
-            "start_date": "2024-01-01",
-            "end_date": "2024-06-30",
-            "param_a": "1,2,3",  # grid param
-            "param_b": "5",  # base config
-            "max_workers": "2",
-        })
-        resp = await run_grid_search(req, name="x")
-    assert resp is not None
-

@@ -1,0 +1,658 @@
+"""参数优化页面：配置、后台任务进度、结果对比与样本外告警。"""
+
+from __future__ import annotations
+
+import base64
+import json
+from typing import Any
+
+import arrow
+import fasthtml.common as fh
+from fasthtml.common import *
+from loguru import logger
+
+from quantide.service.optimization_tasks import (
+    STATUS_CANCELLED,
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_PENDING,
+    STATUS_RUNNING,
+    cancel_optimization,
+    get_task,
+    list_tasks,
+    objective_label,
+    start_optimization,
+)
+from quantide.service.param_optimizer import (
+    MODES,
+    OBJECTIVES,
+    OptimizationSpec,
+)
+from quantide.web.layouts.main import MainLayout
+
+from .strategy import rt
+
+OPTIMIZE_POLL_SECONDS = 2
+
+
+def _encode_prefill(payload: dict[str, Any]) -> str:
+    """把回测预填参数编码为 URL 安全字符串。"""
+    raw = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _parse_param_values(text: str) -> list[Any]:
+    """解析逗号分隔的参数取值。"""
+    values: list[Any] = []
+    for item in str(text or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            if "." in item or "e" in item.lower():
+                values.append(float(item))
+            else:
+                values.append(int(item))
+        except (TypeError, ValueError):
+            values.append(item)
+    return values
+
+
+def _build_spec(
+    name: str,
+    form: Any,
+) -> OptimizationSpec:
+    """由表单构造优化配置。"""
+    from quantide.service.discovery import strategy_loader
+
+    from .strategy import _get_strategy_default_params, _split_backtest_params
+
+    strategies = strategy_loader.load_from_cache()
+    cls = strategies.get(name)
+    default_params = _get_strategy_default_params(cls) if cls else {}
+    strategy_params, _ = _split_backtest_params(default_params)
+
+    param_grid: dict[str, list[Any]] = {}
+    base_config: dict[str, Any] = {}
+    for key in strategy_params:
+        raw = form.get(f"param_{key}")
+        if raw is None:
+            base_config[key] = default_params.get(key)
+            continue
+        values = _parse_param_values(raw)
+        if not values:
+            base_config[key] = default_params.get(key)
+        elif len(values) == 1:
+            base_config[key] = values[0]
+        else:
+            param_grid[key] = values
+    for key, value in default_params.items():
+        if key not in strategy_params:
+            base_config[key] = value
+
+    start_date = arrow.get(form.get("start_date")).date()
+    end_date = arrow.get(form.get("end_date")).date()
+    objective = str(form.get("objective") or "sharpe")
+    if objective not in OBJECTIVES:
+        objective = "sharpe"
+    mode = str(form.get("mode") or "grid")
+    if mode not in MODES:
+        mode = "grid"
+    try:
+        in_sample_ratio = float(form.get("in_sample_ratio") or 0.7)
+    except (TypeError, ValueError):
+        in_sample_ratio = 0.7
+    try:
+        max_workers = int(form.get("max_workers") or 4)
+    except (TypeError, ValueError):
+        max_workers = 4
+    try:
+        n_random = int(form.get("n_random") or 20)
+    except (TypeError, ValueError):
+        n_random = 20
+    try:
+        time_budget = float(form.get("time_budget_minutes") or 0)
+    except (TypeError, ValueError):
+        time_budget = 0.0
+    try:
+        initial_cash = float(form.get("initial_cash") or 1_000_000)
+    except (TypeError, ValueError):
+        initial_cash = 1_000_000
+
+    return OptimizationSpec(
+        strategy_name=name,
+        base_config=base_config,
+        param_grid=param_grid,
+        start_date=start_date,
+        end_date=end_date,
+        objective=objective,
+        in_sample_ratio=in_sample_ratio,
+        mode=mode,
+        n_random=n_random,
+        max_workers=max(1, max_workers),
+        initial_cash=initial_cash,
+        time_budget_minutes=time_budget,
+    )
+
+
+def _format_pct(value: Any) -> str:
+    """格式化百分比。"""
+    try:
+        return f"{float(value):.2%}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _format_num(value: Any) -> str:
+    """格式化数值。"""
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _metric(metrics: dict[str, Any], key: str) -> str:
+    """读取指标文本。"""
+    return str(metrics.get(key, "-"))
+
+
+def _render_results(name: str, task: dict[str, Any]) -> Any:
+    """渲染结果对比表。"""
+    results = task.get("results") or []
+    objective = task.get("objective", "sharpe")
+    param_keys = sorted(
+        {
+            key
+            for row in results
+            for key in (row.get("params") or {}).keys()
+        }
+    )
+    header_cells = [Th("#", cls="text-xs"), Th("参数", cls="text-xs")]
+    header_cells.append(
+        Th(f"样本内{objective_label(objective)}", cls="text-xs")
+    )
+    header_cells.append(Th("样本外", cls="text-xs"))
+    header_cells.append(Th("样本内年化", cls="text-xs"))
+    header_cells.append(Th("样本外年化", cls="text-xs"))
+    header_cells.append(Th("样本内回撤", cls="text-xs"))
+    header_cells.append(Th("告警", cls="text-xs"))
+    header_cells.append(Th("操作", cls="text-xs"))
+
+    rows: list[Any] = []
+    for index, row in enumerate(results, start=1):
+        params = row.get("params") or {}
+        in_sample = row.get("in_sample") or {}
+        out_sample = row.get("out_sample") or {}
+        overfit = bool(row.get("overfit"))
+        param_text = ", ".join(
+            f"{key}={params.get(key)}" for key in param_keys
+        ) or "-"
+        prefill = _encode_prefill(
+            {
+                "params": params,
+                "start_date": task.get("spec", {}).get("start_date"),
+                "end_date": task.get("spec", {}).get("end_date"),
+            }
+        )
+        rows.append(
+            Tr(
+                Td(str(index), cls="text-xs"),
+                Td(param_text, cls="text-xs font-mono"),
+                Td(_format_num(row.get("objective")), cls="text-xs"),
+                Td(_format_num(row.get("out_objective")), cls="text-xs"),
+                Td(_metric(in_sample, "CAGR"), cls="text-xs"),
+                Td(_metric(out_sample, "CAGR"), cls="text-xs"),
+                Td(_metric(in_sample, "Max Drawdown"), cls="text-xs"),
+                Td(
+                    Span("疑似过拟合", cls="text-xs text-amber-700 bg-amber-50 px-1 rounded")
+                    if overfit
+                    else Span("-", cls="text-xs text-gray-400"),
+                ),
+                Td(
+                    A(
+                        "用这组参数回测",
+                        href=(
+                            f"/strategy/{name}/backtest/modal?prefill={prefill}"
+                        ),
+                        cls="text-xs text-blue-600 hover:underline",
+                        hx_get=f"/strategy/{name}/backtest/modal?prefill={prefill}",
+                        hx_target="#modal-container",
+                        hx_indicator="#global-loading",
+                    ),
+                    cls="text-xs",
+                ),
+            )
+        )
+
+    if not rows:
+        return Div(
+            P("暂无结果。", cls="text-sm text-gray-500"),
+            cls="bg-white p-4 rounded-lg border border-gray-100",
+        )
+
+    return Div(
+        Table(
+            Thead(Tr(*header_cells)),
+            Tbody(*rows),
+            cls="table table-zebra text-xs",
+        ),
+        P(
+            "样本内用于挑选参数，样本外仅用于检验；样本外为负或大幅劣于样本内时提示疑似过拟合。",
+            cls="text-xs text-gray-500 mt-2",
+        ),
+        cls="bg-white p-4 rounded-lg border border-gray-100 overflow-x-auto",
+    )
+
+
+def _render_task_panel(name: str, task_id: str) -> Any:
+    """渲染任务进度与结果面板。"""
+    task = get_task(task_id)
+    if task is None:
+        return Div(
+            P("任务不存在。", cls="text-sm text-gray-500"),
+            cls="bg-white p-4 rounded-lg border border-gray-100",
+        )
+
+    status = task.get("status")
+    total = int(task.get("total") or 0)
+    done = int(task.get("done") or 0)
+    running = status in {STATUS_PENDING, STATUS_RUNNING}
+
+    if running:
+        percent = int(done * 100 / total) if total else 0
+        progress = Div(
+            Div(
+                Div(
+                    cls="bg-blue-600 h-2 rounded transition-all",
+                    style=f"width:{percent}%",
+                ),
+                cls="bg-gray-200 h-2 rounded w-full overflow-hidden",
+            ),
+            P(
+                f"进行中 {done}/{total}（{percent}%）",
+                cls="text-xs text-gray-600 mt-2",
+            ),
+            cls="mb-3",
+        )
+    else:
+        progress = P(
+            {
+                STATUS_DONE: f"已完成，共 {len(task.get('results') or [])} 个组合。",
+                STATUS_CANCELLED: "任务已中断。",
+                STATUS_FAILED: f"任务失败：{task.get('error') or '未知错误'}",
+            }.get(status, f"状态：{status}"),
+            cls="text-sm text-gray-600 mb-3",
+        )
+
+    cancel_button = (
+        Button(
+            "中断任务",
+            type="button",
+            cls="btn btn-ghost btn-sm",
+            hx_post=f"/strategy/{name}/optimize/cancel/{task_id}",
+            hx_target="#optimize-task-panel",
+        )
+        if running
+        else Div()
+    )
+
+    panel = Div(
+        Div(
+            H3("任务状态", cls="text-base font-semibold"),
+            cancel_button,
+            cls="flex items-center justify-between mb-2",
+        ),
+        progress,
+        _render_results(name, task),
+        id="optimize-task-panel",
+    )
+    if running:
+        panel = Div(
+            panel,
+            hx_get=f"/strategy/{name}/optimize/status/{task_id}",
+            hx_trigger=f"every {OPTIMIZE_POLL_SECONDS}s",
+            hx_swap="outerHTML",
+            id="optimize-task-wrapper",
+        )
+    else:
+        panel = Div(panel, id="optimize-task-wrapper")
+    return panel
+
+
+def _render_history(name: str) -> Any:
+    """渲染历史任务列表。"""
+    tasks = list_tasks(name, limit=10)
+    if not tasks:
+        return Div(
+            P("暂无历史任务。", cls="text-sm text-gray-500"),
+            cls="bg-white p-4 rounded-lg border border-gray-100",
+        )
+    rows = []
+    for task in tasks:
+        spec = task.get("spec") or {}
+        rows.append(
+            Tr(
+                Td(task.get("started_at", "")[:19], cls="text-xs"),
+                Td(task.get("status", ""), cls="text-xs"),
+                Td(
+                    objective_label(task.get("objective", "")),
+                    cls="text-xs",
+                ),
+                Td(
+                    f"{task.get('done', 0)}/{task.get('total', 0)}",
+                    cls="text-xs",
+                ),
+                Td(
+                    f"{spec.get('start_date', '')} ~ {spec.get('end_date', '')}",
+                    cls="text-xs",
+                ),
+                Td(
+                    A(
+                        "查看",
+                        href=(
+                            f"/strategy/{name}/optimize?task_id={task.get('task_id')}"
+                        ),
+                        cls="text-xs text-blue-600 hover:underline",
+                    ),
+                    cls="text-xs",
+                ),
+            )
+        )
+    return Div(
+        Table(
+            Thead(
+                Tr(
+                    Th("开始时间", cls="text-xs"),
+                    Th("状态", cls="text-xs"),
+                    Th("目标", cls="text-xs"),
+                    Th("进度", cls="text-xs"),
+                    Th("区间", cls="text-xs"),
+                    Th("", cls="text-xs"),
+                )
+            ),
+            Tbody(*rows),
+            cls="table table-zebra text-xs",
+        ),
+        cls="bg-white p-4 rounded-lg border border-gray-100 overflow-x-auto",
+    )
+
+
+@rt("/{name}/optimize")
+def optimize_page(req, session, name: str):
+    """参数优化页面。"""
+    from quantide.service.discovery import strategy_loader
+
+    from .strategy import _get_strategy_default_params, _split_backtest_params
+
+    layout = MainLayout(title=f"参数优化 - {name}", user=session.get("auth"))
+    layout.header_active = "策略"
+
+    strategies = strategy_loader.load_from_cache()
+    cls = strategies.get(name)
+    if cls is None:
+        return RedirectResponse("/strategy")
+
+    default_params = _get_strategy_default_params(cls)
+    strategy_params, _ = _split_backtest_params(default_params)
+
+    param_inputs = []
+    for key, value in strategy_params.items():
+        param_inputs.append(
+            Div(
+                Span(key, cls="text-sm font-medium text-gray-500 w-48 shrink-0"),
+                Input(
+                    name=f"param_{key}",
+                    value=str(value),
+                    placeholder="多个取值用逗号分隔，如 45, 90, 120",
+                    cls="input input-sm w-full",
+                ),
+                cls="flex items-center gap-3 mb-2",
+            )
+        )
+
+    query_params = getattr(req, "query_params", {}) or {}
+    task_id = str(query_params.get("task_id") or "")
+
+    today = arrow.now().format("YYYY-MM-DD")
+    form = Form(
+        Div(
+            Div(
+                Div(
+                    Span("优化目标", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    fh.Select(
+                        *[
+                            fh.Option(
+                                objective_label(obj),
+                                value=obj,
+                                selected="selected" if obj == "sharpe" else None,
+                            )
+                            for obj in OBJECTIVES
+                        ],
+                        name="objective",
+                        cls="uk-select uk-form-small flex-1 text-gray-700",
+                    ),
+                    cls="flex items-center gap-3 mb-2",
+                ),
+                Div(
+                    Span("搜索方式", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    fh.Select(
+                        fh.Option("网格枚举", value="grid", selected="selected"),
+                        fh.Option("随机采样", value="random"),
+                        name="mode",
+                        cls="uk-select uk-form-small flex-1 text-gray-700",
+                    ),
+                    cls="flex items-center gap-3 mb-2",
+                ),
+                Div(
+                    Span("随机样本数", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    Input(
+                        name="n_random",
+                        type="number",
+                        value="20",
+                        cls="input input-sm w-full",
+                    ),
+                    cls="flex items-center gap-3 mb-2",
+                ),
+                Div(
+                    Span("开始日期", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    Input(
+                        name="start_date",
+                        type="date",
+                        value="2024-01-01",
+                        required=True,
+                        cls="input input-sm w-full",
+                    ),
+                    cls="flex items-center gap-3 mb-2",
+                ),
+                Div(
+                    Span("结束日期", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    Input(
+                        name="end_date",
+                        type="date",
+                        value=today,
+                        required=True,
+                        cls="input input-sm w-full",
+                    ),
+                    cls="flex items-center gap-3 mb-2",
+                ),
+                Div(
+                    Span("区间长度(年)", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    Input(
+                        name="years",
+                        type="number",
+                        value="2",
+                        step="0.5",
+                        cls="input input-sm w-full",
+                    ),
+                    cls="flex items-center gap-3 mb-1",
+                ),
+                Div(
+                    Span("样本内占比", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    Input(
+                        name="in_sample_ratio",
+                        type="number",
+                        value="0.7",
+                        step="0.05",
+                        min="0.1",
+                        max="0.9",
+                        cls="input input-sm w-full",
+                    ),
+                    cls="flex items-center gap-3 mb-1",
+                ),
+                Div(
+                    Span("并发进程数", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    Input(
+                        name="max_workers",
+                        type="number",
+                        value="4",
+                        min="1",
+                        max="16",
+                        cls="input input-sm w-full",
+                    ),
+                    cls="flex items-center gap-3 mb-2",
+                ),
+                Div(
+                    Span("时间预算(分钟)", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    Input(
+                        name="time_budget_minutes",
+                        type="number",
+                        value="0",
+                        min="0",
+                        cls="input input-sm w-full",
+                    ),
+                    cls="flex items-center gap-3 mb-1",
+                ),
+                P(
+                    "时间预算为 0 表示不限；超出预算会自动停止并保留已完成结果。",
+                    cls="ml-[7.75rem] text-xs text-gray-500 mb-3",
+                ),
+                Div(
+                    Span("初始资金", cls="text-sm font-medium text-gray-500 w-28 shrink-0"),
+                    Input(
+                        name="initial_cash",
+                        type="number",
+                        value="1000000",
+                        cls="input input-sm w-full",
+                    ),
+                    cls="flex items-center gap-3 mb-4",
+                ),
+                Div(
+                    H4(
+                        "参数取值（仅策略参数）",
+                        cls="text-sm font-semibold text-gray-600 mb-1",
+                    ),
+                    P(
+                        "只填一个值表示固定该参数；填多个值表示参与搜索。",
+                        cls="text-xs text-gray-500 mb-2",
+                    ),
+                    *param_inputs,
+                ),
+                Div(
+                    Button(
+                        "开始优化",
+                        type="button",
+                        cls="btn btn-primary",
+                        hx_post=f"/strategy/{name}/optimize/run",
+                        hx_target="#optimize-task-wrapper",
+                        hx_include="closest form",
+                    ),
+                    cls="flex justify-end mt-4",
+                ),
+            ),
+            cls="bg-white p-6 rounded-lg shadow-sm border border-gray-100",
+        )
+    )
+
+    task_panel = (
+        _render_task_panel(name, task_id) if task_id else Div()
+    )
+
+    layout.main_block = lambda: Div(
+        Div(
+            Div(
+                A(
+                    "← 返回策略",
+                    href=f"/strategy/{name}",
+                    cls="text-gray-500 hover:text-gray-800 mb-4 inline-block",
+                ),
+                H1(f"参数优化 · {name}", cls="text-2xl font-bold mb-1"),
+                P(
+                    "搜索策略参数，按样本内指标挑选，并用样本外区间检验是否过拟合。",
+                    cls="text-sm text-gray-600 mb-5",
+                ),
+            ),
+            form,
+            Div(
+                H3("本次任务", cls="text-base font-semibold mb-2"),
+                task_panel,
+                cls="mt-6",
+            ),
+            Div(
+                H3("历史任务", cls="text-base font-semibold mb-2"),
+                _render_history(name),
+                cls="mt-6",
+            ),
+            Script(
+                """
+                (function(){
+                    const form = document.querySelector('form');
+                    if (!form) return;
+                    const years = form.querySelector('[name=years]');
+                    const start = form.querySelector('[name=start_date]');
+                    const end = form.querySelector('[name=end_date]');
+                    if (!years || !start || !end) return;
+                    const apply = () => {
+                        const n = parseFloat(years.value);
+                        if (!n || n <= 0 || !end.value) return;
+                        const endDate = new Date(end.value);
+                        if (isNaN(endDate)) return;
+                        const startDate = new Date(endDate.getTime());
+                        startDate.setFullYear(startDate.getFullYear() - n);
+                        start.value = startDate.toISOString().slice(0, 10);
+                    };
+                    years.addEventListener('change', apply);
+                    end.addEventListener('change', apply);
+                })();
+                """
+            ),
+            cls="max-w-5xl mx-auto py-8",
+        )
+    )
+    return layout.render()
+
+
+@rt("/{name}/optimize/run", methods=["POST"])
+async def run_optimize(req, name: str):
+    """启动参数优化任务。"""
+    form = await req.form()
+    try:
+        spec = _build_spec(name, form)
+    except Exception as exc:
+        logger.warning(f"参数优化配置解析失败: {exc}")
+        return Div(
+            P(f"配置无效：{exc}", cls="text-sm text-red-600"),
+            cls="bg-white p-4 rounded-lg border border-red-200",
+        )
+    if not spec.param_grid and spec.mode == "grid":
+        return Div(
+            P(
+                "请至少为一个策略参数填写多个取值（用逗号分隔）。",
+                cls="text-sm text-red-600",
+            ),
+            cls="bg-white p-4 rounded-lg border border-red-200",
+        )
+    task_id = start_optimization(spec)
+    return _render_task_panel(name, task_id)
+
+
+@rt("/{name}/optimize/status/{task_id}")
+def optimize_status(name: str, task_id: str):
+    """查询任务状态（前端轮询）。"""
+    return _render_task_panel(name, task_id)
+
+
+@rt("/{name}/optimize/cancel/{task_id}", methods=["POST"])
+def optimize_cancel(name: str, task_id: str):
+    """中断运行中的优化任务。"""
+    cancel_optimization(task_id)
+    return _render_task_panel(name, task_id)

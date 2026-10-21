@@ -46,6 +46,26 @@ except ImportError:  # pragma: no cover
 #: 流水线版本（策略源码哈希）：策略逻辑变化时归因缓存自动失效
 PIPELINE_VERSION: str = hashlib.sha1(Path(__file__).read_bytes()).hexdigest()[:12]
 
+def _bars_fingerprint() -> tuple[Any, ...]:
+    """行情数据的轻量指纹（数据更新后使面板缓存失效）。"""
+    try:
+        return (
+            daily_bars.end,
+            daily_bars.total_dates,
+            daily_bars.last_update_time,
+        )
+    except Exception:  # pragma: no cover - 数据层未就绪
+        return ()
+
+
+#: 因子面板缓存（键：选池规格 + 因子集 + 信号日 + 持仓），跨回测/跨组合复用
+_PANEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
+_PANEL_CACHE_MAX = 3
+
+#: 三重障碍标签缓存（键：面板键 + 障碍参数 + 持有期），跨训练/跨组合复用
+_LABEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
+_LABEL_CACHE_MAX = 6
+
 #: 归因用的模型缓存（按训练参数 + 因子集 + 截面日 + 持仓键控）
 _EXPLAIN_MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, str]] = {}
 
@@ -234,6 +254,7 @@ def _fit_ml_model(
     up_barrier_pct: float = 0.15,
     down_barrier_pct: float = 0.06,
     feature_cols: list[str] | None = None,
+    label_cache_key: tuple[Any, ...] | None = None,
 ) -> tuple[Any, str]:
     """Train the ranking model strictly on leak-free historical samples.
 
@@ -249,17 +270,29 @@ def _fit_ml_model(
         up_barrier_pct: 标签的止盈障碍。
         down_barrier_pct: 标签的止损障碍。
         feature_cols: 参与训练的因子；为空表示全部因子。
+        label_cache_key: 面板内容键；相同面板的标签可跨训练复用。
 
     Returns:
         tuple: (模型, 引擎名)。
     """
     z_cols = [f"{c}_z" for c in (feature_cols or FEATURE_COLS)]
-    labeled = compute_triple_barrier_labels(
-        hist_df,
-        horizon=horizon,
-        up_barrier_pct=up_barrier_pct,
-        down_barrier_pct=down_barrier_pct,
+    label_key = (
+        tuple(label_cache_key) if label_cache_key is not None else id(hist_df),
+        round(float(up_barrier_pct), 6),
+        round(float(down_barrier_pct), 6),
+        int(horizon),
     )
+    labeled = _LABEL_CACHE.get(label_key)
+    if labeled is None:
+        labeled = compute_triple_barrier_labels(
+            hist_df,
+            horizon=horizon,
+            up_barrier_pct=up_barrier_pct,
+            down_barrier_pct=down_barrier_pct,
+        )
+        if len(_LABEL_CACHE) >= _LABEL_CACHE_MAX:
+            _LABEL_CACHE.pop(next(iter(_LABEL_CACHE)))
+        _LABEL_CACHE[label_key] = labeled
     valid_train = labeled.filter(
         pl.col("tb_ret").is_not_null() & pl.col("tb_ret").is_finite()
     )
@@ -873,8 +906,38 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 held.append(str(asset))
         return sorted(held)
 
+    def _panel_cache_key(self, signal_date: datetime.date) -> tuple[Any, ...]:
+        """因子面板的缓存键（必须覆盖所有影响面板内容的要素）。"""
+        bt_end = getattr(self.broker, "_bt_end", None)
+        return (
+            signal_date,
+            self.train_window,
+            self.universe_rebalance_days,
+            _coerce_date(bt_end),
+            self.universe_size,
+            self.universe_mode,
+            round(self.market_cap_trim_pct, 6),
+            tuple(self.selected_features or FEATURE_COLS),
+            tuple(self._held_assets(signal_date)),
+            self.custom_assets,
+            _bars_fingerprint(),
+        )
+
+    def _panel_end_for(self, signal_date: datetime.date) -> datetime.date:
+        """面板窗口结束信号日。"""
+        bt_end_attr = getattr(self.broker, "_bt_end", None)
+        bt_end_date = _coerce_date(bt_end_attr) or signal_date
+        rebalance_end = calendar.shift(
+            signal_date, self.universe_rebalance_days, FrameType.DAY
+        )
+        return max(signal_date, min(rebalance_end, bt_end_date))
+
     def _ensure_backtest_panel(self, signal_date: datetime.date) -> None:
-        """Pre-fetch and compute causal feature panel covering the backtest window."""
+        """Pre-fetch and compute causal feature panel covering the backtest window.
+
+        面板按内容键缓存（模块级），参数优化时同一选股池/因子集的面板可跨组合
+        复用，避免每个组合重复抓取与计算因子。
+        """
         if (
             self._cached_norm_panel is not None
             and self._panel_start is not None
@@ -883,14 +946,17 @@ class MLMomentumReversalStrategy(BaseStrategy):
         ):
             return
 
+        panel_key = self._panel_cache_key(signal_date)
+        cached_panel = _PANEL_CACHE.get(panel_key)
+        if cached_panel is not None:
+            self._cached_norm_panel = cached_panel
+            self._panel_start = signal_date
+            self._panel_end = self._panel_end_for(signal_date)
+            return
+
         lookback = max(self.train_window + 35, 80)
         fetch_start = calendar.shift(signal_date, -lookback, FrameType.DAY)
-        bt_end_attr = getattr(self.broker, "_bt_end", None)
-        bt_end_date = _coerce_date(bt_end_attr) or signal_date
-        rebalance_end = calendar.shift(
-            signal_date, self.universe_rebalance_days, FrameType.DAY
-        )
-        fetch_end = max(signal_date, min(rebalance_end, bt_end_date))
+        fetch_end = self._panel_end_for(signal_date)
 
         if self.custom_assets:
             universe_assets: list[str] | None = self.custom_assets
@@ -944,6 +1010,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
         )
         self._panel_start = signal_date
         self._panel_end = fetch_end
+        if len(_PANEL_CACHE) >= _PANEL_CACHE_MAX:
+            _PANEL_CACHE.pop(next(iter(_PANEL_CACHE)))
+        _PANEL_CACHE[panel_key] = self._cached_norm_panel
 
     def _explain_cache_keys(
         self, signal_date: datetime.date, build_signal: datetime.date | None = None
@@ -1122,6 +1191,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             up_barrier_pct=self.take_profit_pct,
             down_barrier_pct=self.stop_loss_pct,
             feature_cols=self.selected_features or FEATURE_COLS,
+            label_cache_key=self._panel_cache_key(build_signal),
         )
         if len(_EXPLAIN_MODEL_CACHE) >= 8:
             _EXPLAIN_MODEL_CACHE.pop(next(iter(_EXPLAIN_MODEL_CACHE)))
@@ -1359,6 +1429,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 up_barrier_pct=self.take_profit_pct,
                 down_barrier_pct=self.stop_loss_pct,
                 feature_cols=self.selected_features or FEATURE_COLS,
+                label_cache_key=self._panel_cache_key(signal_date),
             )
             self._bars_since_train = 0
         self._bars_since_train += 1

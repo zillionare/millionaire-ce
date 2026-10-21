@@ -5,11 +5,11 @@ import datetime
 import pandas as pd
 import pytest
 
-import quantide.service.grid_search as grid_search_module
+import quantide.service.param_optimizer as param_optimizer_module
 from quantide.data.models import BacktestLogEntry
 from quantide.service.backtest_logs import _entry_to_row
-from quantide.service.grid_search import GridSearch
 from quantide.service.metrics import _calculate_metrics
+from quantide.service.param_optimizer import OptimizationSpec, ParamOptimizer
 from quantide.service.trade_lightning import compute_cached_price
 from quantide.service.triple_barrier import BarrierHit, evaluate_day
 
@@ -40,7 +40,7 @@ class _Executor:
         return False
 
     def submit(self, _function, *_args, **_kwargs):
-        config = _args[1]
+        config = _args[0]["config"]
         self.submitted.append(config)
         return _CompletedFuture({"portfolio_id": config["alpha"], "metrics": {"score": 1}})
 
@@ -66,40 +66,47 @@ def test_backtest_log_row_preserves_required_display_fields() -> None:
     }
 
 
-def test_grid_search_submits_each_parameter_combination_once(monkeypatch) -> None:
-    """FR-0404 AC-2: GridSearch evaluates the full Cartesian parameter grid exactly once."""
-    _Executor.submitted = []
-    monkeypatch.setattr(grid_search_module, "ProcessPoolExecutor", _Executor)
-    monkeypatch.setattr(grid_search_module, "as_completed", lambda futures: futures)
-    search = GridSearch(
-        strategy_cls=object,
-        base_config={"fixed": True},
-        param_grid={"alpha": [1, 2], "beta": ["x", "y"]},
-        start_date=datetime.date(2024, 1, 1),
-        end_date=datetime.date(2024, 1, 2),
+def _optimizer(param_grid: dict, base_config: dict) -> ParamOptimizer:
+    """构造用于覆盖组合枚举的优化器。"""
+    return ParamOptimizer(
+        OptimizationSpec(
+            strategy_name="demo",
+            base_config=base_config,
+            param_grid=param_grid,
+            start_date=datetime.date(2024, 1, 1),
+            end_date=datetime.date(2024, 1, 2),
+        )
     )
+
+
+def test_optimizer_submits_each_parameter_combination_once(monkeypatch) -> None:
+    """FR-0404 AC-2: 参数优化恰好评估一次完整笛卡尔积。"""
+    _Executor.submitted = []
+    monkeypatch.setattr(param_optimizer_module, "ProcessPoolExecutor", _Executor)
+    monkeypatch.setattr(param_optimizer_module, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(
+        ParamOptimizer, "_resolve_strategy", lambda self: object()
+    )
+    search = _optimizer({"alpha": [1, 2], "beta": ["x", "y"]}, {"fixed": True})
 
     result = search.run()
 
     assert {(row["alpha"], row["beta"]) for row in _Executor.submitted} == {
         (1, "x"), (1, "y"), (2, "x"), (2, "y"),
     }
-    assert result.shape[0] == 4
+    assert len(result) == 4
 
 
-def test_grid_search_uses_fresh_worker_processes_for_cleanup(monkeypatch) -> None:
+def test_optimizer_uses_fresh_worker_processes_for_cleanup(monkeypatch) -> None:
     """v0.2-003 AC-NFR0020-3: workers use spawn so inherited resources cannot block cleanup."""
     _Executor.submitted = []
     _Executor.contexts = []
-    monkeypatch.setattr(grid_search_module, "ProcessPoolExecutor", _Executor)
-    monkeypatch.setattr(grid_search_module, "as_completed", lambda futures: futures)
-    search = GridSearch(
-        strategy_cls=object,
-        base_config={},
-        param_grid={"alpha": [1]},
-        start_date=datetime.date(2024, 1, 1),
-        end_date=datetime.date(2024, 1, 2),
+    monkeypatch.setattr(param_optimizer_module, "ProcessPoolExecutor", _Executor)
+    monkeypatch.setattr(param_optimizer_module, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(
+        ParamOptimizer, "_resolve_strategy", lambda self: object()
     )
+    search = _optimizer({"alpha": [1]}, {})
 
     search.run()
 

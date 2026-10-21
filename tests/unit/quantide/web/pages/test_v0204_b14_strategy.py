@@ -3,7 +3,6 @@
 Target lines:
 - 2116: deploy_backtest_to_paper success return tuple
 - 2175: deploy_backtest_to_live success return tuple
-- 2356-2358: run_grid_search non-empty results_df -> sort + iter_rows
 - 2436, 2438: backtest_result metric value positive/negative branches
 - 2808-2814: backtest_result positions multi-date grouping
 - 2921: load_saved_backtest_log_panel success path
@@ -17,7 +16,6 @@ from __future__ import annotations
 import datetime as dt
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import polars as pl
 import pytest
 
 from quantide.web.pages import strategy as strategy_mod
@@ -27,7 +25,6 @@ from quantide.web.pages.strategy import (
     deploy_backtest_to_live,
     deploy_backtest_to_paper,
     load_saved_backtest_log_panel,
-    run_grid_search,
     save_scan_config,
     scan_confirm_modal,
 )
@@ -284,47 +281,6 @@ def test_backtest_result_positions_multi_date_grouping(monkeypatch):
 # run_grid_search: lines 2356-2358 (non-empty results_df)
 # ---------------------------------------------------------------------------
 
-
-@pytest.mark.asyncio
-async def test_run_grid_search_with_non_empty_results(monkeypatch):
-    """run_grid_search with non-empty results_df -> sort + iter_rows + render table."""
-    form_data = {
-        "start_date": "2024-01-01",
-        "end_date": "2024-06-01",
-        "max_workers": "2",
-        "param_window": "5,10",
-    }
-    req = _make_req(form_data=form_data)
-    strategy_cls = MagicMock()
-    monkeypatch.setattr(
-        strategy_mod.strategy_loader, "load_from_cache", lambda: {"MyStrat": strategy_cls}
-    )
-
-    # Non-empty results DataFrame with expected columns.
-    fake_results = pl.DataFrame({
-        "params": [{"window": 5}, {"window": 10}],
-        "annual_return": [0.15, 0.10],
-        "sharpe": [1.2, 0.9],
-        "max_drawdown": [-0.05, -0.08],
-    })
-
-    class FakeGridSearch:
-        def __init__(self, **kwargs):
-            pass
-
-        def run(self, save_logs=False):
-            return fake_results
-
-    monkeypatch.setattr(strategy_mod, "GridSearch", FakeGridSearch)
-
-    out = await run_grid_search(req, "MyStrat")
-    text = strategy_mod.to_xml(out) if not isinstance(out, str) else out
-    # Modal title and table render.
-    assert "网格搜索结果" in text
-    assert "参数" in text
-    # Should show 2 result rows.
-    assert "15.00%" in text
-    assert "10.00%" in text
 
 
 # ---------------------------------------------------------------------------

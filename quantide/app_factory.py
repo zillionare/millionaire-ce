@@ -58,6 +58,7 @@ from quantide.web.pages.home import home_app
 from quantide.web.pages.init_wizard import init_wizard, init_wizard_app
 from quantide.web.pages.live import live_app
 from quantide.web.pages.paper import paper_app
+from quantide.web.pages.optimize import optimize_page as _optimize_page  # noqa: E402,F401
 from quantide.web.pages.strategy import strategy_app
 from quantide.web.pages.system.alpha_ledger import system_alpha_ledger_app
 from quantide.web.pages.system.calendar import system_calendar_app

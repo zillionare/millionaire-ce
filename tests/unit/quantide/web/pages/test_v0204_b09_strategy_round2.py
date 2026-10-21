@@ -6,11 +6,9 @@ Covers missing branches:
 - ``_form_to_config`` / ``_coerce_form_value`` branches
 - ``deploy_backtest_to_paper`` (invalid principal / no registry / existing runtime / deploy failure)
 - ``deploy_backtest_to_live`` (no registry / no live accounts / existing runtime / deploy failure)
-- ``run_grid_search`` (invalid strategy / parse params / generic exception)
 - ``run_scan`` (no strategies / with strategies / scan failure)
 - ``save_scan_config`` (invalid directory / generic exception)
 - ``copy_scan_examples`` (no directory / invalid directory / generic exception)
-- ``grid_search_modal`` (not found / with PARAMS)
 - ``backtest_ws`` (no portfolio_id / WebSocketDisconnect)
 """
 
@@ -35,8 +33,6 @@ from quantide.web.pages.strategy import (
     copy_scan_examples,
     deploy_backtest_to_live,
     deploy_backtest_to_paper,
-    grid_search_modal,
-    run_grid_search,
     run_scan,
     save_scan_config,
 )
@@ -301,57 +297,6 @@ async def test_deploy_backtest_to_live_deploy_failure_returns_dialog_modal(monke
     req = _make_req(form_data={"live_account_id": "gw:1"})
     out = await deploy_backtest_to_live(req, "p1")
     assert out == "error-dialog"
-
-
-# ---------------------------------------------------------------------------
-# grid_search_modal
-# ---------------------------------------------------------------------------
-
-
-def test_grid_search_modal_returns_string_when_strategy_not_found(monkeypatch):
-    """[AC-NFR1101-01] When strategy is missing, returns 'Strategy not found'."""
-    monkeypatch.setattr(
-        strategy_mod.strategy_loader, "load_from_cache", lambda: {}
-    )
-    out = grid_search_modal("missing")
-    assert out == "Strategy not found"
-
-
-def test_grid_search_modal_renders_param_inputs_from_params(monkeypatch):
-    """[AC-NFR1101-01] Strategy with PARAMS dict renders param input fields."""
-    class _FakeStrategy:
-        PARAMS = {"window": 10}
-
-    monkeypatch.setattr(
-        strategy_mod.strategy_loader,
-        "load_from_cache",
-        lambda: {"my-strategy": _FakeStrategy},
-    )
-    out = grid_search_modal("my-strategy")
-    rendered = strategy_mod.to_xml(out) if hasattr(out, "render") else str(out)
-    assert "window" in rendered
-
-
-# ---------------------------------------------------------------------------
-# run_grid_search
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_run_grid_search_returns_error_when_strategy_not_found(monkeypatch):
-    """[AC-NFR1101-01] Missing strategy raises and the handler returns error div."""
-    form = MagicMock()
-    form.get = lambda key, default="": {"start_date": "2024-01-01", "end_date": "2024-12-31"}.get(key, default)
-    form.items = lambda: [("start_date", "2024-01-01"), ("end_date", "2024-12-31")].__iter__().__next__()
-    # Use a real dict-like form for items iteration.
-    real_form = {"start_date": "2024-01-01", "end_date": "2024-12-31", "max_workers": "4"}
-    req = _make_req(form_data=real_form)
-    monkeypatch.setattr(
-        strategy_mod.strategy_loader, "load_from_cache", lambda: {}
-    )
-    out = await run_grid_search(req, "missing")
-    rendered = strategy_mod.to_xml(out) if not isinstance(out, str) else out
-    assert "搜索失败" in rendered or "not found" in rendered.lower() or "Strategy" in rendered
 
 
 # ---------------------------------------------------------------------------

@@ -13,9 +13,7 @@ import datetime
 import pickle
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import arrow
 import numpy as np
-import pandas as pd
 import pytest
 from starlette.responses import PlainTextResponse, Response
 
@@ -184,11 +182,24 @@ async def test_run_grid_search_json_parse_failure_falls_back_to_empty():
 
 @pytest.mark.asyncio
 async def test_run_grid_search_success_returns_json_records():
-    """[AC-NFR1101-01] Full success path -> returns df JSON records response."""
+    """[AC-NFR1101-01] Full success path -> returns ranked JSON records response."""
     strategy_cls = MagicMock(name="StrategyCls")
-    results_df = pd.DataFrame(
-        [{"return": 0.15, "sharpe": 1.5}, {"return": 0.10, "sharpe": 1.2}]
-    )
+    results = [
+        {
+            "objective": 1.5,
+            "out_objective": 0.8,
+            "params": {"k": 1},
+            "in_sample": {"Sharpe Ratio": "1.50"},
+            "out_sample": {"Sharpe Ratio": "0.80"},
+        },
+        {
+            "objective": 1.2,
+            "out_objective": 0.5,
+            "params": {"k": 2},
+            "in_sample": {"Sharpe Ratio": "1.20"},
+            "out_sample": {"Sharpe Ratio": "0.50"},
+        },
+    ]
     req = MagicMock()
     req.json = AsyncMock(
         return_value={
@@ -203,15 +214,16 @@ async def test_run_grid_search_success_returns_json_records():
         }
     )
     with patch.object(broker_api, "strategy_loader") as mock_loader, \
-         patch.object(broker_api, "GridSearch") as mock_gs_cls:
+         patch.object(broker_api, "ParamOptimizer") as mock_opt_cls, \
+         patch.object(broker_api, "rank_results", side_effect=lambda rows, obj: rows):
         mock_loader.load_from_cache = MagicMock(return_value={"demo": strategy_cls})
-        gs_inst = MagicMock()
-        gs_inst.run = MagicMock(return_value=results_df)
-        mock_gs_cls.return_value = gs_inst
+        opt_inst = MagicMock()
+        opt_inst.run = MagicMock(return_value=results)
+        mock_opt_cls.return_value = opt_inst
         resp = await run_grid_search_job(req)
     assert resp.status_code == 200
     assert resp.media_type == "application/json"
     body = resp.body.decode()
-    assert "0.15" in body
-    mock_gs_cls.assert_called_once()
-    gs_inst.run.assert_called_once_with(save_logs=True)
+    assert "1.5" in body
+    mock_opt_cls.assert_called_once()
+    opt_inst.run.assert_called_once_with()

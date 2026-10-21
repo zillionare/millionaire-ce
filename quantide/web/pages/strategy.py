@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import datetime
 import json
 import uuid
@@ -32,7 +33,6 @@ from quantide.service.backtest_params import (
     format_changed_params,
 )
 from quantide.service.discovery import strategy_loader
-from quantide.service.grid_search import GridSearch
 from quantide.service.metrics import metrics
 from quantide.service.runner import BacktestRunner
 from quantide.service.strategy_runtime import strategy_runtime_manager
@@ -1769,6 +1769,16 @@ def strategy_detail(req, session, name: str):
             hx_indicator="#global-loading",
         )
     ]
+    detail_actions.append(
+        A(
+            "参数优化",
+            href=f"/strategy/{name}/optimize",
+            cls=(
+                "px-4 py-2 bg-purple-600 text-white rounded-lg "
+                "hover:bg-purple-700 text-sm font-medium inline-block"
+            ),
+        )
+    )
     if _supports_stock_selection(cls):
         detail_actions.append(
             Button(
@@ -1918,19 +1928,56 @@ def _split_backtest_params(default_params: dict[str, Any]) -> tuple[dict[str, An
     return strategy_params, trade_params
 
 
-def _build_param_inputs(params: dict[str, Any], *, labeled: bool) -> list[Any]:
-    """构建参数输入行。"""
+def _build_param_inputs(
+    params: dict[str, Any],
+    *,
+    labeled: bool,
+    overrides: dict[str, Any] | None = None,
+) -> list[Any]:
+    """构建参数输入行。
+
+    Args:
+        params: 参数默认值。
+        labeled: 是否显示中文标签。
+        overrides: 覆盖值（如参数优化结果回填）。
+
+    Returns:
+        list: 输入行。
+    """
     inputs = []
+    override_map = overrides or {}
     for k, v in params.items():
         label = f"{TRADE_PARAM_LABELS.get(k, k)} {k}" if labeled else k
+        value = override_map.get(k, v)
         inputs.append(
             Div(
                 Span(label, cls="text-sm font-medium text-gray-500 w-48 shrink-0"),
-                Input(name=f"param_{k}", value=str(v), cls="input input-sm w-full"),
+                Input(name=f"param_{k}", value=str(value), cls="input input-sm w-full"),
                 cls="flex items-center gap-3 mb-3"
             )
         )
     return inputs
+
+
+def _decode_backtest_prefill(req: Any) -> dict[str, Any]:
+    """解析回测向导的预填参数（参数优化结果回填）。
+
+    Args:
+        req: 请求对象。
+
+    Returns:
+        dict: 预填内容；无有效预填时返回空字典。
+    """
+    query = getattr(req, "query_params", {}) or {}
+    raw = query.get("prefill")
+    if not raw:
+        return {}
+    try:
+        padded = raw + "=" * (-len(raw) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 
@@ -1997,8 +2044,13 @@ BACKTEST_WIZARD_SCRIPT = """
 """
 
 @rt("/{name}/backtest/modal")
-def backtest_modal(name: str):
-    """运行回测向导：第一步参数，第二步因子选择。"""
+def backtest_modal(name: str, req=None):
+    """运行回测向导：第一步参数，第二步因子选择。
+
+    Args:
+        name: 策略名。
+        req: 请求对象（框架按参数名注入），用于读取参数优化回填。
+    """
     strategies = strategy_loader.load_from_cache()
     cls = strategies.get(name)
     if not cls:
@@ -2007,7 +2059,11 @@ def backtest_modal(name: str):
     default_params = _get_strategy_default_params(cls)
     strategy_params, trade_params = _split_backtest_params(default_params)
 
-    param_inputs = _build_param_inputs(strategy_params, labeled=False)
+    prefill = _decode_backtest_prefill(req)
+    prefill_params = prefill.get("params") or {}
+    param_inputs = _build_param_inputs(
+        strategy_params, labeled=False, overrides=prefill_params
+    )
     trade_param_inputs = _build_param_inputs(trade_params, labeled=True)
 
     step1 = Div(
@@ -3472,193 +3528,6 @@ async def deploy_backtest_to_live(req, portfolio_id: str):
             ),
             modal_id="deploy-live-error-modal",
             width_cls="max-w-md",
-        )
-
-# --- Grid Search Modal & Runner ---
-
-@rt("/{name}/grid_search/modal")
-def grid_search_modal(name: str):
-    strategies = strategy_loader.load_from_cache()
-    cls = strategies.get(name)
-    if not cls:
-        return "Strategy not found"
-
-    default_params = _get_strategy_default_params(cls)
-
-    param_inputs = []
-    for k, v in default_params.items():
-        # For grid search, we expect comma separated values
-        param_inputs.append(
-            Div(
-                Span(f"{k} (逗号分隔)", cls="text-sm font-medium text-gray-500 w-32 shrink-0"),
-                Input(
-                    name=f"param_{k}",
-                    value=str(v),
-                    placeholder="例如: 10, 20, 30",
-                    cls="input input-sm w-full",
-                ),
-                cls="flex items-center gap-3 mb-3"
-            )
-        )
-
-    return Div(
-        Div(
-            H3(f"运行网格搜索 - {name}", cls="text-lg font-bold mb-4"),
-            Form(
-                Div(
-                    Span("开始日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                    Input(
-                        name="start_date",
-                        type="date",
-                        value="2024-01-01",
-                        required=True,
-                        cls="input input-sm w-full",
-                    ),
-                    cls="flex items-center gap-3 mb-3"
-                ),
-                Div(
-                    Span("结束日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                    Input(
-                        name="end_date",
-                        type="date",
-                        value=arrow.now().format("YYYY-MM-DD"),
-                        required=True,
-                        cls="input input-sm w-full",
-                    ),
-                    cls="flex items-center gap-3 mb-3"
-                ),
-                Div(
-                    Span("并发数量", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                    Input(
-                        name="max_workers",
-                        type="number",
-                        value="4",
-                        cls="input input-sm w-full",
-                    ),
-                    cls="flex items-center gap-3 mb-3"
-                ),
-                Div(
-                    H4("参数网格", cls="text-sm font-semibold text-gray-600 mt-4 mb-2"),
-                    P("输入多个值以逗号分隔，如: 5, 10, 20", cls="text-xs text-gray-500 mb-2"),
-                    *param_inputs
-                ),
-                Div(
-                    Button("取消", type="button", cls="btn btn-ghost", onclick=STRATEGY_MODAL_CLOSE_JS),
-                    Button(
-                        "开始运行",
-                        type="button",
-                        cls="btn btn-primary",
-                        hx_post=f"/strategy/{name}/grid_search/run",
-                        hx_target="#modal-container",
-                        hx_include="closest form"
-                    ),
-                    cls="flex justify-end gap-2 mt-6"
-                ),
-            ),
-            cls="bg-white p-6 rounded-xl shadow-xl max-w-lg w-full"
-        ),
-        cls="fixed inset-0 bg-black/50 flex items-center justify-center z-50",
-        id="grid-search-modal"
-    )
-
-@rt("/{name}/grid_search/run", methods=["POST"])
-async def run_grid_search(req, name: str):
-    form = await req.form()
-
-    try:
-        start_date = arrow.get(form.get("start_date")).date()
-        end_date = arrow.get(form.get("end_date")).date()
-        max_workers = int(form.get("max_workers", 4))
-
-        # Parse grid params
-        param_grid = {}
-        base_config = {}
-
-        strategies = strategy_loader.load_from_cache()
-        cls = strategies.get(name)
-        if not cls:
-            raise Exception("Strategy not found")
-
-        for k, v in form.items():
-            if k.startswith("param_"):
-                param_name = k[6:]
-                # Split by comma
-                if ',' in v:
-                    values = [x.strip() for x in v.split(',')]
-                    # Try convert types
-                    converted_values = []
-                    for val in values:
-                        try:
-                            if '.' in val:
-                                converted_values.append(float(val))
-                            else:
-                                converted_values.append(int(val))
-                        except (TypeError, ValueError):
-                            converted_values.append(val)
-                    param_grid[param_name] = converted_values
-                else:
-                    # Single value, treat as base config
-                    try:
-                        if '.' in v:
-                            base_config[param_name] = float(v)
-                        else:
-                            base_config[param_name] = int(v)
-                    except (TypeError, ValueError):
-                        base_config[param_name] = v
-
-        gs = GridSearch(
-            strategy_cls=cls,
-            base_config=base_config,
-            param_grid=param_grid,
-            start_date=start_date,
-            end_date=end_date,
-            initial_cash=1000000,
-            max_workers=max_workers
-        )
-
-        # Run grid search in a separate thread to avoid blocking the event loop
-        loop = asyncio.get_event_loop()
-        results_df = await loop.run_in_executor(None, lambda: gs.run(save_logs=True))
-
-        # Show results in a modal or redirect?
-        # Let's show a summary table in a modal
-
-        rows = []
-        # Sort by annual_return desc
-        if not results_df.is_empty():
-            results_df = results_df.sort("annual_return", descending=True).head(10)
-            for row in results_df.iter_rows(named=True):
-                rows.append(
-                    Tr(
-                        Td(str(row["params"])),
-                        Td(f"{row['annual_return']:.2%}"),
-                        Td(f"{row['sharpe']:.2f}"),
-                        Td(f"{row['max_drawdown']:.2%}"),
-                    )
-                )
-
-        result_table = Table(
-            Thead(Tr(Th("参数"), Th("年化"), Th("夏普"), Th("回撤"))),
-            Tbody(*rows),
-            cls=TableT.striped + " text-xs"
-        )
-
-        return Modal(
-            ModalTitle("网格搜索结果 (Top 10)"),
-            ModalBody(result_table),
-            ModalFooter(
-                Button("关闭", cls=ButtonT.primary, onclick=STRATEGY_MODAL_CLOSE_JS)
-            ),
-            open=True
-        )
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return Div(
-            Div(f"搜索失败: {str(e)}", cls="text-red-500 mb-4"),
-            Button("关闭", cls=ButtonT.secondary, onclick="this.closest('.modal').remove()"),
-            cls="p-4 bg-white rounded shadow"
         )
 
 # --- Backtest Result View ---

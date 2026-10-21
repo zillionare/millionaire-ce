@@ -1,12 +1,12 @@
-"""Importable strategy fixture for spawned GridSearch worker tests."""
+"""Importable strategy fixture for spawned parameter-optimizer worker tests."""
 
 import datetime
 
 from quantide.core.strategy import BaseStrategy
 
 
-class GridSearchRecordingStrategy(BaseStrategy):
-    """Record the grid-search ``param1`` value from a spawned worker process."""
+class ParamOptimizerRecordingStrategy(BaseStrategy):
+    """Record the ``param1`` value from a spawned optimizer worker process."""
 
     async def init(self) -> None:
         """Record the configured parameter in the worker backtest log.

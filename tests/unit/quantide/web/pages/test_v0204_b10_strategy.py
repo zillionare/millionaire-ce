@@ -2,7 +2,6 @@
 
 Targets specific missing branches:
 - _build_series_payload: trade with tm=None continue (271), first_total fallback (318)
-- run_grid_search: param parsing float/int/except branches (2320-2334)
 - _build_daily_positions: multi-date position grouping (2808-2814)
 - _format_percent / _format_number exception branches
 - backtest_ws: status != "running" close (2964-2966)
@@ -24,7 +23,6 @@ from quantide.web.pages.strategy import (
     _format_number,
     _format_percent,
     backtest_ws,
-    run_grid_search,
 )
 
 
@@ -91,51 +89,6 @@ def test_build_series_payload_first_total_fallback_to_one(monkeypatch):
 # run_grid_search: param parsing float/int/except branches (2320-2334)
 # ---------------------------------------------------------------------------
 
-
-@pytest.mark.asyncio
-async def test_run_grid_search_parses_float_int_and_fallback_values(monkeypatch):
-    """[AC-NFR1101-01] run_grid_search parses float/int/fallback param values (2320-2334)."""
-    form_data = {
-        "start_date": "2024-01-01",
-        "end_date": "2024-06-01",
-        "max_workers": "2",
-        # comma-separated with float, int, and non-numeric fallback
-        "param_window": "5,10.5,invalid",
-        # single value float
-        "param_threshold": "0.5",
-        # single value int
-        "param_count": "100",
-        # single value non-numeric fallback
-        "param_label": "hello",
-    }
-    req = _make_req(form_data=form_data)
-
-    strategy_cls = MagicMock()
-    monkeypatch.setattr(
-        strategy_mod.strategy_loader, "load_from_cache", lambda: {"MyStrat": strategy_cls}
-    )
-
-    captured_gs = {}
-
-    class FakeGridSearch:
-        def __init__(self, **kwargs):
-            captured_gs["kwargs"] = kwargs
-
-        def run(self, save_logs=False):
-            return pl.DataFrame()
-
-    monkeypatch.setattr(strategy_mod, "GridSearch", FakeGridSearch)
-
-    await run_grid_search(req, "MyStrat")
-    kwargs = captured_gs["kwargs"]
-    # float/int/fallback in comma-separated values
-    assert kwargs["param_grid"]["window"] == [5, 10.5, "invalid"]
-    # single value float
-    assert kwargs["base_config"]["threshold"] == 0.5
-    # single value int
-    assert kwargs["base_config"]["count"] == 100
-    # single value fallback (string)
-    assert kwargs["base_config"]["label"] == "hello"
 
 
 # ---------------------------------------------------------------------------

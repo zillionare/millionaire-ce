@@ -1,4 +1,5 @@
 import datetime
+import json
 
 from fasthtml.common import fast_app
 from starlette.responses import JSONResponse, PlainTextResponse, Response
@@ -10,7 +11,11 @@ from quantide.core.errors import TradeError, TradeErrors
 from quantide.data.models import Asset
 from quantide.data.sqlite import db
 from quantide.service.discovery import strategy_loader
-from quantide.service.grid_search import GridSearch
+from quantide.service.param_optimizer import (
+    OptimizationSpec,
+    ParamOptimizer,
+    rank_results,
+)
 from quantide.service.runner import BacktestRunner
 
 app, rt = fast_app()
@@ -494,8 +499,6 @@ async def run_grid_search_job(req):
     if strategy_name not in strategies:
         return Response(f"Strategy {strategy_name} not found", status_code=404)
 
-    strategy_cls = strategies[strategy_name]
-
     try:
         if not start_date or not end_date:
             return Response("start_date and end_date are required", status_code=400)
@@ -504,25 +507,29 @@ async def run_grid_search_job(req):
     except Exception as e:
         return Response(f"Invalid date format: {e}", status_code=400)
 
-    gs = GridSearch(
-        strategy_cls=strategy_cls,
+    spec = OptimizationSpec(
+        strategy_name=strategy_name,
         base_config=base_config,
         param_grid=param_grid,
         start_date=start,
         end_date=end,
+        objective=params.get("objective", "sharpe"),
+        in_sample_ratio=params.get("in_sample_ratio", 0.7),
+        mode=params.get("mode", "grid"),
+        n_random=params.get("n_random", 20),
+        max_workers=max_workers or 4,
         interval=interval,
         initial_cash=initial_cash,
-        max_workers=max_workers
     )
 
     try:
-        # Run grid search (this is blocking, should be async or in background task)
-        # For now, we run it directly (it uses ProcessPoolExecutor internally)
-        # save_logs=True to persist results
-        results_df = gs.run(save_logs=True)
-
-        # Return top results
-        return Response(results_df.to_json(orient="records"), media_type="application/json")
+        optimizer = ParamOptimizer(spec)
+        results = optimizer.run()
+        ranked = rank_results(results, spec.objective)
+        return Response(
+            json.dumps(ranked, ensure_ascii=False, default=str),
+            media_type="application/json",
+        )
     except Exception as e:
         return Response(f"Grid search failed: {str(e)}", status_code=500)
 

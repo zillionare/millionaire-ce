@@ -978,6 +978,31 @@ def test_replay_context_finds_panel_and_refit(monkeypatch) -> None:
     assert refit_build == days[0]
 
 
+def test_panel_cache_key_covers_lookback_and_window_inputs(monkeypatch) -> None:
+    """面板缓存键必须覆盖所有影响面板内容的参数，避免跨组合污染。"""
+    days = _weekdays(dt.date(2024, 1, 1), 20)
+    base = _stub_strategy(monkeypatch, days, train_window=45)
+    other_window = _stub_strategy(monkeypatch, days, train_window=120)
+    other_rebalance = _stub_strategy(monkeypatch, days, universe_rebalance_days=10)
+
+    signal_date = days[5]
+    base_key = base._panel_cache_key(signal_date)
+    assert base_key != other_window._panel_cache_key(signal_date)
+    assert base_key != other_rebalance._panel_cache_key(signal_date)
+    assert base_key == base._panel_cache_key(signal_date)
+
+
+def test_panel_cache_key_tracks_backtest_end_date(monkeypatch) -> None:
+    """回测结束日不同（面板窗口不同）时缓存键必须不同。"""
+    days = _weekdays(dt.date(2024, 1, 1), 20)
+    first = _stub_strategy(monkeypatch, days)
+    second = _stub_strategy(monkeypatch, days)
+    second.broker._bt_end = days[-1]
+
+    signal_date = days[5]
+    assert first._panel_cache_key(signal_date) != second._panel_cache_key(signal_date)
+
+
 def test_explain_cache_keys_include_build_signal(monkeypatch) -> None:
     """缓存键必须包含面板构建日，避免不同窗口互相污染。"""
     days = _weekdays(dt.date(2024, 1, 1), 20)
