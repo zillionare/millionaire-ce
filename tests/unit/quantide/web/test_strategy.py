@@ -963,7 +963,7 @@ def test_trade_kline_modal_route_renders_chart(monkeypatch):
     monkeypatch.setattr(
         strategy_page,
         "build_trade_kline_payload",
-        lambda portfolio_id, buy_tid, sell_tid=None: {
+        lambda portfolio_id, buy_tid, sell_tid=None, panel="": {
             "asset": "002078.SZ",
             "name": "测试股",
             "pair": {
@@ -1026,7 +1026,7 @@ def test_trade_kline_modal_route_reports_missing_trade(monkeypatch):
     monkeypatch.setattr(
         strategy_page,
         "build_trade_kline_payload",
-        lambda portfolio_id, buy_tid, sell_tid=None: None,
+        lambda portfolio_id, buy_tid, sell_tid=None, panel="": None,
     )
 
     html = to_xml(

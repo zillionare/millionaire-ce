@@ -256,6 +256,10 @@ FEATURE_DOCS: dict[str, str] = {
 }
 
 
+#: 归因用的模型缓存（按训练参数 + 截面日 + 面板规模键控）
+_EXPLAIN_MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, str]] = {}
+
+
 def _parse_custom_assets(config: dict[str, Any]) -> list[str] | None:
     """Extract custom asset list from strategy config if specified."""
     raw = config.get("symbols") or config.get("universe") or config.get("symbol")
@@ -1276,6 +1280,8 @@ class MLMomentumReversalStrategy(BaseStrategy):
 
     VERSION = "v1.0.0"
     RISK_OVERLAY = "triple_barrier"
+    #: 声明本策略支持逐次预测归因（web 层据此动态加载 SHAP 面板）
+    ATTRIBUTION = "shap"
     PARAMS: dict[str, Any] = {
         "top_k": 5,
         "keep_top_n": 15,
@@ -1535,6 +1541,178 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self._cached_norm_panel = _standardize_features(feat_panel, FEATURE_COLS)
         self._panel_start = signal_date
         self._panel_end = fetch_end
+
+    def _attribution_model(
+        self, hist: pl.DataFrame, target_date: datetime.date
+    ) -> tuple[Any, str]:
+        """取（或训练）归因所需的模型，按决策日缓存。
+
+        Args:
+            hist: 截至信号日的标准化特征面板。
+            target_date: 截面日。
+
+        Returns:
+            tuple: (模型, 引擎名)。
+        """
+        key = (
+            self.train_window,
+            self.horizon,
+            round(self.stop_loss_pct, 6),
+            round(self.take_profit_pct, 6),
+            self.use_lightgbm,
+            self.universe_size,
+            self.universe_mode,
+            round(self.market_cap_trim_pct, 6),
+            target_date,
+            int(hist.height),
+        )
+        cached = _EXPLAIN_MODEL_CACHE.get(key)
+        if cached is not None:
+            return cached
+        model, engine = _fit_ml_model(
+            hist,
+            train_window=self.train_window,
+            horizon=self.horizon,
+            use_lightgbm=self.use_lightgbm,
+            up_barrier_pct=self.take_profit_pct,
+            down_barrier_pct=self.stop_loss_pct,
+        )
+        if len(_EXPLAIN_MODEL_CACHE) >= 16:
+            _EXPLAIN_MODEL_CACHE.pop(next(iter(_EXPLAIN_MODEL_CACHE)))
+        _EXPLAIN_MODEL_CACHE[key] = (model, engine)
+        return model, engine
+
+    def explain_prediction(
+        self, asset: str, signal_date: datetime.date
+    ) -> dict[str, Any] | None:
+        """返回该资产在决策日的最终得分归因。
+
+        最终得分 = ``model_weight × 模型截面 z-score + prior_weight × 先验分截面
+        z-score``（LightGBM 为 0.7/0.3）。模型部分用 LightGBM 自带的 TreeSHAP
+        (``pred_contrib=True``) 给出逐特征贡献，先验分部分是
+        ``PRIOR_WEIGHTS`` 的线性加权（外加超涨惩罚项），两者相加可精确还原总分。
+
+        Args:
+            asset: 证券代码。
+            signal_date: 决策日（信号日，即成交日的前一交易日）。
+
+        Returns:
+            dict | None: 归因结果；数据不足或资产不在截面内时返回 ``None``。
+        """
+        try:
+            self._ensure_backtest_panel(signal_date)
+        except Exception:
+            return None
+        panel = self._cached_norm_panel
+        if panel is None or panel.is_empty():
+            return None
+
+        hist = panel.filter(pl.col("date") <= pl.lit(signal_date))
+        if hist.is_empty():
+            return None
+        target_date = hist["date"].max()
+        cross = hist.filter(pl.col("date") == pl.lit(target_date))
+        if cross.is_empty():
+            return None
+
+        assets = cross["asset"].to_list()
+        if asset not in assets:
+            return None
+        index = assets.index(asset)
+
+        model, engine = self._attribution_model(hist, target_date)
+        z_cols = [f"{c}_z" for c in FEATURE_COLS]
+        x = (
+            cross.select(z_cols)
+            .fill_null(0.0)
+            .fill_nan(0.0)
+            .to_numpy()
+            .astype(np.float64)
+        )
+        z_row = x[index]
+
+        model_weight, prior_weight = (0.7, 0.3) if engine == "LightGBM" else (0.5, 0.5)
+        model_contrib = np.zeros(len(FEATURE_COLS), dtype=np.float64)
+        model_baseline = 0.0
+        if engine == "LightGBM" and hasattr(model, "predict"):
+            raw = np.asarray(model.predict(x), dtype=np.float64)
+            contrib = np.asarray(model.predict(x, pred_contrib=True), dtype=np.float64)
+            std_raw = float(np.std(raw)) + 1e-6
+            model_contrib = model_weight * contrib[index][:-1] / std_raw
+            model_baseline = model_weight * (
+                float(contrib[index][-1]) - float(np.mean(raw))
+            ) / std_raw
+            model_z = _zscore_1d(raw)[index]
+        elif isinstance(model, np.ndarray):
+            ridge_raw = x @ model
+            std_ridge = float(np.std(ridge_raw)) + 1e-6
+            model_contrib = model_weight * (z_row * model) / std_ridge
+            model_baseline = model_weight * (0.0 - float(np.mean(ridge_raw))) / std_ridge
+            model_z = _zscore_1d(ridge_raw)[index]
+        else:
+            model_z = 0.0
+
+        prior_raw = _compute_prior_score(x, FEATURE_COLS)
+        prior_z = _zscore_1d(prior_raw)
+        std_prior = float(np.std(prior_raw)) + 1e-6
+        prior_contrib = np.zeros(len(FEATURE_COLS), dtype=np.float64)
+        for col_index, col in enumerate(FEATURE_COLS):
+            prior_contrib[col_index] = (
+                prior_weight * PRIOR_WEIGHTS.get(col, 0.0) * z_row[col_index] / std_prior
+            )
+        # 超涨惩罚项：0.08 * max(bias_20,0) * max(upper_shadow,0)，按一阶分配
+        if "bias_20" in FEATURE_COLS and "upper_shadow" in FEATURE_COLS:
+            bias_index = FEATURE_COLS.index("bias_20")
+            shadow_index = FEATURE_COLS.index("upper_shadow")
+            bias_part = max(float(z_row[bias_index]), 0.0)
+            shadow_part = max(float(z_row[shadow_index]), 0.0)
+            penalty = 0.08 * bias_part * shadow_part
+            if bias_part + shadow_part > 0:
+                prior_contrib[bias_index] -= (
+                    prior_weight * penalty * bias_part / (bias_part + shadow_part) / std_prior
+                )
+                prior_contrib[shadow_index] -= (
+                    prior_weight * penalty * shadow_part / (bias_part + shadow_part) / std_prior
+                )
+        prior_baseline = prior_weight * (0.0 - float(np.mean(prior_raw))) / std_prior
+
+        final_score = model_weight * model_z + prior_weight * prior_z[index]
+        baseline = model_baseline + prior_baseline
+        total = model_contrib + prior_contrib
+
+        # 截面排名（与策略排序一致：得分降序，同分按代码升序）
+        scores = model_weight * _zscore_1d(
+            np.asarray(model.predict(x), dtype=np.float64)
+            if engine == "LightGBM" and hasattr(model, "predict")
+            else (x @ model if isinstance(model, np.ndarray) else np.zeros(len(x)))
+        ) + prior_weight * prior_z
+        order = sorted(range(len(assets)), key=lambda i: (-scores[i], assets[i]))
+        rank = order.index(index) + 1
+
+        features = [
+            {
+                "name": col,
+                "z": float(z_row[col_index]),
+                "model": float(model_contrib[col_index]),
+                "prior": float(prior_contrib[col_index]),
+                "total": float(total[col_index]),
+            }
+            for col_index, col in enumerate(FEATURE_COLS)
+        ]
+        features.sort(key=lambda item: abs(item["total"]), reverse=True)
+
+        return {
+            "asset": asset,
+            "date": target_date,
+            "engine": engine,
+            "score": float(final_score),
+            "baseline": float(baseline),
+            "rank": int(rank),
+            "cross_section": len(assets),
+            "model_weight": model_weight,
+            "prior_weight": prior_weight,
+            "features": features,
+        }
 
     def _rank_for_bar(
         self, tm: datetime.datetime

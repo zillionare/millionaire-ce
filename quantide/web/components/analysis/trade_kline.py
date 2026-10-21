@@ -13,7 +13,7 @@ import json
 from typing import Any
 
 import polars as pl
-from fasthtml.common import Div, P, Script, Span
+from fasthtml.common import Button, Div, P, Script, Span
 
 from quantide.core.enums import OrderSide
 from quantide.data.models.daily_bars import daily_bars
@@ -28,6 +28,38 @@ TRADE_KLINE_MA_PERIODS = (5, 10, 20, 30, 120, 250)
 TRADE_KLINE_CHART_ID = "trade-kline-chart"
 TRADE_KLINE_PANEL_ID = "trade-kline-panel"
 TRADE_KLINE_FEATURE_LOOKBACK_DAYS = 150
+TRADE_KLINE_PANEL_FEATURES = "features"
+TRADE_KLINE_PANEL_SHAP = "shap"
+TRADE_KLINE_PANEL_LABELS = {
+    TRADE_KLINE_PANEL_FEATURES: "特征",
+    TRADE_KLINE_PANEL_SHAP: "SHAP",
+}
+
+
+def _portfolio_supports_attribution(portfolio_id: str) -> bool:
+    """该回测所用策略是否支持逐次预测归因。"""
+    from quantide.service.attribution import supports_attribution
+    from quantide.service.discovery import strategy_loader
+
+    portfolio = db.get_portfolio(portfolio_id)
+    if portfolio is None:
+        return False
+    strategy_cls = strategy_loader.load_from_cache().get(portfolio.name or "")
+    return supports_attribution(strategy_cls)
+
+
+def _decision_attribution(
+    portfolio_id: str, asset: str, buy_dt: datetime.date
+) -> dict[str, Any] | None:
+    """计算该笔买入在决策日的预测归因（按策略能力动态加载）。"""
+    from quantide.data.models.calendar import calendar
+    from quantide.service.attribution import explain_prediction
+
+    try:
+        signal_date = calendar.day_shift(buy_dt, -1)
+    except Exception:
+        signal_date = buy_dt - datetime.timedelta(days=1)
+    return explain_prediction(portfolio_id, asset, signal_date)
 
 
 def _trade_date(tm: Any) -> datetime.date | None:
@@ -209,6 +241,7 @@ def build_trade_kline_payload(
     portfolio_id: str,
     buy_tid: str,
     sell_tid: str | None = None,
+    panel: str = TRADE_KLINE_PANEL_FEATURES,
 ) -> dict[str, Any] | None:
     """构建成交对对应的 K 线、买卖点与信息面板数据。
 
@@ -216,6 +249,7 @@ def build_trade_kline_payload(
         portfolio_id: 回测组合 ID。
         buy_tid: 买入成交 ID。
         sell_tid: 卖出成交 ID（可为空，表示未平仓）。
+        panel: 右侧面板页签（``features`` / ``shap``）。
 
     Returns:
         dict | None: 弹窗数据；成交对不存在时返回 ``None``。
@@ -309,7 +343,18 @@ def build_trade_kline_payload(
         first_dt = bars[0]["dt"]
         markers = [m for m in markers if m["dt"] >= first_dt]
 
-    features = _decision_features(asset, buy_dt)
+    available_panels = [TRADE_KLINE_PANEL_FEATURES]
+    attribution: dict[str, Any] | None = None
+    features: list[tuple[str, float]] | None = None
+    if _portfolio_supports_attribution(portfolio_id):
+        available_panels.append(TRADE_KLINE_PANEL_SHAP)
+    active_panel = panel if panel in available_panels else TRADE_KLINE_PANEL_FEATURES
+    if active_panel == TRADE_KLINE_PANEL_SHAP:
+        attribution = _decision_attribution(portfolio_id, asset, buy_dt)
+        if attribution is None:
+            active_panel = TRADE_KLINE_PANEL_FEATURES
+    if active_panel == TRADE_KLINE_PANEL_FEATURES:
+        features = _decision_features(asset, buy_dt)
 
     return {
         "asset": asset,
@@ -342,6 +387,9 @@ def build_trade_kline_payload(
         "post_start_dt": bars[len(bars) - post_trend_bars]["dt"] if post_trend_bars else "",
         "post_sell_trend": sell_dt is not None,
         "features": features or [],
+        "attribution": attribution,
+        "available_panels": available_panels,
+        "active_panel": active_panel,
     }
 
 
@@ -619,16 +667,94 @@ def _render_trade_panel(payload: dict[str, Any]) -> Any:
 
     return Div(
         *sections,
-        id=TRADE_KLINE_PANEL_ID,
         cls="w-72 shrink-0 max-h-[520px] overflow-y-auto pl-3 border-l border-gray-200",
     )
 
 
-def render_trade_kline_chart(payload: dict[str, Any]) -> Any:
+def _render_panel_tabs(
+    payload: dict[str, Any], tab_urls: dict[str, str] | None
+) -> Any:
+    """构建右侧面板的页签条。"""
+    available = payload.get("available_panels") or [TRADE_KLINE_PANEL_FEATURES]
+    active = payload.get("active_panel") or TRADE_KLINE_PANEL_FEATURES
+    tabs: list[Any] = []
+    for key in available:
+        label = TRADE_KLINE_PANEL_LABELS.get(key, key)
+        if key == active:
+            tabs.append(
+                Span(
+                    label,
+                    cls="px-2 py-1 text-xs font-semibold text-white bg-gray-700 rounded",
+                )
+            )
+            continue
+        url = (tab_urls or {}).get(key)
+        if not url:
+            tabs.append(Span(label, cls="px-2 py-1 text-xs text-gray-500"))
+            continue
+        tabs.append(
+            Button(
+                label,
+                type="button",
+                hx_get=url,
+                hx_target="#modal-container",
+                cls="px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-100",
+            )
+        )
+    return Div(*tabs, cls="flex items-center gap-1 mb-2")
+
+
+def _render_attribution_panel(attribution: dict[str, Any]) -> Any:
+    """构建 SHAP 归因面板。"""
+    rows: list[Any] = [
+        _panel_row("决策日", str(attribution.get("date", ""))),
+        _panel_row("模型", str(attribution.get("engine", ""))),
+        _panel_row("最终得分", f"{float(attribution.get('score') or 0):+.4f}"),
+        _panel_row(
+            "截面排名",
+            f"#{attribution.get('rank')} / {attribution.get('cross_section')}",
+        ),
+        _panel_row("基线分", f"{float(attribution.get('baseline') or 0):+.4f}"),
+        _panel_row(
+            "权重",
+            f"模型 {float(attribution.get('model_weight') or 0):.1f}"
+            f" / 先验 {float(attribution.get('prior_weight') or 0):.1f}",
+        ),
+    ]
+    header = Div(
+        Div("归因（模型 TreeSHAP + 先验分项）", cls="text-xs font-semibold text-gray-700 mb-1"),
+        *rows,
+        cls="mb-2",
+    )
+    feature_rows = [
+        Div(
+            Span(item["name"], cls="text-xs text-gray-600 truncate"),
+            Span(
+                f"{float(item.get('total') or 0):+.4f}",
+                cls="text-xs text-gray-900 font-medium text-right tabular-nums",
+            ),
+            cls="flex items-center justify-between gap-2 py-0.5 border-b border-gray-100",
+        )
+        for item in attribution.get("features") or []
+    ]
+    legend = Div(
+        Div(
+            "特征（合计贡献）",
+            cls="text-xs font-semibold text-gray-700 mb-1",
+        ),
+        *feature_rows,
+    )
+    return Div(header, legend)
+
+
+def render_trade_kline_chart(
+    payload: dict[str, Any], tab_urls: dict[str, str] | None = None
+) -> Any:
     """渲染 K 线图容器与右侧信息面板。
 
     Args:
         payload: :func:`build_trade_kline_payload` 生成的数据。
+        tab_urls: 各页签对应的弹窗 URL（由页面层提供）。
 
     Returns:
         Any: 可直接放入弹窗主体的节点。
@@ -666,7 +792,16 @@ def render_trade_kline_chart(payload: dict[str, Any]) -> Any:
         summary,
         Div(
             Div(id=TRADE_KLINE_CHART_ID, cls="w-full h-[520px]"),
-            _render_trade_panel(payload),
+            Div(
+                _render_panel_tabs(payload, tab_urls),
+                (
+                    _render_attribution_panel(payload["attribution"])
+                    if payload.get("attribution")
+                    else _render_trade_panel(payload)
+                ),
+                id=TRADE_KLINE_PANEL_ID,
+                cls="w-80 shrink-0 max-h-[520px] overflow-y-auto pl-3 border-l border-gray-200",
+            ),
             cls="flex gap-2 items-start",
         ),
         Script(_chart_script(payload)),

@@ -2844,12 +2844,25 @@ def _trade_kline_modal_footer() -> Any:
     )
 
 
-def _trade_pair_nav_url(portfolio_id: str, pair: Any) -> str:
-    """构建成交对 K 线弹窗的跳转链接。"""
-    return (
+def _trade_kline_modal_url(
+    portfolio_id: str,
+    buy_tid: str,
+    sell_tid: str | None,
+    panel: str = "",
+) -> str:
+    """构建成交对 K 线弹窗链接（可带右侧面板页签）。"""
+    url = (
         f"/strategy/backtest/{portfolio_id}/trade/kline/modal"
-        f"?buy_tid={quote(pair.buy_tid)}&sell_tid={quote(pair.sell_tid or '')}"
+        f"?buy_tid={quote(buy_tid)}&sell_tid={quote(sell_tid or '')}"
     )
+    if panel:
+        url += f"&panel={quote(panel)}"
+    return url
+
+
+def _trade_pair_nav_url(portfolio_id: str, pair: Any, panel: str = "") -> str:
+    """构建成交对 K 线弹窗的跳转链接。"""
+    return _trade_kline_modal_url(portfolio_id, pair.buy_tid, pair.sell_tid, panel)
 
 
 def _trade_kline_modal_title(
@@ -2857,6 +2870,7 @@ def _trade_kline_modal_title(
     payload: dict[str, Any],
     buy_tid: str,
     sell_tid: str | None,
+    panel: str = "",
 ) -> Any:
     """构建带前后翻箭头的弹窗标题。"""
     pairs = _ordered_trade_pairs(portfolio_id)
@@ -2879,7 +2893,7 @@ def _trade_kline_modal_title(
             label,
             type="button",
             title=hint,
-            hx_get=_trade_pair_nav_url(portfolio_id, pairs[index]),
+            hx_get=_trade_pair_nav_url(portfolio_id, pairs[index], panel),
             hx_target="#modal-container",
             cls="w-7 h-7 inline-flex items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-100",
         )
@@ -2906,7 +2920,8 @@ def trade_kline_modal(req, portfolio_id: str):
     query = getattr(req, "query_params", {}) or {}
     buy_tid = str(query.get("buy_tid") or "").strip()
     sell_tid = str(query.get("sell_tid") or "").strip() or None
-    payload = build_trade_kline_payload(portfolio_id, buy_tid, sell_tid)
+    panel = str(query.get("panel") or "").strip()
+    payload = build_trade_kline_payload(portfolio_id, buy_tid, sell_tid, panel)
     if payload is None:
         return _strategy_dialog_modal(
             "K 线",
@@ -2915,9 +2930,15 @@ def trade_kline_modal(req, portfolio_id: str):
             modal_id="trade-kline-modal",
             width_cls="max-w-6xl",
         )
+    active_panel = payload.get("active_panel") or ""
+    tab_urls = {
+        key: _trade_kline_modal_url(portfolio_id, buy_tid, sell_tid, key)
+        for key in payload.get("available_panels") or []
+        if key != active_panel
+    }
     return _strategy_dialog_modal(
-        _trade_kline_modal_title(portfolio_id, payload, buy_tid, sell_tid),
-        render_trade_kline_chart(payload),
+        _trade_kline_modal_title(portfolio_id, payload, buy_tid, sell_tid, active_panel),
+        render_trade_kline_chart(payload, tab_urls),
         _trade_kline_modal_footer(),
         modal_id="trade-kline-modal",
         width_cls="max-w-6xl",

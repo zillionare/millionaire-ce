@@ -386,3 +386,50 @@ def test_render_chart_tooltip_uses_two_decimals_and_daily_change(monkeypatch) ->
     assert "lines.join('<br/>')" in html
     # 当日涨跌幅随 K 线一起下发
     assert "var pcts = [" in html
+
+
+def test_render_panel_tabs_switches_between_features_and_shap(monkeypatch) -> None:
+    """右侧面板为页签：默认特征页，可切到 SHAP 页。"""
+    buy = _trade(tid="t1", tm=datetime.datetime(2024, 6, 3, 9, 30))
+    _install(
+        monkeypatch,
+        [buy],
+        _bars(datetime.date(2022, 1, 3), datetime.date(2024, 6, 3)),
+        store_end=datetime.date(2024, 6, 3),
+    )
+
+    payload = build_trade_kline_payload("pf-1", "t1")
+    assert payload is not None
+    payload["available_panels"] = ["features", "shap"]
+    payload["active_panel"] = "features"
+
+    tab_urls = {
+        "shap": "/strategy/backtest/pf-1/trade/kline/modal?buy_tid=t1&panel=shap"
+    }
+    html = _html(render_trade_kline_chart(payload, tab_urls))
+    assert 'hx-get="/strategy/backtest/pf-1/trade/kline/modal?buy_tid=t1&amp;panel=shap"' in html
+    assert "特征" in html
+    assert "SHAP" in html
+
+    payload["active_panel"] = "shap"
+    payload["attribution"] = {
+        "asset": "002078.SZ",
+        "date": datetime.date(2024, 6, 3),
+        "engine": "LightGBM",
+        "score": 1.2345,
+        "baseline": -0.01,
+        "rank": 7,
+        "cross_section": 4505,
+        "model_weight": 0.7,
+        "prior_weight": 0.3,
+        "features": [
+            {"name": "rs_board_20d", "z": 1.2, "model": 0.01, "prior": 0.02, "total": 0.03}
+        ],
+    }
+    html = _html(render_trade_kline_chart(payload, tab_urls))
+    assert "归因" in html
+    assert "rs_board_20d" in html
+    assert "LightGBM" in html
+    assert "#7 / 4505" in html
+    # 归因页不再显示通用特征明细
+    assert "bias_5" not in html
