@@ -4,6 +4,7 @@ import json
 import uuid
 from pathlib import Path as FilePath
 from typing import Any
+from urllib.parse import quote
 
 import arrow
 import fasthtml.common as fh
@@ -30,11 +31,17 @@ from quantide.service.grid_search import GridSearch
 from quantide.service.metrics import metrics
 from quantide.service.runner import BacktestRunner
 from quantide.service.strategy_runtime import strategy_runtime_manager
+from quantide.service.trade_pairs import build_trade_pairs
+from quantide.web.components.analysis.trade_kline import (
+    build_trade_kline_payload,
+    render_trade_kline_chart,
+)
 from quantide.web.layouts.main import MainLayout
 
 strategy_app, rt = fast_app()
 
 BENCHMARK_ASSET = "000300.SH"
+TRADE_PAIRS_PAGE_SIZE = 100
 BACKTEST_REPORT_TABS = {
     "overview": "收益概述",
     "trades": "交易详情",
@@ -490,6 +497,7 @@ def _build_trade_rows(portfolio_id: str, limit: int = 200) -> list[dict]:
             side_text = "买入" if side_value == OrderSide.BUY else "卖出"
         rows.append(
             {
+                "tid": str(row.get("tid", "")),
                 "tm": str(row.get("tm", "")),
                 "asset": row.get("asset", ""),
                 "side": side_text,
@@ -501,6 +509,165 @@ def _build_trade_rows(portfolio_id: str, limit: int = 200) -> list[dict]:
             }
         )
     return rows
+
+
+def _ordered_trade_pairs(portfolio_id: str) -> list[Any]:
+    """按买入时间倒序返回成交对（与交易明细表顺序一致）。
+
+    Args:
+        portfolio_id: 组合 ID。
+
+    Returns:
+        list: 成交对列表。
+    """
+    return list(reversed(build_trade_pairs(portfolio_id)))
+
+
+def _build_trade_pair_rows(portfolio_id: str) -> list[dict]:
+    """构建成交对明细行（按买入时间倒序）。
+
+    Args:
+        portfolio_id: 组合 ID。
+
+    Returns:
+        list[dict]: 成交对明细。
+    """
+    pairs = _ordered_trade_pairs(portfolio_id)
+    rows = []
+    for pair in pairs:
+        rows.append(
+            {
+                "asset": pair.asset,
+                "buy_tm": str(pair.buy_tm)[:19],
+                "sell_tm": str(pair.sell_tm)[:19] if pair.sell_tm else "",
+                "buy_amount": pair.buy_amount,
+                "sell_amount": pair.sell_amount,
+                "pnl": pair.pnl,
+                "unrealized_pnl": pair.unrealized_pnl,
+                "return_rate": pair.return_rate,
+                "fee": pair.fee,
+                "status": pair.status,
+                "buy_tid": pair.buy_tid,
+                "sell_tid": pair.sell_tid or "",
+            }
+        )
+    return rows
+
+
+def _paginate_trade_pairs(
+    rows: list[dict], page: int, page_size: int = TRADE_PAIRS_PAGE_SIZE
+) -> tuple[list[dict], int, int, int]:
+    """对成交对分页。
+
+    Args:
+        rows: 成交对明细。
+        page: 目标页码（从 1 开始）。
+        page_size: 每页行数。
+
+    Returns:
+        tuple: (当前页数据, 当前页码, 总页数, 总行数)。
+    """
+    total = len(rows)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    current = max(1, min(int(page or 1), total_pages))
+    start = (current - 1) * page_size
+    return rows[start : start + page_size], current, total_pages, total
+
+
+def _build_trade_pair_table(
+    portfolio_id: str,
+    rows: list[dict],
+    page: int,
+    total_pages: int,
+    total: int,
+) -> Any:
+    """构建成交对表格与分页控件。"""
+    table = Table(
+        Thead(
+            Tr(
+                Th("标的"),
+                Th("买入时间"),
+                Th("卖出时间"),
+                Th("金额(买入)"),
+                Th("PnL"),
+                Th("收益率"),
+                Th("费用"),
+            )
+        ),
+        Tbody(
+            *[
+                Tr(
+                    Td(row["asset"]),
+                    Td(row["buy_tm"]),
+                    Td(row["sell_tm"] or "持仓中"),
+                    Td(f"{row['buy_amount']:.2f}"),
+                    Td(
+                        f"{row['pnl']:.2f}"
+                        if row["pnl"] is not None
+                        else (
+                            f"{row['unrealized_pnl']:.2f}（浮盈）"
+                            if row["unrealized_pnl"] is not None
+                            else "—"
+                        ),
+                        cls="text-red-500"
+                        if (row["pnl"] or row["unrealized_pnl"] or 0) > 0
+                        else "text-green-500",
+                    ),
+                    Td(
+                        "—"
+                        if row["return_rate"] is None
+                        else f"{row['return_rate'] * 100:.2f}%"
+                    ),
+                    Td(f"{row['fee']:.2f}"),
+                    hx_get=(
+                        f"/strategy/backtest/{portfolio_id}/trade/kline/modal"
+                        f"?buy_tid={quote(row['buy_tid'])}"
+                        f"&sell_tid={quote(row['sell_tid'])}"
+                    ),
+                    hx_target="#modal-container",
+                    title="点击查看该成交对的 K 线与买卖点",
+                    cls="cursor-pointer hover:bg-blue-50 transition-colors",
+                )
+                for row in rows
+            ],
+            id="trade_pairs_body",
+        ),
+        cls=TableT.striped + " text-xs",
+    )
+
+    def _page_link(target: int, label: str, *, disabled: bool = False) -> Any:
+        if disabled:
+            return Span(label, cls="px-2 py-1 text-xs text-gray-300")
+        return A(
+            label,
+            href=f"/strategy/backtest/{portfolio_id}?tab=trades&page={target}",
+            cls="px-2 py-1 text-xs text-blue-600 hover:underline",
+        )
+
+    page_links = []
+    start_page = max(1, page - 2)
+    end_page = min(total_pages, start_page + 4)
+    start_page = max(1, end_page - 4)
+    for number in range(start_page, end_page + 1):
+        if number == page:
+            page_links.append(
+                Span(str(number), cls="px-2 py-1 text-xs font-semibold text-gray-900")
+            )
+        else:
+            page_links.append(_page_link(number, str(number)))
+
+    pagination = Div(
+        _page_link(page - 1, "上一页", disabled=page <= 1),
+        *page_links,
+        _page_link(page + 1, "下一页", disabled=page >= total_pages),
+        Span(
+            f"第 {page}/{total_pages} 页 · 共 {total} 笔成交对",
+            cls="text-xs text-gray-500 ml-2",
+        ),
+        cls="flex items-center justify-end gap-1 mt-3",
+    )
+
+    return Div(table, pagination, cls="mt-2")
 
 
 def _build_daily_positions(portfolio_id: str) -> list[dict]:
@@ -1511,6 +1678,8 @@ def _parse_params(form, prefix="param_"):
     for k, v in form.items():
         if k.startswith(prefix):
             param_name = k[len(prefix) :]
+            if isinstance(v, str) and not v.strip():
+                continue
             # Try to infer type
             if v.lower() == "true":
                 v = True
@@ -1528,6 +1697,75 @@ def _parse_params(form, prefix="param_"):
     return config
 
 
+TRADE_PARAM_KEYS = (
+    "take_profit_pct",
+    "stop_loss_pct",
+    "up_pct",
+    "down_pct",
+    "horizon",
+    "sell_fraction",
+    "slippage_pct",
+    "use_broker_barriers",
+    "cheat_on_close",
+)
+
+TRADE_PARAM_LABELS = {
+    "take_profit_pct": "止盈比例",
+    "stop_loss_pct": "止损比例",
+    "up_pct": "止盈比例",
+    "down_pct": "止损比例",
+    "horizon": "持有交易日",
+    "sell_fraction": "卖出比例",
+    "slippage_pct": "滑点比例",
+    "use_broker_barriers": "由 Broker 执行障碍",
+    "cheat_on_close": "按收盘价成交",
+    "commission": "佣金率(单边)",
+    "stamp_duty": "印花税率(卖出)",
+    "transfer_fee": "过户费率(双边)",
+    "min_commission": "单笔最低佣金",
+}
+
+BROKER_FEE_PARAM_DEFAULTS = {
+    "commission": 1e-4,
+    "stamp_duty": 5e-4,
+    "transfer_fee": 1e-5,
+    "min_commission": 5.0,
+}
+
+
+def _split_backtest_params(default_params: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """拆分策略参数与交易参数。
+
+    Args:
+        default_params: 策略默认参数。
+
+    Returns:
+        tuple: (策略参数, 交易参数)。
+    """
+    strategy_params = {
+        k: v for k, v in default_params.items() if k not in TRADE_PARAM_KEYS
+    }
+    trade_params = {k: v for k, v in default_params.items() if k in TRADE_PARAM_KEYS}
+    for key, value in BROKER_FEE_PARAM_DEFAULTS.items():
+        trade_params.setdefault(key, value)
+    return strategy_params, trade_params
+
+
+def _build_param_inputs(params: dict[str, Any], *, labeled: bool) -> list[Any]:
+    """构建参数输入行。"""
+    inputs = []
+    for k, v in params.items():
+        label = f"{TRADE_PARAM_LABELS.get(k, k)} {k}" if labeled else k
+        inputs.append(
+            Div(
+                Span(label, cls="text-sm font-medium text-gray-500 w-48 shrink-0"),
+                Input(name=f"param_{k}", value=str(v), cls="input input-sm w-full"),
+                cls="flex items-center gap-3 mb-3"
+            )
+        )
+    return inputs
+
+
 @rt("/{name}/backtest/modal")
 def backtest_modal(name: str):
     strategies = strategy_loader.load_from_cache()
@@ -1536,16 +1774,10 @@ def backtest_modal(name: str):
         return "Strategy not found"
 
     default_params = _get_strategy_default_params(cls)
+    strategy_params, trade_params = _split_backtest_params(default_params)
 
-    param_inputs = []
-    for k, v in default_params.items():
-        param_inputs.append(
-            Div(
-                Span(k, cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-                Input(name=f"param_{k}", value=str(v), cls="input input-sm w-full"),
-                cls="flex items-center gap-3 mb-3"
-            )
-        )
+    param_inputs = _build_param_inputs(strategy_params, labeled=False)
+    trade_param_inputs = _build_param_inputs(trade_params, labeled=True)
 
     return Div(
         Div(
@@ -1607,6 +1839,18 @@ def backtest_modal(name: str):
                     cls="ml-[6.75rem] mb-3 text-xs text-gray-500",
                 ),
                 Div(H4("策略参数", cls="text-sm font-semibold text-gray-600 mt-4 mb-2"), *param_inputs),
+                Details(
+                    Summary(
+                        "交易参数（三重障碍 / 滑点 / 手续费，一般无需修改）",
+                        cls="cursor-pointer text-sm font-semibold text-gray-600",
+                    ),
+                    P(
+                        "这些参数决定成交与费用口径，默认按上次使用的值。修改三重障碍会影响训练标签，需要重新训练模型。",
+                        cls="text-xs text-gray-500 mt-2 mb-3",
+                    ),
+                    *trade_param_inputs,
+                    cls="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2",
+                ),
                 Div(
                     Button("取消", type="button", cls="btn btn-ghost", onclick=STRATEGY_MODAL_CLOSE_JS),
                     Button(
@@ -2587,6 +2831,99 @@ def delete_backtest_execute(portfolio_id: str):
     )
 
 
+def _trade_kline_modal_footer() -> Any:
+    """构建 K 线弹窗底部按钮。"""
+    return Div(
+        Button(
+            "关闭",
+            type="button",
+            cls="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50",
+            onclick=STRATEGY_MODAL_CLOSE_JS,
+        ),
+        cls="flex justify-end gap-2",
+    )
+
+
+def _trade_pair_nav_url(portfolio_id: str, pair: Any) -> str:
+    """构建成交对 K 线弹窗的跳转链接。"""
+    return (
+        f"/strategy/backtest/{portfolio_id}/trade/kline/modal"
+        f"?buy_tid={quote(pair.buy_tid)}&sell_tid={quote(pair.sell_tid or '')}"
+    )
+
+
+def _trade_kline_modal_title(
+    portfolio_id: str,
+    payload: dict[str, Any],
+    buy_tid: str,
+    sell_tid: str | None,
+) -> Any:
+    """构建带前后翻箭头的弹窗标题。"""
+    pairs = _ordered_trade_pairs(portfolio_id)
+    current = next(
+        (
+            index
+            for index, pair in enumerate(pairs)
+            if pair.buy_tid == buy_tid and (sell_tid is None or pair.sell_tid == sell_tid)
+        ),
+        None,
+    )
+
+    def _arrow(index: int | None, label: str, hint: str) -> Any:
+        if index is None or index < 0 or index >= len(pairs):
+            return Span(
+                label,
+                cls="w-7 h-7 inline-flex items-center justify-center rounded text-gray-300",
+            )
+        return Button(
+            label,
+            type="button",
+            title=hint,
+            hx_get=_trade_pair_nav_url(portfolio_id, pairs[index]),
+            hx_target="#modal-container",
+            cls="w-7 h-7 inline-flex items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-100",
+        )
+
+    prev_arrow = _arrow(
+        current - 1 if current is not None else None, "‹", "上一笔成交对"
+    )
+    next_arrow = _arrow(
+        current + 1 if current is not None else None, "›", "下一笔成交对"
+    )
+    return Div(
+        H3(
+            f"{payload.get('name', '')} {payload.get('asset', '')} K 线",
+            cls="text-lg font-medium leading-6 text-gray-900",
+        ),
+        Div(prev_arrow, next_arrow, cls="flex items-center gap-1"),
+        cls="flex items-center justify-between gap-3",
+    )
+
+
+@rt("/backtest/{portfolio_id}/trade/kline/modal")
+def trade_kline_modal(req, portfolio_id: str):
+    """成交对 K 线弹窗路由：展示个股 K 线、买卖点与交易信息。"""
+    query = getattr(req, "query_params", {}) or {}
+    buy_tid = str(query.get("buy_tid") or "").strip()
+    sell_tid = str(query.get("sell_tid") or "").strip() or None
+    payload = build_trade_kline_payload(portfolio_id, buy_tid, sell_tid)
+    if payload is None:
+        return _strategy_dialog_modal(
+            "K 线",
+            P("未找到该笔成交记录。", cls="text-sm text-red-600"),
+            _trade_kline_modal_footer(),
+            modal_id="trade-kline-modal",
+            width_cls="max-w-6xl",
+        )
+    return _strategy_dialog_modal(
+        _trade_kline_modal_title(portfolio_id, payload, buy_tid, sell_tid),
+        render_trade_kline_chart(payload),
+        _trade_kline_modal_footer(),
+        modal_id="trade-kline-modal",
+        width_cls="max-w-6xl",
+    )
+
+
 def _load_backtest_run_config(portfolio_id: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """从 BacktestRun 拿 config + 策略类 default_config (无 run 时回空).
 
@@ -3035,7 +3372,12 @@ async def run_grid_search(req, name: str):
 def backtest_result(req, session, portfolio_id: str):
     layout = MainLayout(title="回测报告", user=session.get("auth"))
     layout.header_active = "策略"
-    active_tab = _normalize_backtest_tab(getattr(req, "query_params", {}).get("tab"))
+    query_params = getattr(req, "query_params", {}) or {}
+    active_tab = _normalize_backtest_tab(query_params.get("tab"))
+    try:
+        trade_page_param = int(query_params.get("page") or 1)
+    except (TypeError, ValueError):
+        trade_page_param = 1
     layout.sidebar_menu = _build_backtest_sidebar_menu(portfolio_id, active_tab)
 
     status, backtest_error = _resolve_backtest_status(portfolio_id)
@@ -3417,31 +3759,17 @@ def backtest_result(req, session, portfolio_id: str):
         }};
     """)
 
-    trade_rows = _build_trade_rows(portfolio_id, limit=200)
+    trade_pair_rows = _build_trade_pair_rows(portfolio_id)
+    trade_pair_rows, trade_page, trade_total_pages, trade_total = _paginate_trade_pairs(
+        trade_pair_rows, trade_page_param
+    )
     positions_rows = _build_daily_positions(portfolio_id)
-    trade_table = Table(
-        Thead(Tr(Th("时间"), Th("标的"), Th("方向"), Th("价格"), Th("数量"), Th("成交额"), Th("费用"))),
-        Tbody(
-            *[
-                Tr(
-                    Td(row["tm"]),
-                    Td(row["asset"]),
-                    Td(
-                        row["side"],
-                        cls="text-red-500"
-                        if row["side_value"] == OrderSide.BUY
-                        else "text-green-500",
-                    ),
-                    Td(f"{row['price']:.2f}"),
-                    Td(f"{row['shares']:.2f}"),
-                    Td(f"{row['amount']:.2f}"),
-                    Td(f"{row['fee']:.2f}"),
-                )
-                for row in trade_rows
-            ],
-            id="trade_table_body",
-        ),
-        cls=TableT.striped + " text-xs"
+    trade_table = _build_trade_pair_table(
+        portfolio_id,
+        trade_pair_rows,
+        trade_page,
+        trade_total_pages,
+        trade_total,
     )
     position_trs = []
     last_date = None

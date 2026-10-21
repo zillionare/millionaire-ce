@@ -1,3 +1,4 @@
+import datetime
 from types import SimpleNamespace
 
 import pandas as pd
@@ -868,3 +869,227 @@ def test_build_backtest_action_cell_includes_delete_button(monkeypatch):
 
     assert 'hx-get="/strategy/backtest/demo-pf/delete/modal"' in html
     assert "trash-2" in html
+
+
+def _trades_tab_page(monkeypatch, trade_rows, query=None):
+    query = query or {"tab": "trades"}
+    monkeypatch.setattr(strategy_page, "_resolve_backtest_status", lambda portfolio_id: ("finished", ""))
+    monkeypatch.setattr(strategy_page, "_build_metrics_payload", lambda portfolio_id: {})
+    monkeypatch.setattr(strategy_page, "_build_date_axis", lambda portfolio_id: [])
+    monkeypatch.setattr(
+        strategy_page,
+        "_build_series_payload",
+        lambda portfolio_id, date_axis: {
+            "date_axis": [],
+            "total": [],
+            "benchmark": [],
+            "daily_pnl": [],
+            "trade_count": [],
+        },
+    )
+    monkeypatch.setattr(strategy_page, "_build_trade_pair_rows", lambda portfolio_id: trade_rows)
+    monkeypatch.setattr(strategy_page, "_build_daily_positions", lambda portfolio_id: [])
+    monkeypatch.setattr(strategy_page, "_build_log_rows", lambda portfolio_id, limit=200: [])
+    monkeypatch.setattr(
+        strategy_page,
+        "_build_log_meta",
+        lambda portfolio_id: {"save_requested": False, "saved": False, "saved_path": ""},
+    )
+
+    return to_xml(
+        strategy_page.backtest_result(
+            FakePageRequest(query),
+            {"auth": "admin"},
+            "demo-pf",
+        )
+    )
+
+
+def test_backtest_result_trades_tab_shows_pairs_with_pagination(monkeypatch):
+    rows = [
+        {
+            "asset": "002078.SZ",
+            "buy_tm": "2024-01-02 09:30:00",
+            "sell_tm": "2024-01-10 14:55:00",
+            "buy_amount": 1250.0,
+            "sell_amount": 1300.0,
+            "pnl": 40.0,
+            "unrealized_pnl": None,
+            "return_rate": 0.032,
+            "fee": 10.0,
+            "status": "closed",
+            "buy_tid": "tid-1",
+            "sell_tid": "tid-2",
+        }
+    ]
+    html = _trades_tab_page(monkeypatch, rows)
+
+    assert 'hx-get="/strategy/backtest/demo-pf/trade/kline/modal?buy_tid=tid-1&amp;sell_tid=tid-2"' in html
+    assert 'hx-target="#modal-container"' in html
+    assert "cursor-pointer" in html
+    assert "金额(买入)" in html
+    assert "PnL" in html
+    assert "第 1/1 页" in html
+
+
+def test_backtest_result_trades_tab_paginates_pairs(monkeypatch):
+    rows = [
+        {
+            "asset": f"00000{index}.SZ",
+            "buy_tm": "2024-01-02 09:30:00",
+            "sell_tm": "2024-01-10 14:55:00",
+            "buy_amount": 100.0,
+            "sell_amount": 110.0,
+            "pnl": 10.0,
+            "unrealized_pnl": None,
+            "return_rate": 0.1,
+            "fee": 1.0,
+            "status": "closed",
+            "buy_tid": f"tid-{index}",
+            "sell_tid": f"sell-{index}",
+        }
+        for index in range(150)
+    ]
+    html = _trades_tab_page(monkeypatch, rows, query={"tab": "trades", "page": "2"})
+
+    assert "第 2/2 页 · 共 150 笔成交对" in html
+    assert html.count("trade/kline/modal") == 50
+    # 末页的“下一页”应为禁用态
+    assert "下一页</span>" in html
+    assert "page=3" not in html
+
+
+def test_trade_kline_modal_route_renders_chart(monkeypatch):
+    monkeypatch.setattr(
+        strategy_page,
+        "build_trade_kline_payload",
+        lambda portfolio_id, buy_tid, sell_tid=None: {
+            "asset": "002078.SZ",
+            "name": "测试股",
+            "pair": {
+                "buy_tid": buy_tid,
+                "sell_tid": sell_tid,
+                "buy_tm": "2024-01-02 09:30:00",
+                "sell_tm": "2024-01-10 14:55:00",
+                "buy_dt": "2024-01-02",
+                "sell_dt": "2024-01-10",
+                "shares": 100,
+                "buy_price": 12.5,
+                "sell_price": 13.0,
+                "buy_amount": 1250,
+                "sell_amount": 1300,
+                "fee": 10,
+                "pnl": 40,
+                "return_rate": 0.03,
+                "holding_days": 8,
+                "status": "closed",
+                "unrealized_pnl": None,
+            },
+            "bars": [
+                {
+                    "dt": "2024-01-02",
+                    "open": 12.0,
+                    "high": 13.0,
+                    "low": 11.5,
+                    "close": 12.5,
+                    "volume": 1000.0,
+                    "ma": {"5": 12.0, "10": 12.0, "20": 12.0, "30": 12.0, "120": 12.0, "250": 12.0},
+                }
+            ],
+            "markers": [],
+            "ma_periods": [5, 10, 20, 30, 120, 250],
+            "lookback_bars": 120,
+            "initial_bars": 1,
+            "post_trend_bars": 0,
+            "post_sell_trend": False,
+            "features": [("bias_5", 0.01)],
+        },
+    )
+
+    html = to_xml(
+        strategy_page.trade_kline_modal(
+            FakePageRequest({"buy_tid": "tid-1", "sell_tid": "tid-2"}), "demo-pf"
+        )
+    )
+
+    assert 'id="trade-kline-chart"' in html
+    assert "echarts.init" in html
+    assert "MA250" in html
+    assert "买入金额" in html
+    assert "收益率" in html
+    assert "bias_5" in html
+    assert "PnL" not in html
+    assert 'onclick="closeStrategyModal()"' in html
+
+
+def test_trade_kline_modal_route_reports_missing_trade(monkeypatch):
+    monkeypatch.setattr(
+        strategy_page,
+        "build_trade_kline_payload",
+        lambda portfolio_id, buy_tid, sell_tid=None: None,
+    )
+
+    html = to_xml(
+        strategy_page.trade_kline_modal(FakePageRequest({"buy_tid": "missing"}), "demo-pf")
+    )
+
+    assert "未找到该笔成交记录" in html
+    assert "trade-kline-chart" not in html
+
+
+def test_parse_params_skips_blank_values():
+    form = {
+        "param_top_k": "3",
+        "param_take_profit_pct": "",
+        "param_use_broker_barriers": "false",
+        "param_slippage_pct": "0.002",
+        "start_date": "2024-01-01",
+    }
+
+    config = strategy_page._parse_params(form)
+
+    assert config == {
+        "top_k": 3,
+        "use_broker_barriers": False,
+        "slippage_pct": 0.002,
+    }
+
+
+def test_trade_kline_modal_title_exposes_prev_next_arrows(monkeypatch):
+    from quantide.service.trade_pairs import TradePair
+
+    def _pair(buy_tid: str, sell_tid: str | None) -> TradePair:
+        return TradePair(
+            asset="002078.SZ",
+            buy_tid=buy_tid,
+            sell_tid=sell_tid,
+            buy_tm=datetime.datetime(2024, 1, 2, 9, 30),
+            sell_tm=datetime.datetime(2024, 1, 10, 14, 55) if sell_tid else None,
+            shares=100.0,
+            buy_price=12.5,
+            sell_price=13.0 if sell_tid else None,
+            buy_amount=1250.0,
+            sell_amount=1300.0 if sell_tid else 0.0,
+            fee=10.0,
+            pnl=40.0 if sell_tid else None,
+            return_rate=0.03 if sell_tid else None,
+            holding_days=8 if sell_tid else None,
+            status="closed" if sell_tid else "open",
+        )
+
+    pairs = [_pair("buy-1", "sell-1"), _pair("buy-2", "sell-2"), _pair("buy-3", "sell-3")]
+    monkeypatch.setattr(
+        strategy_page,
+        "_ordered_trade_pairs",
+        lambda portfolio_id: pairs,
+    )
+
+    title = strategy_page._trade_kline_modal_title(
+        "demo-pf", {"name": "测试", "asset": "002078.SZ"}, "buy-2", "sell-2"
+    )
+    html = to_xml(title)
+
+    assert "上一笔成交对" in html
+    assert "下一笔成交对" in html
+    assert "buy_tid=buy-1" in html
+    assert "buy_tid=buy-3" in html
