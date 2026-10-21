@@ -136,6 +136,8 @@ quantide.db-shm
 .opencode/
 .claude/
 .louke/raw
+# Louke stage artifacts are generated process output, not source.
+.louke/project/stage-results/
 .dev/
 .kilo/
 
