@@ -1176,3 +1176,70 @@ def test_intraday_exit_is_not_rewound_by_cheat_close_clock(broker, data_feed):
     asyncio.run(broker.run_risk_overlay_intraday(make_dt(day1, 14, 57)))
 
     assert "000001.SZ" not in broker.positions
+
+
+class EmptyFrameDataFeed(MockDataFeed):
+    """模拟真实行情源：无行情时返回空 DataFrame（而不是 None）。"""
+
+    def get_price_for_match(self, asset, tm):
+        return pl.DataFrame(
+            {
+                "date": [],
+                "open": [],
+                "close": [],
+                "up_limit": [],
+                "down_limit": [],
+            }
+        )
+
+
+def test_sell_without_market_data_raises_no_data_for_match(calendar):
+    db.init(":memory:")
+    feed = EmptyFrameDataFeed()
+    b = BacktestBroker(
+        bt_start=datetime.date(2024, 1, 2),
+        bt_end=datetime.date(2024, 1, 10),
+        portfolio_id="test_bt_empty",
+        data_feed=feed,
+        principal=1000000,
+    )
+    b._positions["000001.SZ"] = Position(
+        portfolio_id="test_bt_empty", dt=datetime.date(2024, 1, 1), asset="000001.SZ",
+        shares=1000, price=10.0, avail=1000, mv=10000, profit=0
+    )
+
+    with pytest.raises(NoDataForMatch):
+        asyncio.run(
+            b.sell(
+                asset="000001.SZ",
+                shares=1000,
+                price=0,
+                order_time=make_dt(datetime.date(2024, 1, 10), 15, 0),
+            )
+        )
+
+
+def test_stop_backtest_completes_when_liquidation_has_no_market_data(calendar):
+    db.init(":memory:")
+    feed = EmptyFrameDataFeed()
+    b = BacktestBroker(
+        bt_start=datetime.date(2024, 1, 2),
+        bt_end=datetime.date(2024, 1, 10),
+        portfolio_id="test_bt_empty_stop",
+        data_feed=feed,
+        principal=1000000,
+    )
+    b._positions["000001.SZ"] = Position(
+        portfolio_id="test_bt_empty_stop", dt=datetime.date(2024, 1, 1), asset="000001.SZ",
+        shares=1000, price=10.0, avail=1000, mv=10000, profit=0
+    )
+
+    asyncio.run(b.stop_backtest())
+
+    assert b._bt_stopped is True
+    portfolio = db.get_portfolio("test_bt_empty_stop")
+    assert portfolio is not None
+    assert portfolio.status is False
+    asset_rec = db.get_asset(portfolio_id="test_bt_empty_stop", dt=datetime.date(2024, 1, 10))
+    assert asset_rec is not None
+    assert asset_rec.market_value == pytest.approx(10000.0)

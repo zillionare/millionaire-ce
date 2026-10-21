@@ -174,29 +174,38 @@ class BacktestBroker(AbstractBroker):
         # 获取当前所有持仓资产
         assets_to_sell = [a for a, p in self._positions.items() if p.avail > 0]
 
-        for asset in assets_to_sell:
-            pos = self._positions[asset]
-            # 执行卖出。使用市价单 (price=0) 在 order_time (15:00) 撮合，将以收盘价成交
-            await self.sell(asset=asset, shares=pos.avail, price=0, order_time=order_time)
+        try:
+            for asset in assets_to_sell:
+                pos = self._positions[asset]
+                # 执行卖出。使用市价单 (price=0) 在 order_time (15:00) 撮合，将以收盘价成交
+                try:
+                    await self.sell(asset=asset, shares=pos.avail, price=0, order_time=order_time)
+                except Exception as exc:
+                    # 单个标的清仓失败（例如行情缺失、停牌）不应中断回测收尾
+                    self._log(
+                        "WARNING",
+                        f"回测结束清仓失败: {asset} {exc}",
+                        dt=order_time,
+                    )
 
-        # 3. 标记停止并更新数据库状态
-        # 计算剩余持仓（冻结部分）的市值
-        remaining_mv = self.market_value()
+            # 3. 标记停止并更新数据库状态
+            # 计算剩余持仓（冻结部分）的市值
+            remaining_mv = self.market_value()
 
-        dt = self.as_date(self._clock)
-        asset_info = Asset(
-            portfolio_id=self._portfolio_id,
-            dt=dt,
-            principal=self._principal,
-            cash=self._cash,
-            frozen_cash=0,
-            market_value=remaining_mv,
-            total=self._cash + remaining_mv,
-        )
-        db.upsert_asset(asset_info)
-
-        self._bt_stopped = True
-        db.update_portfolio(self._portfolio_id, status=False)
+            dt = self.as_date(self._clock)
+            asset_info = Asset(
+                portfolio_id=self._portfolio_id,
+                dt=dt,
+                principal=self._principal,
+                cash=self._cash,
+                frozen_cash=0,
+                market_value=remaining_mv,
+                total=self._cash + remaining_mv,
+            )
+            db.upsert_asset(asset_info)
+        finally:
+            self._bt_stopped = True
+            db.update_portfolio(self._portfolio_id, status=False)
 
     def _fill_history_gaps(self, end_fill: datetime.date) -> None:
         """填补历史数据缺失，确保资产记录和持仓记录完整
@@ -882,7 +891,7 @@ class BacktestBroker(AbstractBroker):
 
         本方法使用内存中的 positions 缓存快速计算，不刷新数据，最终结果为近似值。
         """
-        return np.sum([pos.mv for pos in self._positions.values()])
+        return float(np.sum([pos.mv for pos in self._positions.values()]))
 
     def total_asset(self)-> float:
         """获取当前总资产
@@ -961,7 +970,7 @@ class BacktestBroker(AbstractBroker):
 
         # 1. 获取撮合所需的行情数据
         bars = self._data_feed.get_price_for_match(asset, order_time)
-        if bars is None:
+        if bars is None or bars.is_empty():
             self._log(
                 "WARNING",
                 f"failed to match {asset}, no data at {order_time}",
