@@ -240,3 +240,26 @@ def test_format_report_contains_key_fields():
     assert "f | 持有 1 日" in text
     assert "RankIC" in text
     assert "十分位" in text
+
+
+def test_study_factors_matches_single_factor_results() -> None:
+    """批量检验与单因子检验结果一致。"""
+    from quantide.factors.alphatest import study_factors
+
+    panel = _panel(n_days=20, n_assets=150, noise=0.0001)
+
+    batch = study_factors(panel, ["f"], holding_days=1, price="close")
+    single_f = study_single_factor(panel, "f", holding_days=1, price="close")
+
+    assert [r.factor for r in batch] == ["f"]
+    by_factor = {r.factor: r for r in batch}
+    assert by_factor["f"].rank_ic.mean == pytest.approx(single_f.rank_ic.mean)
+    assert by_factor["f"].rank_ic.n_days == single_f.rank_ic.n_days
+    assert len(by_factor["f"].deciles) == len(single_f.deciles)
+
+
+def test_study_factors_rejects_missing_factor() -> None:
+    from quantide.factors.alphatest import study_factors
+
+    with pytest.raises(KeyError):
+        study_factors(_panel(n_days=5, n_assets=110), ["missing"], holding_days=1)

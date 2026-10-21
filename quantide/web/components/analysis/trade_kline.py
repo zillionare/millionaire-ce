@@ -28,14 +28,14 @@ TRADE_KLINE_MA_PERIODS = (5, 10, 20, 30, 120, 250)
 TRADE_KLINE_CHART_ID = "trade-kline-chart"
 TRADE_KLINE_PANEL_ID = "trade-kline-panel"
 TRADE_KLINE_FEATURE_LOOKBACK_DAYS = 150
-TRADE_KLINE_PANEL_FEATURES = "features"
-TRADE_KLINE_PANEL_SHAP = "shap"
-#: 全市场兜底计算的因子缓存（键：资产 + 决策日）
-_MARKET_FEATURE_CACHE: dict[tuple[str, str], list[tuple[str, float]]] = {}
+TRADE_KLINE_PANEL_SUMMARY = "summary"
+TRADE_KLINE_PANEL_BUY = "buy"
+TRADE_KLINE_PANEL_SELL = "sell"
 
 TRADE_KLINE_PANEL_LABELS = {
-    TRADE_KLINE_PANEL_FEATURES: "特征",
-    TRADE_KLINE_PANEL_SHAP: "SHAP",
+    TRADE_KLINE_PANEL_SUMMARY: "摘要",
+    TRADE_KLINE_PANEL_BUY: "买入归因",
+    TRADE_KLINE_PANEL_SELL: "卖出归因",
 }
 
 
@@ -191,81 +191,6 @@ def _build_markers(
     return markers
 
 
-def _decision_features(
-    portfolio_id: str,
-    asset: str,
-    decision_date: datetime.date,
-) -> tuple[list[tuple[str, float]], str] | None:
-    """计算决策日该股票的模型特征取值。
-
-    优先使用策略自己的因子面板（同一选股池、同一复权口径 → 与模型输入一致）；
-    策略不支持时退化为全市场计算。
-
-    Args:
-        portfolio_id: 回测组合 ID。
-        asset: 证券代码。
-        decision_date: 决策日。
-
-    Returns:
-        list | None: (特征名, 取值) 列表；无法计算时返回 ``None``。
-    """
-    try:
-        from quantide.factors import FEATURE_COLS, compute_alpha_features
-    except Exception:
-        return None
-
-    from quantide.service.attribution import explain_features
-
-    try:
-        signal_date = _signal_date_for(decision_date, None)
-    except Exception:
-        signal_date = decision_date
-    features = explain_features(portfolio_id, asset, signal_date)
-    if features:
-        return features, "策略选股池口径（与模型输入一致）"
-
-    cache_key = (asset, decision_date.isoformat())
-    cached = _MARKET_FEATURE_CACHE.get(cache_key)
-    if cached is not None:
-        return cached, "全市场口径（该股不在策略选股池内）"
-
-    try:
-        panel = daily_bars.get_bars_in_range(
-            decision_date - datetime.timedelta(days=TRADE_KLINE_FEATURE_LOOKBACK_DAYS),
-            decision_date,
-            assets=None,
-            adjust=None,
-            eager_mode=True,
-        )
-        if isinstance(panel, pl.LazyFrame):
-            panel = panel.collect()
-        if panel is None or panel.is_empty():
-            return None
-        features = compute_alpha_features(panel)
-        row = features.filter(
-            (pl.col("asset") == asset) & (pl.col("date") == pl.lit(decision_date))
-        )
-        if row.is_empty():
-            return None
-        values = row.row(0, named=True)
-        result: list[tuple[str, float]] = []
-        for column in FEATURE_COLS:
-            value = values.get(column)
-            if value is None:
-                continue
-            try:
-                result.append((column, float(value)))
-            except (TypeError, ValueError):
-                continue
-        if result:
-            if len(_MARKET_FEATURE_CACHE) >= 64:
-                _MARKET_FEATURE_CACHE.pop(next(iter(_MARKET_FEATURE_CACHE)))
-            _MARKET_FEATURE_CACHE[cache_key] = result
-        return (result, "全市场口径（该股不在策略选股池内）") if result else None
-    except Exception:
-        return None
-
-
 def _find_pair(
     portfolio_id: str,
     buy_tid: str,
@@ -282,7 +207,7 @@ def build_trade_kline_payload(
     portfolio_id: str,
     buy_tid: str,
     sell_tid: str | None = None,
-    panel: str = TRADE_KLINE_PANEL_FEATURES,
+    panel: str = TRADE_KLINE_PANEL_SUMMARY,
 ) -> dict[str, Any] | None:
     """构建成交对对应的 K 线、买卖点与信息面板数据。
 
@@ -384,26 +309,22 @@ def build_trade_kline_payload(
         first_dt = bars[0]["dt"]
         markers = [m for m in markers if m["dt"] >= first_dt]
 
-    available_panels = [TRADE_KLINE_PANEL_FEATURES]
-    attribution: dict[str, Any] | None = None
-    features: list[tuple[str, float]] | None = None
-    if _portfolio_supports_attribution(portfolio_id):
-        available_panels.append(TRADE_KLINE_PANEL_SHAP)
-    active_panel = panel if panel in available_panels else TRADE_KLINE_PANEL_FEATURES
+    available_panels = [TRADE_KLINE_PANEL_SUMMARY]
+    buy_attribution: dict[str, Any] | None = None
     sell_attribution: dict[str, Any] | None = None
-    if active_panel == TRADE_KLINE_PANEL_SHAP:
-        attribution = _decision_attribution(portfolio_id, asset, buy_dt, pair.buy_tm)
-        if attribution is None:
-            active_panel = TRADE_KLINE_PANEL_FEATURES
-        elif sell_dt is not None:
-            sell_attribution = _decision_attribution(
-                portfolio_id, asset, sell_dt, pair.sell_tm
-            )
-    features_scope = ""
-    if active_panel == TRADE_KLINE_PANEL_FEATURES:
-        feature_result = _decision_features(portfolio_id, asset, buy_dt)
-        if feature_result is not None:
-            features, features_scope = feature_result
+    if _portfolio_supports_attribution(portfolio_id):
+        available_panels.append(TRADE_KLINE_PANEL_BUY)
+        if sell_dt is not None:
+            available_panels.append(TRADE_KLINE_PANEL_SELL)
+    active_panel = panel if panel in available_panels else TRADE_KLINE_PANEL_SUMMARY
+    if active_panel == TRADE_KLINE_PANEL_BUY:
+        buy_attribution = _decision_attribution(portfolio_id, asset, buy_dt, pair.buy_tm)
+        if buy_attribution is None:
+            active_panel = TRADE_KLINE_PANEL_SUMMARY
+    elif active_panel == TRADE_KLINE_PANEL_SELL:
+        sell_attribution = _decision_attribution(portfolio_id, asset, sell_dt, pair.sell_tm)
+        if sell_attribution is None:
+            active_panel = TRADE_KLINE_PANEL_SUMMARY
 
     return {
         "asset": asset,
@@ -435,9 +356,7 @@ def build_trade_kline_payload(
         "post_trend_bars": post_trend_bars,
         "post_start_dt": bars[len(bars) - post_trend_bars]["dt"] if post_trend_bars else "",
         "post_sell_trend": sell_dt is not None,
-        "features": features or [],
-        "features_scope": features_scope,
-        "attribution": attribution,
+        "buy_attribution": buy_attribution,
         "sell_attribution": sell_attribution,
         "available_panels": available_panels,
         "active_panel": active_panel,
@@ -666,12 +585,12 @@ def _panel_row(label: str, value: str) -> Any:
     )
 
 
-def _render_trade_panel(payload: dict[str, Any]) -> Any:
-    """构建右侧交易信息与决策特征面板。"""
+def _render_summary_panel(payload: dict[str, Any]) -> Any:
+    """构建「摘要」面板：只显示交易信息。"""
     pair = payload.get("pair") or {}
-    sections: list[Any] = []
-
     trade_rows = [
+        _panel_row("买入日期", str(pair.get("buy_dt") or "—")),
+        _panel_row("卖出日期", str(pair.get("sell_dt") or "持仓中")),
         _panel_row("买入价(实际成交)", _format_number(pair.get("buy_price"))),
         _panel_row("卖出价(实际成交)", _format_number(pair.get("sell_price"))),
         _panel_row("买入金额", _format_number(pair.get("buy_amount"))),
@@ -683,47 +602,18 @@ def _render_trade_panel(payload: dict[str, Any]) -> Any:
             _panel_row("收益率", "—" if rate is None else f"{float(rate) * 100:.2f}%")
         )
         trade_rows.append(
-            _panel_row("持仓天数", "—" if pair.get("holding_days") is None else str(pair.get("holding_days")))
+            _panel_row(
+                "持仓天数",
+                "—" if pair.get("holding_days") is None else str(pair.get("holding_days")),
+            )
         )
     else:
         trade_rows.append(
             _panel_row("浮动盈亏", _format_number(pair.get("unrealized_pnl")))
         )
-    sections.append(
-        Div(
-            Div("交易信息", cls="text-xs font-semibold text-gray-700 mb-1"),
-            *trade_rows,
-            cls="mb-3",
-        )
-    )
-
-    scope = payload.get("features_scope") or ""
-    features = payload.get("features") or []
-    if scope:
-        sections.append(
-            P(scope, cls="text-xs text-gray-400 mb-1")
-        )
-    if features:
-        feature_rows = [
-            _panel_row(name, f"{value:.4f}") for name, value in features
-        ]
-        sections.append(
-            Div(
-                Div("决策特征（买入日）", cls="text-xs font-semibold text-gray-700 mb-1"),
-                *feature_rows,
-            )
-        )
-    else:
-        sections.append(
-            Div(
-                Div("决策特征", cls="text-xs font-semibold text-gray-700 mb-1"),
-                P("该策略未提供特征明细。", cls="text-xs text-gray-400"),
-            )
-        )
-
     return Div(
-        *sections,
-        cls="w-72 shrink-0 max-h-[520px] overflow-y-auto pl-3 border-l border-gray-200",
+        Div("交易信息", cls="text-xs font-semibold text-gray-700 mb-1"),
+        *trade_rows,
     )
 
 
@@ -731,8 +621,8 @@ def _render_panel_tabs(
     payload: dict[str, Any], tab_urls: dict[str, str] | None
 ) -> Any:
     """构建右侧面板的页签条。"""
-    available = payload.get("available_panels") or [TRADE_KLINE_PANEL_FEATURES]
-    active = payload.get("active_panel") or TRADE_KLINE_PANEL_FEATURES
+    available = payload.get("available_panels") or [TRADE_KLINE_PANEL_SUMMARY]
+    active = payload.get("active_panel") or TRADE_KLINE_PANEL_SUMMARY
     tabs: list[Any] = []
     for key in available:
         label = TRADE_KLINE_PANEL_LABELS.get(key, key)
@@ -760,61 +650,8 @@ def _render_panel_tabs(
     return Div(*tabs, cls="flex items-center gap-1 mb-2")
 
 
-def _render_attribution_panel(
-    attribution: dict[str, Any], sell_attribution: dict[str, Any] | None = None
-) -> Any:
-    """构建 SHAP 归因面板（买入侧 + 卖出侧）。"""
-    rows: list[Any] = [
-        _panel_row("决策日", str(attribution.get("date", ""))),
-        _panel_row("模型", str(attribution.get("engine", ""))),
-        _panel_row("最终得分", f"{float(attribution.get('score') or 0):+.4f}"),
-        _panel_row(
-            "截面排名",
-            f"#{attribution.get('rank')} / {attribution.get('cross_section')}",
-        ),
-        _panel_row("基线分", f"{float(attribution.get('baseline') or 0):+.4f}"),
-    ]
-    header = Div(
-        Div("买入归因（模型 TreeSHAP）", cls="text-xs font-semibold text-gray-700 mb-1"),
-        *rows,
-        cls="mb-2",
-    )
-    feature_rows = [
-        Div(
-            Span(item["name"], cls="text-xs text-gray-600 truncate"),
-            Span(
-                f"z {float(item.get('z') or 0):+.2f}",
-                cls="text-xs text-gray-400 text-right tabular-nums w-16",
-            ),
-            Span(
-                f"{float(item.get('total') or 0):+.4f}",
-                cls="text-xs text-gray-900 font-medium text-right tabular-nums",
-            ),
-            cls="flex items-center justify-between gap-2 py-0.5 border-b border-gray-100",
-        )
-        for item in attribution.get("features") or []
-    ]
-    legend = Div(
-        Div(
-            "特征（合计贡献）",
-            cls="text-xs font-semibold text-gray-700 mb-1",
-        ),
-        *feature_rows,
-    )
-    blocks = [header, legend]
-    if sell_attribution:
-        blocks.append(
-            _render_attribution_block(
-                sell_attribution, "卖出时点评分（模型）"
-            )
-        )
-    return Div(*blocks)
-
-
-def _render_attribution_block(
-    attribution: dict[str, Any], title: str
-) -> Any:
-    """构建一段归因（标题 + 概览 + 特征贡献）。"""
+def _render_attribution_panel(attribution: dict[str, Any], title: str) -> Any:
+    """构建归因面板：概览 + 特征（名称/特征值/归因权重）。"""
     rows: list[Any] = [
         _panel_row("决策日", str(attribution.get("date", ""))),
         _panel_row("模型", str(attribution.get("engine", ""))),
@@ -829,26 +666,36 @@ def _render_attribution_block(
         Div(
             Span(item["name"], cls="text-xs text-gray-600 truncate"),
             Span(
-                f"z {float(item.get('z') or 0):+.2f}",
-                cls="text-xs text-gray-400 text-right tabular-nums w-16",
+                "—" if item.get("value") is None else f"{float(item['value']):+.4f}",
+                cls="text-xs text-gray-400 text-right tabular-nums w-20",
             ),
             Span(
                 f"{float(item.get('total') or 0):+.4f}",
-                cls="text-xs text-gray-900 font-medium text-right tabular-nums",
+                cls="text-xs text-gray-900 font-medium text-right tabular-nums w-20",
             ),
             cls="flex items-center justify-between gap-2 py-0.5 border-b border-gray-100",
         )
         for item in attribution.get("features") or []
     ]
     return Div(
-        Div(title, cls="text-xs font-semibold text-gray-700 mb-1 mt-3"),
+        Div(title, cls="text-xs font-semibold text-gray-700 mb-1"),
         *rows,
         Div(
-            "特征（合计贡献）",
+            "特征 / 特征值 / 归因权重",
             cls="text-xs font-semibold text-gray-700 mb-1 mt-2",
         ),
         *feature_rows,
     )
+
+
+def _render_active_panel(payload: dict[str, Any]) -> Any:
+    """渲染当前页签的内容。"""
+    active = payload.get("active_panel") or TRADE_KLINE_PANEL_SUMMARY
+    if active == TRADE_KLINE_PANEL_BUY and payload.get("buy_attribution"):
+        return _render_attribution_panel(payload["buy_attribution"], "买入归因")
+    if active == TRADE_KLINE_PANEL_SELL and payload.get("sell_attribution"):
+        return _render_attribution_panel(payload["sell_attribution"], "卖出归因")
+    return _render_summary_panel(payload)
 
 
 def render_trade_kline_chart(
@@ -898,15 +745,12 @@ def render_trade_kline_chart(
             Div(id=TRADE_KLINE_CHART_ID, cls="w-full h-[520px]"),
             Div(
                 _render_panel_tabs(payload, tab_urls),
-                (
-                    _render_attribution_panel(
-                        payload["attribution"], payload.get("sell_attribution")
-                    )
-                    if payload.get("attribution")
-                    else _render_trade_panel(payload)
+                Div(
+                    _render_active_panel(payload),
+                    cls="max-h-[478px] overflow-y-auto pr-1",
                 ),
                 id=TRADE_KLINE_PANEL_ID,
-                cls="w-80 shrink-0 max-h-[520px] overflow-y-auto pl-3 border-l border-gray-200",
+                cls="w-80 shrink-0 pl-3 border-l border-gray-200",
             ),
             cls="flex gap-2 items-start",
         ),

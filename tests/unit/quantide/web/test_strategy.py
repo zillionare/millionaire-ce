@@ -1003,7 +1003,32 @@ def test_trade_kline_modal_route_renders_chart(monkeypatch):
             "initial_bars": 1,
             "post_trend_bars": 0,
             "post_sell_trend": False,
-            "features": [("bias_5", 0.01)],
+            "buy_attribution": {
+                "asset": "002078.SZ",
+                "date": "2024-01-02",
+                "engine": "LightGBM",
+                "score": 1.5,
+                "baseline": -0.1,
+                "rank": 3,
+                "cross_section": 100,
+                "features": [
+                    {"name": "bias_5", "value": -0.0229, "z": -1.16, "total": 0.05}
+                ],
+            },
+            "sell_attribution": {
+                "asset": "002078.SZ",
+                "date": "2024-01-10",
+                "engine": "LightGBM",
+                "score": -0.8,
+                "baseline": -0.1,
+                "rank": 88,
+                "cross_section": 100,
+                "features": [
+                    {"name": "bias_5", "value": 0.0311, "z": -1.2, "total": -0.06}
+                ],
+            },
+            "available_panels": ["summary", "buy", "sell"],
+            "active_panel": "summary",
         },
     )
 
@@ -1018,7 +1043,13 @@ def test_trade_kline_modal_route_renders_chart(monkeypatch):
     assert "MA250" in html
     assert "买入金额" in html
     assert "收益率" in html
-    assert "bias_5" in html
+    assert "买入日期" in html
+    assert "卖出日期" in html
+    assert "摘要" in html
+    assert "买入归因" in html
+    assert "卖出归因" in html
+    # 摘要页不展示归因明细
+    assert "bias_5" not in html
     assert "PnL" not in html
     assert 'onclick="closeStrategyModal()"' in html
 

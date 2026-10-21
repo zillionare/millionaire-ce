@@ -59,6 +59,7 @@ from quantide.web.pages.init_wizard import init_wizard, init_wizard_app
 from quantide.web.pages.live import live_app
 from quantide.web.pages.paper import paper_app
 from quantide.web.pages.strategy import strategy_app
+from quantide.web.pages.system.alpha_ledger import system_alpha_ledger_app
 from quantide.web.pages.system.calendar import system_calendar_app
 from quantide.web.pages.system.datasource import system_datasource_app
 from quantide.web.pages.system.gateway import system_gateway_app
@@ -172,6 +173,7 @@ def _attach_runtime_to_app_states(runtime) -> None:
         data_market_app,
         data_stocks_app,
         init_wizard_app,
+        system_alpha_ledger_app,
         system_calendar_app,
         system_datasource_app,
         system_gateway_app,
@@ -197,6 +199,7 @@ def _attach_root_app_to_app_states(root_app) -> None:
         data_market_app,
         data_stocks_app,
         init_wizard_app,
+        system_alpha_ledger_app,
         system_calendar_app,
         system_datasource_app,
         system_gateway_app,
@@ -449,6 +452,7 @@ def create_app(
                 lambda req: RedirectResponse("/system/market/", status_code=303),
                 methods=["GET"],
             ),
+            Mount("/system/alpha-ledger", system_alpha_ledger_app),
             Mount("/system/calendar", system_calendar_app),
             Mount("/system/stocks", system_stocks_app),
             Mount("/system/market", system_market_app),

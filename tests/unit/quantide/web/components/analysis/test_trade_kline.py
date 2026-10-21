@@ -111,11 +111,6 @@ def _install(
         property(lambda self: store_end),
         raising=False,
     )
-    monkeypatch.setattr(
-        trade_kline_module,
-        "_decision_features",
-        lambda portfolio_id, asset, decision_date: (features, "策略选股池口径"),
-    )
 
 
 def test_build_payload_returns_none_for_unknown_pair(monkeypatch) -> None:
@@ -235,8 +230,10 @@ def test_render_chart_emits_ma_series_and_info_panel(monkeypatch) -> None:
     assert "买入金额" in html
     assert "费用" in html
     assert "收益率" in html
-    assert "决策特征" in html
-    assert "bias_5" in html
+    assert "买入日期" in html
+    assert "卖出日期" in html
+    # 决策特征明细已移出摘要页
+    assert "决策特征" not in html
     # 按要求不展示的字段
     assert "PnL" not in html
     assert "买入时间" not in html
@@ -388,8 +385,8 @@ def test_render_chart_tooltip_uses_two_decimals_and_daily_change(monkeypatch) ->
     assert "var pcts = [" in html
 
 
-def test_render_panel_tabs_switches_between_features_and_shap(monkeypatch) -> None:
-    """右侧面板为页签：默认特征页，可切到 SHAP 页。"""
+def test_render_panel_tabs_switches_between_summary_and_attribution(monkeypatch) -> None:
+    """右侧面板为三个页签：摘要 / 买入归因 / 卖出归因。"""
     buy = _trade(tid="t1", tm=datetime.datetime(2024, 6, 3, 9, 30))
     _install(
         monkeypatch,
@@ -400,43 +397,26 @@ def test_render_panel_tabs_switches_between_features_and_shap(monkeypatch) -> No
 
     payload = build_trade_kline_payload("pf-1", "t1")
     assert payload is not None
-    payload["available_panels"] = ["features", "shap"]
-    payload["active_panel"] = "features"
+    payload["available_panels"] = ["summary", "buy", "sell"]
+    payload["active_panel"] = "summary"
 
     tab_urls = {
-        "shap": "/strategy/backtest/pf-1/trade/kline/modal?buy_tid=t1&panel=shap"
+        "buy": "/strategy/backtest/pf-1/trade/kline/modal?buy_tid=t1&panel=buy",
+        "sell": "/strategy/backtest/pf-1/trade/kline/modal?buy_tid=t1&panel=sell",
     }
     html = _html(render_trade_kline_chart(payload, tab_urls))
-    assert 'hx-get="/strategy/backtest/pf-1/trade/kline/modal?buy_tid=t1&amp;panel=shap"' in html
-    assert "特征" in html
-    assert "SHAP" in html
-
-    payload["active_panel"] = "shap"
-    payload["attribution"] = {
-        "asset": "002078.SZ",
-        "date": datetime.date(2024, 6, 3),
-        "engine": "LightGBM",
-        "score": 1.2345,
-        "baseline": -0.01,
-        "rank": 7,
-        "cross_section": 4505,
-        "model_weight": 0.7,
-        "prior_weight": 0.3,
-        "features": [
-            {"name": "rs_board_20d", "z": 1.2, "model": 0.01, "prior": 0.02, "total": 0.03}
-        ],
-    }
-    html = _html(render_trade_kline_chart(payload, tab_urls))
-    assert "归因" in html
-    assert "rs_board_20d" in html
-    assert "LightGBM" in html
-    assert "#7 / 4505" in html
-    # 归因页不再显示通用特征明细
-    assert "bias_5" not in html
+    assert "panel=buy" in html
+    assert "panel=sell" in html
+    assert "摘要" in html
+    assert "买入归因" in html
+    assert "卖出归因" in html
+    assert "交易信息" in html
+    # 归因页未激活时不展示归因内容
+    assert "特征 / 特征值 / 归因权重" not in html
 
 
-def test_shap_panel_shows_buy_and_sell_attribution(monkeypatch) -> None:
-    """SHAP 面板同时给出买入侧与卖出侧归因。"""
+def test_attribution_panels_are_separate(monkeypatch) -> None:
+    """买入归因与卖出归因分成两个页签。"""
     buy = _trade(tid="t1", tm=datetime.datetime(2024, 6, 3, 9, 30))
     sell = _trade(
         tid="t2",
@@ -453,9 +433,9 @@ def test_shap_panel_shows_buy_and_sell_attribution(monkeypatch) -> None:
 
     payload = build_trade_kline_payload("pf-1", "t1", "t2")
     assert payload is not None
-    payload["available_panels"] = ["features", "shap"]
-    payload["active_panel"] = "shap"
-    payload["attribution"] = {
+    payload["available_panels"] = ["summary", "buy", "sell"]
+    payload["active_panel"] = "buy"
+    payload["buy_attribution"] = {
         "asset": "002078.SZ",
         "date": datetime.date(2024, 6, 3),
         "engine": "LightGBM",
@@ -473,18 +453,26 @@ def test_shap_panel_shows_buy_and_sell_attribution(monkeypatch) -> None:
         "baseline": -0.1,
         "rank": 88,
         "cross_section": 100,
-        "features": [{"name": "bias_5", "z": -1.2, "total": -0.06}],
+        "features": [
+            {"name": "bias_5", "value": 0.0311, "z": -1.2, "total": -0.06}
+        ],
     }
 
     html = _html(render_trade_kline_chart(payload, {}))
 
-    assert "卖出时点评分" in html
-    assert "#88 / 100" in html
+    assert "买入归因" in html
     assert "#3 / 100" in html
+    assert "#88 / 100" not in html
+
+    payload["active_panel"] = "sell"
+    html = _html(render_trade_kline_chart(payload, {}))
+    assert "卖出归因" in html
+    assert "#88 / 100" in html
+    assert "#3 / 100" not in html
 
 
-def test_shap_attribution_only_computed_on_shap_tab(monkeypatch) -> None:
-    """非 SHAP 页签时不应触发归因计算。"""
+def test_attribution_only_computed_on_attribution_tab(monkeypatch) -> None:
+    """非归因页签时不应触发归因计算。"""
     calls: list[str] = []
 
     def _spy(portfolio_id, asset, decision_date, decision_tm=None):
@@ -514,12 +502,12 @@ def test_shap_attribution_only_computed_on_shap_tab(monkeypatch) -> None:
 
     payload = build_trade_kline_payload("pf-1", "t1")
     assert payload is not None
-    assert payload["active_panel"] == "features"
-    assert payload["attribution"] is None
+    assert payload["active_panel"] == "summary"
+    assert payload["buy_attribution"] is None
     assert calls == []
 
-    payload = build_trade_kline_payload("pf-1", "t1", panel="shap")
+    payload = build_trade_kline_payload("pf-1", "t1", panel="buy")
     assert payload is not None
-    assert payload["active_panel"] == "shap"
-    assert payload["attribution"] is not None
+    assert payload["active_panel"] == "buy"
+    assert payload["buy_attribution"] is not None
     assert calls == ["002078.SZ"]

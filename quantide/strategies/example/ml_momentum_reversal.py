@@ -1129,14 +1129,18 @@ class MLMomentumReversalStrategy(BaseStrategy):
         order = sorted(range(len(assets)), key=lambda i: (-scores[i], assets[i]))
         rank = order.index(index) + 1
 
-        features = [
-            {
-                "name": col,
-                "z": float(z_row[col_index]),
-                "total": float(contrib[col_index]),
-            }
-            for col_index, col in enumerate(feature_cols)
-        ]
+        raw_values = cross.row(index, named=True)
+        features = []
+        for col_index, col in enumerate(feature_cols):
+            raw_value = raw_values.get(col)
+            features.append(
+                {
+                    "name": col,
+                    "value": None if raw_value is None else float(raw_value),
+                    "z": float(z_row[col_index]),
+                    "total": float(contrib[col_index]),
+                }
+            )
         features.sort(key=lambda item: abs(item["total"]), reverse=True)
 
         return {

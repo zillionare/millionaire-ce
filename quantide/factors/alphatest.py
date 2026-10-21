@@ -306,6 +306,112 @@ def yearly_rank_ic(
     return dict(sorted(result.items()))
 
 
+def _batch_stats(
+    df: pl.DataFrame,
+    factors: list[str],
+    buckets: int = 10,
+) -> tuple[dict[str, list[float]], dict[int, dict[str, list[float]]], dict[str, list[tuple[int, int, float]]]]:
+    """一次遍历算出多因子的逐日 RankIC、分年 RankIC 与十分位收益。
+
+    Args:
+        df: 含 ``date``/因子/前瞻收益的表。
+        factors: 因子列名列表。
+        buckets: 十分位分组数。
+
+    Returns:
+        tuple: (逐日 IC, 分年 IC, 十分位累计（因子 → [(分组, 样本数, 收益和)])。
+    """
+    ics: dict[str, list[float]] = {f: [] for f in factors}
+    year_ics: dict[int, dict[str, list[float]]] = {}
+    deciles: dict[str, list[tuple[int, int, float]]] = {f: [] for f in factors}
+    sums: dict[str, np.ndarray] = {f: np.zeros(buckets + 1) for f in factors}
+    counts: dict[str, np.ndarray] = {f: np.zeros(buckets + 1) for f in factors}
+
+    for _, group in df.group_by("date"):
+        if group.height < MIN_CROSS_SECTION:
+            continue
+        x = group.select(factors).to_numpy().astype(float)
+        y = group["forward"].to_numpy().astype(float)
+        mask = ~np.isnan(x).any(axis=1) & ~np.isnan(y)
+        if int(mask.sum()) < MIN_CROSS_SECTION:
+            continue
+        x = x[mask]
+        y = y[mask]
+        ranks = np.argsort(np.argsort(x, axis=0), axis=0).astype(float)
+        # Spearman：因子秩与收益秩的相关
+        y_ranks = np.argsort(np.argsort(y)).astype(float)
+        year = group["date"][0].year if hasattr(group["date"][0], "year") else None
+        for col_index, factor in enumerate(factors):
+            r = ranks[:, col_index]
+            if r.std() < 1e-9 or y_ranks.std() < 1e-9:
+                continue
+            value = float(np.corrcoef(r, y_ranks)[0, 1])
+            ics[factor].append(value)
+            if year is not None:
+                year_ics.setdefault(int(year), {}).setdefault(factor, []).append(value)
+            labels = np.floor(r / len(r) * buckets).astype(int) + 1
+            for bucket in range(1, buckets + 1):
+                picked = y[labels == bucket]
+                if picked.size:
+                    sums[factor][bucket] += float(picked.sum())
+                    counts[factor][bucket] += int(picked.size)
+    for factor in factors:
+        deciles[factor] = [
+            (bucket, int(counts[factor][bucket]), float(sums[factor][bucket]))
+            for bucket in range(1, buckets + 1)
+            if counts[factor][bucket]
+        ]
+    return ics, year_ics, deciles
+
+
+def study_factors(
+    panel: pl.DataFrame,
+    factors: list[str],
+    holding_days: int,
+    price: str = "open",
+    buckets: int = 10,
+) -> list[SingleFactorResult]:
+    """批量检验多个因子（同一持有期），向量化计算以加速。
+
+    Args:
+        panel: 因子面板（需含 ``date``/``asset``/因子列）。
+        factors: 因子列名列表。
+        holding_days: 持有交易日数 N。
+        price: 价格字段。
+        buckets: 十分位分组数。
+
+    Returns:
+        list[SingleFactorResult]: 每个因子的检验结果。
+    """
+    missing = [f for f in factors if f not in panel.columns]
+    if missing:
+        raise KeyError(f"面板缺少因子列: {', '.join(missing)}")
+    prepared = prepare_forward_returns(panel, holding_days, price)
+    usable = prepared.filter(pl.col("valid") & pl.col("forward").is_not_null())
+    ics, year_ics, deciles = _batch_stats(usable, factors, buckets=buckets)
+    results: list[SingleFactorResult] = []
+    for factor in factors:
+        buckets_out = [
+            DecileBucket(bucket=bucket, n_samples=n, mean_forward=total / n)
+            for bucket, n, total in deciles[factor]
+        ]
+        results.append(
+            SingleFactorResult(
+                factor=factor,
+                holding_days=holding_days,
+                price=price,
+                rank_ic=summarize(ics[factor]),
+                deciles=buckets_out,
+                by_year={
+                    year: summarize(values.get(factor, []))
+                    for year, values in sorted(year_ics.items())
+                },
+                n_rows=usable.height,
+            )
+        )
+    return results
+
+
 def study_single_factor(
     panel: pl.DataFrame,
     factor: str,
