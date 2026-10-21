@@ -314,3 +314,44 @@ def test_session_absent_does_not_break_page():
             optimize_page_mod.optimize_page(_make_req(), {}, "demo")
         )
     assert "参数优化" in html
+
+
+def test_backtest_modal_prefills_params_and_dates(monkeypatch):
+    """参数优化结果可回填回测向导（参数与日期）。"""
+    from quantide.web.pages import strategy as strategy_mod
+
+    prefill = optimize_page_mod._encode_prefill(
+        {
+            "params": {"top_k": 3},
+            "start_date": "2024-01-02",
+            "end_date": "2024-03-29",
+        }
+    )
+    req = MagicMock()
+    req.query_params = {"prefill": prefill}
+    with patch.object(
+        strategy_mod.strategy_loader,
+        "load_from_cache",
+        return_value={"demo": _fake_strategy()},
+    ):
+        html = strategy_mod.to_xml(strategy_mod.backtest_modal("demo", req))
+    assert 'name="param_top_k"' in html
+    assert 'value="3"' in html
+    assert 'value="2024-01-02"' in html
+    assert 'value="2024-03-29"' in html
+
+
+def test_backtest_modal_ignores_invalid_prefill(monkeypatch):
+    """非法 prefill 不影响回测向导渲染。"""
+    from quantide.web.pages import strategy as strategy_mod
+
+    req = MagicMock()
+    req.query_params = {"prefill": "not-base64!!"}
+    with patch.object(
+        strategy_mod.strategy_loader,
+        "load_from_cache",
+        return_value={"demo": _fake_strategy()},
+    ):
+        html = strategy_mod.to_xml(strategy_mod.backtest_modal("demo", req))
+    assert 'name="param_top_k"' in html
+    assert "2024-01-01" in html

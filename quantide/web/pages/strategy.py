@@ -2072,7 +2072,7 @@ def backtest_modal(name: str, req=None):
             Input(
                 name="start_date",
                 type="date",
-                value="2024-01-01",
+                value=str(prefill.get("start_date") or "2024-01-01"),
                 required=True,
                 cls="input input-sm w-full",
             ),
@@ -2083,7 +2083,9 @@ def backtest_modal(name: str, req=None):
             Input(
                 name="end_date",
                 type="date",
-                value=arrow.now().format("YYYY-MM-DD"),
+                value=str(
+                    prefill.get("end_date") or arrow.now().format("YYYY-MM-DD")
+                ),
                 required=True,
                 cls="input input-sm w-full",
             ),
