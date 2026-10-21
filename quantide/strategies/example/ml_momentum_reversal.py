@@ -515,16 +515,18 @@ def _filter_universe(
     universe_size: int,
     mode: str = "market_cap_trim",
     trim_pct: float = 0.05,
+    holdings: list[str] | None = None,
 ) -> list[str]:
     """Select the tradable universe on ``target_date``.
 
     ``market_cap_trim`` first removes the largest and smallest ``trim_pct`` of
     the cross-section by ``total_mv``, then removes suspended and ST stocks
-    from the remaining set, and finally keeps ``universe_size`` stocks chosen
-    by a per-asset stable hash (size is exact, membership does not rotate with
-    the rebalance date, and it is uncorrelated with market cap;
-    ``universe_size <= 0`` means no cap).  ``liquidity`` keeps the legacy
-    top-N by 20-day mean amount.
+    from the remaining set.  The current holdings are always kept (as long as
+    they are still eligible) so they can be ranked and sold by the alpha rule
+    instead of being force-exited as "未入池"; the remaining slots are filled
+    by a per-asset stable hash (exact size, no rotation with the rebalance
+    date, uncorrelated with market cap; ``universe_size <= 0`` means no cap).
+    ``liquidity`` keeps the legacy top-N by 20-day mean amount.
     """
     on_date = bars_df.filter(pl.col("date") == target_date)
     if on_date.is_empty():
@@ -567,18 +569,20 @@ def _filter_universe(
             if "is_st" in cols:
                 cap = cap.filter(~pl.col("is_st").fill_null(False))
             cap = _drop_st_names(cap)
-            # 裁剪后按「每资产稳定哈希」排序取前 universe_size 只：
+            # 选池：先放入当前持仓（仍合格的），其余按「每资产稳定哈希」补足：
             # - 规模精确等于 universe_size；
-            # - 成员与调仓日无关（同一只股票只要仍在合格池中就一直在池内），
-            #   不会因为重新抽样而被强制卖出；
+            # - 持仓一定在池内 → 不会被「未入池」强卖，可按排名正常卖出；
+            # - 非持仓成员的顺序与调仓日无关 → 不会整池轮换；
             # - 与市值大小无关，避免市值偏置。
-            if universe_size > 0 and cap.height > universe_size:
-                assets = sorted(cap["asset"].unique().to_list())
+            assets = sorted(cap["asset"].unique().to_list())
+            if universe_size > 0 and len(assets) > universe_size:
+                held = [a for a in (holdings or []) if a in set(assets)]
                 ranked = sorted(
-                    assets,
+                    [a for a in assets if a not in set(held)],
                     key=lambda asset: _stable_universe_rank(asset, mode),
                 )
-                cap = cap.filter(pl.col("asset").is_in(ranked[:universe_size]))
+                picked = held + ranked[: max(0, universe_size - len(held))]
+                cap = cap.filter(pl.col("asset").is_in(picked))
             return sorted(cap["asset"].unique().to_list())
 
     cond = (pl.col("close") > 0) & (pl.col("volume") > 0)
@@ -826,6 +830,16 @@ class MLMomentumReversalStrategy(BaseStrategy):
             return cur_date - datetime.timedelta(days=1)
         return cur_date
 
+    def _held_assets(self) -> list[str]:
+        """返回当前持仓的证券代码列表。"""
+        positions = getattr(self.broker, "positions", None) or {}
+        held: list[str] = []
+        for asset, position in positions.items():
+            shares = float(getattr(position, "shares", 0) or 0)
+            if shares > 0:
+                held.append(str(asset))
+        return sorted(held)
+
     def _ensure_backtest_panel(self, signal_date: datetime.date) -> None:
         """Pre-fetch and compute causal feature panel covering the backtest window."""
         if (
@@ -868,6 +882,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 self.universe_size,
                 mode=self.universe_mode,
                 trim_pct=self.market_cap_trim_pct,
+                holdings=self._held_assets(),
             )
             self.log(
                 f"Universe selected on {latest_init_dt}: "
@@ -1232,11 +1247,11 @@ class MLMomentumReversalStrategy(BaseStrategy):
                         "ML动量反转走弱("
                         f"score={score_map.get(asset, 0.0):.2f})"
                     )
-            elif cur_rank is None or cur_rank > self.keep_top_n:
-                rank_label = f"#{cur_rank}" if cur_rank is not None else "未入池"
-                sell_reason = (
-                    f"截面排名跌出前{self.keep_top_n}(排名={rank_label})"
-                )
+            elif cur_rank is None:
+                # 不在选股池内：ST/停牌或被市值裁剪，持仓已不合格
+                sell_reason = "已不符合选股池条件(未入池)"
+            elif cur_rank > self.keep_top_n:
+                sell_reason = f"截面排名跌出前{self.keep_top_n}(排名=#{cur_rank})"
 
             if sell_reason is not None:
                 try:

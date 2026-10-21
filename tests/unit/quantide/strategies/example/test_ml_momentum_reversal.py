@@ -791,3 +791,58 @@ def test_filter_universe_membership_is_stable_across_rebalance_dates(monkeypatch
 
     assert len(first) == 5
     assert first == last
+
+
+def test_filter_universe_always_keeps_current_holdings(monkeypatch):
+    """持仓优先入池，其余按稳定哈希补足，保证持仓不会被"未入池"强卖。"""
+    monkeypatch.setattr(
+        ml_momentum_reversal.stock_list, "_data", pl.DataFrame()
+    )
+    panel = _make_synthetic_panel(n_assets=20, n_days=3)
+    market_caps = {
+        asset: float(index + 1) * 1e8
+        for index, asset in enumerate(sorted(panel["asset"].unique().to_list()))
+    }
+    panel = panel.with_columns(
+        pl.col("asset").replace_strict(market_caps, default=0.0).alias("total_mv")
+    )
+    total_date = panel["date"].max()
+    all_assets = sorted(panel["asset"].unique().to_list())
+    # 选一个"哈希排序靠后"的股票作为持仓，它本不该被随机抽到
+    held = [all_assets[-1]]
+
+    without = ml_momentum_reversal._filter_universe(
+        panel, total_date, 5, mode="market_cap_trim", trim_pct=0.0
+    )
+    with_holding = ml_momentum_reversal._filter_universe(
+        panel, total_date, 5, mode="market_cap_trim", trim_pct=0.0, holdings=held
+    )
+
+    assert len(with_holding) == 5
+    assert held[0] in with_holding
+    assert held[0] not in without
+
+
+def test_filter_universe_holdings_do_not_change_size(monkeypatch):
+    """持仓入池后仍要补足到 universe_size。"""
+    monkeypatch.setattr(
+        ml_momentum_reversal.stock_list, "_data", pl.DataFrame()
+    )
+    panel = _make_synthetic_panel(n_assets=20, n_days=3)
+    panel = panel.with_columns(
+        (pl.col("close") * 1000.0).alias("total_mv")
+    )
+    total_date = panel["date"].max()
+    all_assets = sorted(panel["asset"].unique().to_list())
+
+    assets = ml_momentum_reversal._filter_universe(
+        panel,
+        total_date,
+        8,
+        mode="market_cap_trim",
+        trim_pct=0.0,
+        holdings=all_assets[:3],
+    )
+
+    assert len(assets) == 8
+    assert set(all_assets[:3]) <= set(assets)
