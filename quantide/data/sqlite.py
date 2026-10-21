@@ -195,6 +195,28 @@ class SQLiteDB:
                 [p.to_dict() for p in positions], pk=Position.__pk__
             )  # type: ignore
 
+    def replace_positions(
+        self,
+        portfolio_id: str,
+        dt: datetime.date,
+        positions: Iterable[Position],
+    ) -> None:
+        """Replace the complete position snapshot for one portfolio/date.
+
+        ``upsert_positions`` only inserts or updates rows.  A position that is
+        sold to zero during the day would otherwise remain in the table and be
+        picked up by the next history-fill run as a ghost holding.  Every date
+        must therefore be written as a complete end-of-day snapshot.
+        """
+        if isinstance(dt, datetime.datetime):
+            dt = dt.date()
+        self["positions"].delete_where(
+            "portfolio_id = ? AND dt = ?", (portfolio_id, str(dt))
+        )
+        items = list(positions)
+        if items:
+            self.upsert_positions(items)
+
     def get_positions(
         self, dt: datetime.date | None = None, portfolio_id: str | None = None
     ) -> pl.DataFrame:

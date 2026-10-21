@@ -75,6 +75,10 @@ def broker(calendar, data_feed):
         portfolio_id="test_bt",
         data_feed=data_feed,
         principal=1000000,
+        commission=5e-4,
+        stamp_duty=0.0,
+        min_commission=0.0,
+        transfer_fee=0.0,
     )
     return b
 
@@ -88,8 +92,33 @@ def minute_broker(calendar, data_feed):
         data_feed=data_feed,
         principal=1000000,
         match_level="minute",
+        commission=5e-4,
+        stamp_duty=0.0,
+        min_commission=0.0,
+        transfer_fee=0.0,
     )
     return b
+
+def test_ashare_fee_model(calendar, data_feed):
+    db.init(":memory:")
+    b = BacktestBroker(
+        bt_start=datetime.date(2024, 1, 2),
+        bt_end=datetime.date(2024, 1, 10),
+        portfolio_id="test_fee",
+        data_feed=data_feed,
+        principal=1000000,
+        commission=1e-4,
+        stamp_duty=5e-4,
+        min_commission=5.0,
+        transfer_fee=1e-5,
+    )
+
+    assert b._calc_fee(10_000, OrderSide.BUY) == pytest.approx(5.1)
+    assert b._calc_fee(10_000, OrderSide.SELL) == pytest.approx(10.1)
+    assert b._calc_fee(1_000, OrderSide.BUY) == pytest.approx(5.01)
+    assert b._calc_fee(100_000, OrderSide.BUY) == pytest.approx(11.0)
+    assert b._calc_fee(100_000, OrderSide.SELL) == pytest.approx(61.0)
+
 
 def test_init_backtest(broker):
     p = db.get_portfolio("test_bt")
@@ -286,6 +315,61 @@ def test_sell_day_scenarios(broker, data_feed):
     # Sell at 11.0. Match 10.0.
     with pytest.raises(PriceNotMeet):
         asyncio.run(broker.sell("000001.SZ", 100, 11.0, dt))
+
+def test_sell_removes_sold_asset_from_same_day_snapshot(broker, data_feed):
+    """Selling a position to zero must remove it from the same-day snapshot.
+
+    Otherwise the next history fill treats the sold asset as a ghost holding
+    and adds its stale market value to the portfolio.
+    """
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "close": [10.0],
+        "up_limit": [11.0], "down_limit": [9.0],
+    })
+
+    asyncio.run(broker.buy("000001.SZ", 1000, 0, dt))
+    asyncio.run(broker.buy("000002.SZ", 1000, 0, dt))
+
+    data_feed.close_factor_data = pl.DataFrame([
+        {"dt": datetime.date(2024, 1, 2), "asset": "000001.SZ", "close": 10.0, "factor": 1.0},
+        {"dt": datetime.date(2024, 1, 2), "asset": "000002.SZ", "close": 10.0, "factor": 1.0},
+        {"dt": datetime.date(2024, 1, 3), "asset": "000001.SZ", "close": 10.0, "factor": 1.0},
+        {"dt": datetime.date(2024, 1, 3), "asset": "000002.SZ", "close": 11.0, "factor": 1.0},
+        {"dt": datetime.date(2024, 1, 3), "asset": "000003.SZ", "close": 10.0, "factor": 1.0},
+        {"dt": datetime.date(2024, 1, 4), "asset": "000001.SZ", "close": 10.0, "factor": 1.0},
+        {"dt": datetime.date(2024, 1, 4), "asset": "000002.SZ", "close": 12.0, "factor": 1.0},
+        {"dt": datetime.date(2024, 1, 4), "asset": "000003.SZ", "close": 11.0, "factor": 1.0},
+    ])
+
+    # T+1: move to the next day so both positions become sellable.
+    broker.set_clock(make_dt(datetime.date(2024, 1, 3), 9, 30))
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 3)],
+        "open": [10.0], "close": [10.0],
+        "up_limit": [11.0], "down_limit": [9.0],
+    })
+
+    # Buy a third asset first, so the same-day snapshot is persisted.
+    asyncio.run(broker.buy("000003.SZ", 1000, 0, make_dt(datetime.date(2024, 1, 3), 9, 30)))
+    positions = db.get_positions(dt=datetime.date(2024, 1, 3), portfolio_id="test_bt")
+    assert set(positions["asset"]) == {"000001.SZ", "000002.SZ", "000003.SZ"}
+
+    asyncio.run(broker.sell("000001.SZ", 1000, 0, make_dt(datetime.date(2024, 1, 3), 9, 30)))
+    positions = db.get_positions(dt=datetime.date(2024, 1, 3), portfolio_id="test_bt")
+    assert set(positions["asset"]) == {"000002.SZ", "000003.SZ"}
+
+    # Jump over Jan 4 so the history fill runs for Jan 4.  The sold asset must
+    # not be resurrected from the Jan 3 snapshot.
+    broker.set_clock(make_dt(datetime.date(2024, 1, 5), 9, 30))
+
+    asset_rec = db.get_asset(portfolio_id="test_bt", dt=datetime.date(2024, 1, 4))
+    assert asset_rec is not None
+    assert asset_rec.market_value == pytest.approx(23000.0)
+    positions = db.get_positions(dt=datetime.date(2024, 1, 4), portfolio_id="test_bt")
+    assert set(positions["asset"]) == {"000002.SZ", "000003.SZ"}
+
 
 def test_sell_errors(broker, data_feed):
     dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
@@ -694,14 +778,24 @@ def test_fill_history_complex_factor(broker, data_feed):
     # Expected Total = 1,000,000 - 15 = 999,985.
     assert abs(asset_rec.total - 999985.0) < 0.01
 
-    # Check Cash
+    # Check Cash: corporate actions are handled as splits, not cash dividends.
     # Initial Cash 1M.
     # Spent: 10000+5 + 20000+10 = 30015.
-    # Cash before fill = 969,985.
-    # Fill Adj A (Day 1): +5000.
-    # Fill Adj B (Day 2): +10000.
-    # Final Cash = 969,985 + 15000 = 984,985.
-    assert abs(asset_rec.cash - 984985.0) < 0.01
+    # Cash before fill = 969,985; no cash adjustment is added.
+    assert abs(asset_rec.cash - 969985.0) < 0.01
+    # A: 1000 -> 2000 shares, cost 10 -> 5, mv 2000*5=10,000.
+    # B: 1000 -> 2000 shares, cost 20 -> 10, mv 2000*10=20,000.
+    assert abs(asset_rec.market_value - 30000.0) < 0.01
+    assert abs(asset_rec.total - 999985.0) < 0.01
+
+    positions = db.get_positions(dt=datetime.date(2024, 1, 4), portfolio_id="test_bt")
+    by_asset = {row["asset"]: row for row in positions.to_dicts()}
+    assert by_asset["000001.SZ"]["shares"] == pytest.approx(2000.0)
+    assert by_asset["000001.SZ"]["price"] == pytest.approx(5.0)
+    assert by_asset["000001.SZ"]["mv"] == pytest.approx(10000.0)
+    assert by_asset["000002.SZ"]["shares"] == pytest.approx(2000.0)
+    assert by_asset["000002.SZ"]["price"] == pytest.approx(10.0)
+    assert by_asset["000002.SZ"]["mv"] == pytest.approx(20000.0)
 
 def test_fill_history_suspension(broker, data_feed):
     """Test handling of missing data (suspension) during history fill."""
@@ -869,3 +963,216 @@ def test_complex_scenario(broker, data_feed):
     # Exact calculation might differ slightly due to fees/price est, but should be around 24700
     assert abs(res.trades[0].shares - 24700) <= 200
 
+
+
+@pytest.mark.asyncio
+async def test_execute_exit_uses_explicit_intraday_price(broker, data_feed):
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "close": [10.0],
+        "up_limit": [11.0], "down_limit": [9.0], "volume": [10000.0],
+    })
+    await broker.buy(
+        "000001.SZ", 1000, 0, make_dt(datetime.date(2024, 1, 2), 9, 30)
+    )
+
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 3)],
+        "open": [9.8], "close": [9.5],
+        "up_limit": [10.78], "down_limit": [8.82], "volume": [10000.0],
+    })
+    broker.set_clock(make_dt(datetime.date(2024, 1, 3), 9, 30))
+    result = await broker.execute_exit(
+        "000001.SZ",
+        1000,
+        price=9.4,
+        order_time=make_dt(datetime.date(2024, 1, 3), 14, 55),
+        reason="stop",
+    )
+
+    assert result.trades[0].price == pytest.approx(9.4)
+    assert result.trades[0].fee > 0
+    assert "000001.SZ" not in broker.positions
+
+
+@pytest.mark.asyncio
+async def test_overlay_intraday_with_real_broker(broker, data_feed):
+    from quantide.service.risk_overlay import TripleBarrierConfig, TripleBarrierOverlay
+
+    overlay = TripleBarrierOverlay(
+        TripleBarrierConfig(down_pct=0.06, slippage=0.0)
+    )
+    broker._risk_overlay = overlay
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "high": [10.1], "low": [9.9], "close": [10.0],
+        "up_limit": [11.0], "down_limit": [9.0], "volume": [10000.0],
+    })
+    await broker.buy(
+        "000001.SZ", 1000, 0, make_dt(datetime.date(2024, 1, 2), 9, 30)
+    )
+    broker.sync_risk_overlay(make_dt(datetime.date(2024, 1, 2), 9, 30))
+    assert overlay._entry_dates["000001.SZ"] == datetime.date(2024, 1, 2)
+
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 3)],
+        "open": [10.0], "high": [10.1], "low": [9.39], "close": [9.5],
+        "up_limit": [11.0], "down_limit": [9.0], "volume": [10000.0],
+    })
+    broker.set_clock(make_dt(datetime.date(2024, 1, 3), 9, 30))
+    await broker.run_risk_overlay(make_dt(datetime.date(2024, 1, 3), 9, 30))
+    broker.sync_risk_overlay(make_dt(datetime.date(2024, 1, 3), 9, 30))
+    await broker.run_risk_overlay_intraday(
+        make_dt(datetime.date(2024, 1, 3), 9, 30)
+    )
+
+    assert "000001.SZ" not in broker.positions
+
+
+def test_ex_date_split_is_applied_before_intraday_barrier_check(broker, data_feed):
+    """Ex-date cost and raw price must share one price space (FR-185)."""
+    from quantide.service.risk_overlay import TripleBarrierConfig, TripleBarrierOverlay
+
+    day0 = datetime.date(2024, 1, 2)
+    day1 = datetime.date(2024, 1, 3)
+    day2 = datetime.date(2024, 1, 4)
+
+    data_feed.match_data = pl.DataFrame({
+        "date": [make_dt(day0, 9, 30)],
+        "open": [10.0], "high": [10.1], "low": [9.9], "close": [10.0],
+        "up_limit": [11.0], "down_limit": [9.0], "factor": [1.0],
+    })
+    asyncio.run(broker.buy("000001.SZ", 1000, 0, make_dt(day0, 9, 30)))
+
+    # 1:2 split on day1: raw price 10 -> 5, adjust factor 1 -> 2.
+    data_feed.close_factor_data = pl.DataFrame([
+        {"dt": day0, "asset": "000001.SZ", "close": 10.0, "factor": 1.0},
+        {"dt": day1, "asset": "000001.SZ", "close": 5.0, "factor": 2.0},
+        {"dt": day2, "asset": "000001.SZ", "close": 5.0, "factor": 2.0},
+    ])
+
+    overlay = TripleBarrierOverlay(
+        TripleBarrierConfig(down_pct=0.06, slippage=0.0)
+    )
+    broker._risk_overlay = overlay
+    overlay.sync_positions(broker.positions, day0)
+
+    data_feed.match_data = pl.DataFrame({
+        "date": [make_dt(day1, 9, 30)],
+        "open": [5.0], "high": [5.1], "low": [4.9], "close": [5.0],
+        "up_limit": [5.5], "down_limit": [4.5], "factor": [2.0],
+    })
+    broker.set_clock(make_dt(day1, 9, 30))
+
+    pos = broker.positions["000001.SZ"]
+    assert pos.shares == pytest.approx(2000.0)
+    assert pos.price == pytest.approx(5.0)
+    assert pos.mv == pytest.approx(10000.0)
+    assert pos.avail == pytest.approx(2000.0)
+
+    asyncio.run(broker.run_risk_overlay(make_dt(day1, 9, 30)))
+    broker.sync_risk_overlay(make_dt(day1, 9, 30))
+    asyncio.run(broker.run_risk_overlay_intraday(make_dt(day1, 9, 30)))
+    assert "000001.SZ" in broker.positions
+
+    # 次日展仓不能再次应用同一比例。
+    data_feed.match_data = pl.DataFrame({
+        "date": [make_dt(day2, 9, 30)],
+        "open": [5.0], "high": [5.1], "low": [4.9], "close": [5.0],
+        "up_limit": [5.5], "down_limit": [4.5], "factor": [2.0],
+    })
+    broker.set_clock(make_dt(day2, 9, 30))
+    assert broker.positions["000001.SZ"].shares == pytest.approx(2000.0)
+    assert broker.positions["000001.SZ"].price == pytest.approx(5.0)
+
+    day1_pos = db.get_positions(dt=day1, portfolio_id="test_bt")
+    assert not day1_pos.is_empty()
+    assert day1_pos["shares"][0] == pytest.approx(2000.0)
+    assert day1_pos["price"][0] == pytest.approx(5.0)
+    assert day1_pos["mv"][0] == pytest.approx(10000.0)
+
+
+def test_ex_date_dividend_does_not_trigger_false_stop(broker, data_feed):
+    """约 6.4% 分红对应 r≈1.064，修复前恰好会误触发 -6% 止损."""
+    from quantide.service.risk_overlay import TripleBarrierConfig, TripleBarrierOverlay
+
+    day0 = datetime.date(2024, 1, 2)
+    day1 = datetime.date(2024, 1, 3)
+
+    data_feed.match_data = pl.DataFrame({
+        "date": [make_dt(day0, 9, 30)],
+        "open": [10.0], "high": [10.1], "low": [9.9], "close": [10.0],
+        "up_limit": [11.0], "down_limit": [9.0], "factor": [1.0],
+    })
+    asyncio.run(broker.buy("000001.SZ", 1000, 0, make_dt(day0, 9, 30)))
+
+    ratio = 1.0638
+    data_feed.close_factor_data = pl.DataFrame([
+        {"dt": day0, "asset": "000001.SZ", "close": 10.0, "factor": 1.0},
+        {"dt": day1, "asset": "000001.SZ", "close": 9.4, "factor": ratio},
+    ])
+
+    overlay = TripleBarrierOverlay(
+        TripleBarrierConfig(down_pct=0.06, slippage=0.0)
+    )
+    broker._risk_overlay = overlay
+    overlay.sync_positions(broker.positions, day0)
+
+    data_feed.match_data = pl.DataFrame({
+        "date": [make_dt(day1, 9, 30)],
+        "open": [9.4], "high": [9.5], "low": [9.35], "close": [9.4],
+        "up_limit": [10.3], "down_limit": [8.5], "factor": [ratio],
+    })
+    broker.set_clock(make_dt(day1, 9, 30))
+
+    pos = broker.positions["000001.SZ"]
+    # A 股股数取整：1063.8 -> 1064；总成本守恒 -> 10000/1064。
+    assert pos.shares == pytest.approx(1064.0)
+    assert pos.price == pytest.approx(10000.0 / 1064.0)
+    assert pos.mv == pytest.approx(10000.0)
+
+    asyncio.run(broker.run_risk_overlay(make_dt(day1, 9, 30)))
+    broker.sync_risk_overlay(make_dt(day1, 9, 30))
+    asyncio.run(broker.run_risk_overlay_intraday(make_dt(day1, 9, 30)))
+    assert "000001.SZ" in broker.positions
+
+    # 宿主按 int(avail) 全仓卖出必须被识别为清仓，不能因零股被拒。
+    asyncio.run(
+        broker.sell(
+            "000001.SZ", int(pos.avail), price=0, order_time=make_dt(day1, 10, 0)
+        )
+    )
+    assert "000001.SZ" not in broker.positions
+
+
+def test_intraday_exit_is_not_rewound_by_cheat_close_clock(broker, data_feed):
+    """cheat_on_close bar 时间 14:57 时，14:55 的盘中单不能触发 ClockRewind."""
+    from quantide.service.risk_overlay import TripleBarrierConfig, TripleBarrierOverlay
+
+    day0 = datetime.date(2024, 1, 2)
+    day1 = datetime.date(2024, 1, 3)
+
+    data_feed.match_data = pl.DataFrame({
+        "date": [make_dt(day0, 9, 30)],
+        "open": [10.0], "high": [10.1], "low": [9.9], "close": [10.0],
+        "up_limit": [11.0], "down_limit": [9.0],
+    })
+    asyncio.run(broker.buy("000001.SZ", 1000, 0, make_dt(day0, 9, 30)))
+
+    overlay = TripleBarrierOverlay(
+        TripleBarrierConfig(down_pct=0.06, slippage=0.0)
+    )
+    broker._risk_overlay = overlay
+    overlay.sync_positions(broker.positions, day0)
+
+    data_feed.match_data = pl.DataFrame({
+        "date": [make_dt(day1, 9, 30)],
+        "open": [10.0], "high": [10.1], "low": [9.3], "close": [9.5],
+        "up_limit": [11.0], "down_limit": [9.0], "volume": [10000.0],
+    })
+    broker.set_clock(make_dt(day1, 14, 57))
+    asyncio.run(broker.run_risk_overlay(make_dt(day1, 14, 57)))
+    broker.sync_risk_overlay(make_dt(day1, 14, 57))
+    asyncio.run(broker.run_risk_overlay_intraday(make_dt(day1, 14, 57)))
+
+    assert "000001.SZ" not in broker.positions

@@ -55,3 +55,10 @@ class DataFetcherPort(Protocol):
     ) -> tuple[pd.DataFrame, list[list]]:
         """获取标准化扩展日线数据."""
         ...
+
+    def fetch_daily_basic(
+        self,
+        dates: Iterable[datetime.date] | datetime.date,
+    ) -> tuple[pd.DataFrame, list[list]]:
+        """获取每日市值等基本面数据."""
+        ...

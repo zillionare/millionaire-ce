@@ -363,6 +363,18 @@ class GatewayBrokerWrapper(AbstractBroker):
         Gateway 兼容层当前仅用于 UI 交易与查询，不持久化策略指标。
         """
 
+    def get_prices(self, assets: list[str]) -> dict[str, float]:
+        """Return the latest gateway quote price for live risk strategies."""
+        result: dict[str, float] = {}
+        for asset in assets:
+            quote = live_quote.get_quote(asset)
+            if not quote:
+                continue
+            price = float(quote.get("lastPrice", 0) or 0)
+            if price > 0:
+                result[asset] = price
+        return result
+
     async def buy(
         self,
         asset: str,

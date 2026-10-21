@@ -17,6 +17,10 @@ from quantide.data.sqlite import db
 from quantide.service.backtest_broker import BacktestBroker
 from quantide.service.backtest_logs import record_backtest_log
 from quantide.service.metrics import metrics
+from quantide.service.risk_overlay import (
+    TripleBarrierConfig,
+    TripleBarrierOverlay,
+)
 
 
 class BacktestRunner:
@@ -104,6 +108,28 @@ class BacktestRunner:
             db.init(db_path)
 
         # 1. Init Broker
+        overlay_name = getattr(strategy_cls, "RISK_OVERLAY", None)
+        risk_overlay = None
+        if overlay_name == "triple_barrier":
+            if "use_broker_barriers" in config:
+                use_barriers = bool(config["use_broker_barriers"])
+            else:
+                defaults = getattr(strategy_cls, "default_config", None)
+                use_barriers = (
+                    bool(defaults().get("use_broker_barriers", False))
+                    if callable(defaults)
+                    else False
+                )
+            if use_barriers:
+                risk_overlay = TripleBarrierOverlay(
+                    TripleBarrierConfig(
+                        up_pct=float(config.get("take_profit_pct", 0.15)),
+                        down_pct=float(config.get("stop_loss_pct", 0.06)),
+                        horizon=int(config.get("horizon", 3)),
+                        sell_fraction=float(config.get("sell_fraction", 1.0)),
+                        slippage=float(config.get("slippage_pct", 0.001)),
+                    )
+                )
         broker = BacktestBroker(
             bt_start=start_date,
             bt_end=end_date,
@@ -113,6 +139,7 @@ class BacktestRunner:
             match_level="day" if frame_type == FrameType.DAY else "minute",
             portfolio_name=strategy_cls.__name__,
             save_logs=save_logs,
+            risk_overlay=risk_overlay,
         )
 
         # Use patched logger
@@ -326,7 +353,16 @@ class BacktestRunner:
                     config,
                     frame_type,
                 )
+                if frame_type == FrameType.DAY:
+                    overlay_result = broker.run_risk_overlay(bar_tm)
+                    if inspect.isawaitable(overlay_result):
+                        await overlay_result
                 await strategy.on_bar(bar_tm)
+                if frame_type == FrameType.DAY:
+                    broker.sync_risk_overlay(bar_tm)
+                    intraday_result = broker.run_risk_overlay_intraday(bar_tm)
+                    if inspect.isawaitable(intraday_result):
+                        await intraday_result
 
             # Close the last day
             if last_trade_day is not None:

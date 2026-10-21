@@ -22,11 +22,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 
-class BarrierHit(str, Enum):
+class BarrierHit(StrEnum):
     """屏障触发类型."""
 
     UP = "up"
@@ -196,6 +196,266 @@ def evaluate_day(
         excess_return=excess_return_expire(p_sell, close),
         trigger_price=close,
     )
+
+
+
+@dataclass(frozen=True)
+class TripleBarrierConfig:
+    """统一的三重障碍风控配置（回测与实盘共用）."""
+
+    up_pct: float = 0.15
+    down_pct: float = 0.06
+    horizon: int = 3
+    sell_fraction: float = 1.0
+    slippage: float = 0.001
+
+    def normalized(self) -> TripleBarrierConfig:
+        return TripleBarrierConfig(
+            up_pct=max(0.0, float(self.up_pct)),
+            down_pct=max(0.0, float(self.down_pct)),
+            horizon=max(1, int(self.horizon)),
+            sell_fraction=min(1.0, max(0.0, float(self.sell_fraction))),
+            slippage=min(0.5, max(0.0, float(self.slippage))),
+        )
+
+
+@dataclass(frozen=True)
+class ExitPlan:
+    """一次退出决策；执行层负责按 fill_price / 市价成交."""
+
+    action: Literal["none", "sell", "pending"] = "none"
+    reason: str = ""
+    trigger_price: float = 0.0
+    fill_price: float = 0.0
+    barrier: Literal["up", "down", "time", "pending"] = "pending"
+    at_open: bool = False
+
+
+def _none_plan() -> ExitPlan:
+    return ExitPlan()
+
+
+def _sell_plan(
+    *,
+    reason: str,
+    trigger_price: float,
+    fill_price: float,
+    barrier: Literal["up", "down", "time", "pending"],
+    at_open: bool = False,
+) -> ExitPlan:
+    return ExitPlan(
+        action="sell",
+        reason=reason,
+        trigger_price=max(0.0, float(trigger_price)),
+        fill_price=max(0.0, float(fill_price)),
+        barrier=barrier,
+        at_open=at_open,
+    )
+
+
+def _pending_plan(
+    *,
+    reason: str,
+    trigger_price: float,
+    barrier: Literal["up", "down"],
+) -> ExitPlan:
+    return ExitPlan(
+        action="pending",
+        reason=reason,
+        trigger_price=max(0.0, float(trigger_price)),
+        barrier=barrier,
+    )
+
+
+def _stop_reason(config: TripleBarrierConfig) -> str:
+    return f"触发三重障碍下轨止损(-{config.down_pct:.0%})"
+
+
+def _take_profit_reason(config: TripleBarrierConfig) -> str:
+    return f"触发三重障碍上轨止盈(+{config.up_pct:.0%})"
+
+
+def plan_open_exit(
+    *,
+    open_price: float,
+    cost: float,
+    config: TripleBarrierConfig,
+    held_days: int = 0,
+    pending: ExitPlan | None = None,
+) -> ExitPlan:
+    """T 日开盘时的退出决策。
+
+    - T0 触发的 barrier 只能 T+1 开盘补卖；
+    - 开盘跳空越过 barrier 时，按开盘价成交；
+    - 时间屏障在开盘卖出。
+    """
+    cfg = config.normalized()
+    if cost <= 0 or open_price <= 0:
+        return _none_plan()
+
+    fill_open = open_price * (1.0 - cfg.slippage)
+
+    if pending is not None and pending.action == "pending":
+        return _sell_plan(
+            reason=f"{pending.reason}(T+1开盘补卖)",
+            trigger_price=pending.trigger_price,
+            fill_price=fill_open,
+            barrier=pending.barrier,
+            at_open=True,
+        )
+
+    if held_days >= cfg.horizon:
+        return _sell_plan(
+            reason=f"触发三重障碍时间到期(持有{held_days}日)",
+            trigger_price=open_price,
+            fill_price=fill_open,
+            barrier="time",
+            at_open=True,
+        )
+
+    down_price = cost * (1.0 - cfg.down_pct)
+    up_price = cost * (1.0 + cfg.up_pct)
+    if open_price <= down_price:
+        return _sell_plan(
+            reason=_stop_reason(cfg),
+            trigger_price=down_price,
+            fill_price=fill_open,
+            barrier="down",
+            at_open=True,
+        )
+    if open_price >= up_price:
+        return _sell_plan(
+            reason=_take_profit_reason(cfg),
+            trigger_price=up_price,
+            fill_price=fill_open,
+            barrier="up",
+            at_open=True,
+        )
+    return _none_plan()
+
+
+def plan_intraday_exit(
+    *,
+    open_price: float,
+    high: float,
+    low: float,
+    close: float,
+    cost: float,
+    config: TripleBarrierConfig,
+    is_entry_day: bool = False,
+    pending: ExitPlan | None = None,
+) -> ExitPlan:
+    """T 日盘中/收盘后的退出决策（日线回测用 OHLC 近似）.
+
+    同日上下轨都触发时，沿用 FR-013：开盘价更接近者优先，等距 down。
+    T0 触发的 barrier 返回 pending，不能当天卖。
+    """
+    cfg = config.normalized()
+    if cost <= 0 or min(open_price, high, low, close) <= 0:
+        return _none_plan()
+    if pending is not None and pending.action == "pending":
+        return _none_plan()
+
+    evaluation = evaluate_day(
+        high=high,
+        low=low,
+        open_=open_price,
+        close=close,
+        p_sell=cost,
+        up_threshold=cfg.up_pct * 100.0,
+        down_threshold=cfg.down_pct * 100.0,
+    )
+    if evaluation.barrier_hit is BarrierHit.EXPIRE:
+        return _none_plan()
+
+    if evaluation.barrier_hit is BarrierHit.DOWN:
+        reason = _stop_reason(cfg)
+        barrier: Literal["up", "down"] = "down"
+        open_gap_done = open_price <= cost * (1.0 - cfg.down_pct)
+    else:
+        reason = _take_profit_reason(cfg)
+        barrier = "up"
+        open_gap_done = open_price >= cost * (1.0 + cfg.up_pct)
+
+    if is_entry_day:
+        return _pending_plan(
+            reason=reason,
+            trigger_price=evaluation.trigger_price,
+            barrier=barrier,
+        )
+
+    # 开盘跳空已由 plan_open_exit 处理；若当时因跌停/停牌未成交，
+    # 不在盘中用另一个价格重复尝试。
+    if open_gap_done:
+        return _none_plan()
+
+    return _sell_plan(
+        reason=reason,
+        trigger_price=evaluation.trigger_price,
+        fill_price=evaluation.trigger_price * (1.0 - cfg.slippage),
+        barrier=barrier,
+    )
+
+
+def plan_tick_exit(
+    *,
+    last_price: float,
+    cost: float,
+    config: TripleBarrierConfig,
+    held_days: int = 0,
+    pending: ExitPlan | None = None,
+    is_entry_day: bool = False,
+) -> ExitPlan:
+    """实盘 tick/最新价退出决策；成交由执行层按市价完成。"""
+    cfg = config.normalized()
+    if cost <= 0 or last_price <= 0:
+        return _none_plan()
+
+    if pending is not None and pending.action == "pending":
+        return _sell_plan(
+            reason=f"{pending.reason}(T+1补卖)",
+            trigger_price=pending.trigger_price,
+            fill_price=last_price,
+            barrier=pending.barrier,
+        )
+
+    if held_days >= cfg.horizon:
+        return _sell_plan(
+            reason=f"触发三重障碍时间到期(持有{held_days}日)",
+            trigger_price=last_price,
+            fill_price=last_price,
+            barrier="time",
+        )
+
+    down_price = cost * (1.0 - cfg.down_pct)
+    up_price = cost * (1.0 + cfg.up_pct)
+    if last_price <= down_price:
+        if is_entry_day:
+            return _pending_plan(
+                reason=_stop_reason(cfg),
+                trigger_price=down_price,
+                barrier="down",
+            )
+        return _sell_plan(
+            reason=_stop_reason(cfg),
+            trigger_price=down_price,
+            fill_price=last_price,
+            barrier="down",
+        )
+    if last_price >= up_price:
+        if is_entry_day:
+            return _pending_plan(
+                reason=_take_profit_reason(cfg),
+                trigger_price=up_price,
+                barrier="up",
+            )
+        return _sell_plan(
+            reason=_take_profit_reason(cfg),
+            trigger_price=up_price,
+            fill_price=last_price,
+            barrier="up",
+        )
+    return _none_plan()
 
 
 def evaluate_window(

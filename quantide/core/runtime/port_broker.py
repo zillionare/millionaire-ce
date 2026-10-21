@@ -103,6 +103,18 @@ class PortBackedBroker:
             )
         return result
 
+    def get_prices(self, assets: list[str]) -> dict[str, float]:
+        getter = getattr(self._port, "get_prices", None)
+        if callable(getter):
+            return getter(assets)
+        result: dict[str, float] = {}
+        positions = self.positions
+        for asset in assets:
+            pos = positions.get(asset)
+            if pos is not None and pos.shares > 0 and pos.mv > 0:
+                result[asset] = pos.mv / pos.shares
+        return result
+
     @property
     def orders(self) -> list[Order]:
         return [self._to_order(row) for row in self._port.query_orders()]

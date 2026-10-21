@@ -474,6 +474,56 @@ def test_positions_crud(setup):
     assert len(db.get_positions(dt=None, portfolio_id="non_existent")) == 0
 
 
+def test_replace_positions_removes_stale_rows(setup):
+    """A date snapshot must not retain assets that were sold to zero."""
+    today = datetime.date.today()
+    tomorrow = today + datetime.timedelta(days=1)
+
+    pos01 = Position(
+        portfolio_id="test_portfolio",
+        dt=today,
+        asset="000001.SZ",
+        shares=1000,
+        avail=1000,
+        price=10.0,
+        mv=10000.0,
+        profit=0.0,
+    )
+    pos02 = Position(
+        portfolio_id="test_portfolio",
+        dt=today,
+        asset="000002.SZ",
+        shares=2000,
+        avail=2000,
+        price=20.0,
+        mv=40000.0,
+        profit=0.0,
+    )
+    pos03 = Position(
+        portfolio_id="test_portfolio",
+        dt=tomorrow,
+        asset="000003.SZ",
+        shares=3000,
+        avail=3000,
+        price=30.0,
+        mv=90000.0,
+        profit=0.0,
+    )
+
+    db.replace_positions("test_portfolio", today, [pos01, pos02])
+    db.replace_positions("test_portfolio", tomorrow, [pos03])
+
+    db.replace_positions("test_portfolio", today, [pos02])
+
+    positions = db.get_positions(today, portfolio_id="test_portfolio")
+    assert set(positions["asset"]) == {"000002.SZ"}
+    assert len(db.get_positions(tomorrow, portfolio_id="test_portfolio")) == 1
+
+    db.replace_positions("test_portfolio", today, [])
+    assert len(db.get_positions(today, portfolio_id="test_portfolio")) == 0
+    assert len(db.get_positions(tomorrow, portfolio_id="test_portfolio")) == 1
+
+
 def test_proxy_methods(setup):
     """Test __getitem__ and __getattr__ proxy methods"""
     # Test __getitem__ proxy

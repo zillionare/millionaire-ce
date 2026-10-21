@@ -200,6 +200,18 @@ class PaperBroker(AbstractBroker):
                         "down": float(limits.get("down", 0) or 0),
                     }
 
+    def get_prices(self, assets: list[str]) -> dict[str, float]:
+        """Return the latest price for risk strategies in paper mode."""
+        result: dict[str, float] = {}
+        for asset in assets:
+            quote = self._get_quote(asset)
+            if not quote:
+                continue
+            price = float(quote.get("lastPrice", 0) or 0)
+            if price > 0:
+                result[asset] = price
+        return result
+
     def _get_quote(self, asset: str) -> dict[str, Any] | None:
         """获取行情快照."""
         if self._market_data is not None:

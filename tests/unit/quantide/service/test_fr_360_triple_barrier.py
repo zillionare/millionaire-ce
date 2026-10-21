@@ -190,3 +190,124 @@ def test_fr_360_units_excess_return_decimal():
     )
     assert -0.05 == ev.excess_return
     assert isinstance(ev.excess_return, float)
+
+def test_policy_defaults_are_six_fifteen_three():
+    """Unified policy defaults: 6% stop, 15% take-profit, 3-day horizon."""
+    from quantide.service.triple_barrier import TripleBarrierConfig
+
+    cfg = TripleBarrierConfig().normalized()
+    assert cfg.down_pct == pytest.approx(0.06)
+    assert cfg.up_pct == pytest.approx(0.15)
+    assert cfg.horizon == 3
+
+
+def test_policy_t0_barrier_is_pending_not_sold():
+    from quantide.service.triple_barrier import (
+        TripleBarrierConfig,
+        plan_intraday_exit,
+    )
+
+    plan = plan_intraday_exit(
+        open_price=10.0,
+        high=10.1,
+        low=9.0,
+        close=9.2,
+        cost=10.0,
+        config=TripleBarrierConfig(),
+        is_entry_day=True,
+    )
+    assert plan.action == "pending"
+    assert plan.barrier == "down"
+
+
+def test_policy_gap_fills_at_open_with_slippage():
+    from quantide.service.triple_barrier import (
+        TripleBarrierConfig,
+        plan_open_exit,
+    )
+
+    plan = plan_open_exit(
+        open_price=9.3,
+        cost=10.0,
+        config=TripleBarrierConfig(slippage=0.01),
+    )
+    assert plan.action == "sell"
+    assert plan.at_open is True
+    assert plan.trigger_price == pytest.approx(9.4)
+    assert plan.fill_price == pytest.approx(9.3 * 0.99)
+
+
+def test_policy_intraday_stop_fills_at_stop_with_slippage():
+    from quantide.service.triple_barrier import (
+        TripleBarrierConfig,
+        plan_intraday_exit,
+    )
+
+    plan = plan_intraday_exit(
+        open_price=10.0,
+        high=10.1,
+        low=9.39,
+        close=9.5,
+        cost=10.0,
+        config=TripleBarrierConfig(slippage=0.01),
+    )
+    assert plan.action == "sell"
+    assert plan.barrier == "down"
+    assert plan.trigger_price == pytest.approx(9.4)
+    assert plan.fill_price == pytest.approx(9.4 * 0.99)
+
+
+def test_policy_intraday_take_profit():
+    from quantide.service.triple_barrier import (
+        TripleBarrierConfig,
+        plan_intraday_exit,
+    )
+
+    plan = plan_intraday_exit(
+        open_price=10.0,
+        high=11.51,
+        low=9.9,
+        close=11.4,
+        cost=10.0,
+        config=TripleBarrierConfig(slippage=0.0),
+    )
+    assert plan.action == "sell"
+    assert plan.barrier == "up"
+    assert plan.fill_price == pytest.approx(11.5)
+
+
+def test_policy_same_day_both_uses_open_closer():
+    from quantide.service.triple_barrier import (
+        TripleBarrierConfig,
+        plan_intraday_exit,
+    )
+
+    plan = plan_intraday_exit(
+        open_price=10.0,
+        high=11.6,
+        low=9.3,
+        close=10.5,
+        cost=10.0,
+        config=TripleBarrierConfig(slippage=0.0),
+    )
+    assert plan.action == "sell"
+    assert plan.barrier == "down"
+
+
+def test_policy_tick_t0_defers_and_t1_sells():
+    from quantide.service.triple_barrier import (
+        TripleBarrierConfig,
+        plan_tick_exit,
+    )
+
+    cfg = TripleBarrierConfig(slippage=0.0)
+    t0 = plan_tick_exit(
+        last_price=9.3, cost=10.0, config=cfg, is_entry_day=True
+    )
+    assert t0.action == "pending"
+
+    t1 = plan_tick_exit(
+        last_price=9.3, cost=10.0, config=cfg, pending=t0, is_entry_day=False
+    )
+    assert t1.action == "sell"
+    assert "T+1" in t1.reason

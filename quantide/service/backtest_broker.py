@@ -21,6 +21,7 @@ from quantide.core.errors import (
     NonMultipleOfLotSize,
     PriceNotMeet,
     TradeError,
+    TradingHaltedError,
 )
 from quantide.core.ports.broker import ExecutionResult
 from quantide.data.models import Asset, Order, Portfolio, Position, Trade
@@ -28,6 +29,7 @@ from quantide.data.models.calendar import calendar
 from quantide.data.sqlite import db
 from quantide.service.abstract_broker import AbstractBroker
 from quantide.service.datafeed import BarsFeedImpl
+from quantide.service.risk_overlay import TripleBarrierOverlay
 
 
 class BacktestBroker(AbstractBroker):
@@ -38,18 +40,25 @@ class BacktestBroker(AbstractBroker):
         portfolio_id: str,
         data_feed: BarsFeedImpl,
         principal: float = 1_000_000,
-        commission: float = 5e-4,
+        commission: float = 1e-4,
+        stamp_duty: float = 5e-4,
+        min_commission: float = 5.0,
+        transfer_fee: float = 1e-5,
         portfolio_name: str = "backtest",
         match_level: Literal["day", "minute"] = "day",
         desc: str = "",
         save_logs: bool = False,
+        risk_overlay: TripleBarrierOverlay | None = None,
     ):
         """回测 broker
 
         Args:
             - portfolio_id, 账户ID
             - principal, 账户初始资金
-            - commission, 账户手续费率
+            - commission, 券商佣金率（默认万1，单边）
+            - stamp_duty, 卖方印花税率（默认万5）
+            - min_commission, 单笔最低佣金（默认 5 元）
+            - transfer_fee, 过户费率（默认万0.1，双边）
             - account, 账户名称
             - data_feed, 行情数据源
             - match_level, 匹配模式，day为日线，minute为分钟线
@@ -64,6 +73,9 @@ class BacktestBroker(AbstractBroker):
         )
 
         self._data_feed: BarsFeedImpl = data_feed
+        self._stamp_duty = max(0.0, float(stamp_duty))
+        self._min_commission = max(0.0, float(min_commission))
+        self._transfer_fee = max(0.0, float(transfer_fee))
         self._match_level = match_level
         self._bt_start: datetime.datetime = calendar.replace_time(bt_start, 9, 30)
         # End time should cover the closing operations
@@ -71,6 +83,7 @@ class BacktestBroker(AbstractBroker):
         self._bt_stopped: bool = False
         self._desc: str = desc
         self._save_backtest_logs = save_logs
+        self._risk_overlay = risk_overlay
 
         # 回测时钟，初始化为 bt_start 的前一个交易日 (Day 0)
         prev = calendar.day_shift(bt_start, -1)
@@ -223,7 +236,7 @@ class BacktestBroker(AbstractBroker):
                 dt=d,
                 principal=last_asset.principal,
                 cash=last_asset.cash,
-                frozen_cash=last_asset.frozen_cash,
+                frozen_cash=float(last_asset.frozen_cash or 0.0),
                 market_value=0.0,
                 total=last_asset.cash,
             )
@@ -297,13 +310,12 @@ class BacktestBroker(AbstractBroker):
             pl.col("adjust").fill_null(pl.col("seed_adjust")).over("asset"),
         ])
 
-        # 5. 计算复权变动比例及产生的现金补偿。
+        # 5. 按复权因子调整持仓，而不是现金补偿。
         #
-        # adjust 是累计复权因子，资产价值的连续性由相邻因子的比值决定，
-        # 不能直接使用差值，否则会在除权日凭空放大现金。
-        #
-        # 当缺少前一交易日因子时，seed_adjust 会退化为首个观测到的因子，
-        # 这样首个有效 bar 不会错误地产生一次“从 1 跳到当前因子”的伪补偿。
+        # 数据源只提供累计复权因子，无法可靠区分现金分红与拆股。按更合理的
+        # 拆股假设处理：adjust_ratio = r 时，股数乘以 r、成本除以 r，raw price
+        # 变为原来的 1/r，持仓总市值在除权前后保持不变。这样后续涨跌始终作用
+        # 在完整的经济仓位上；对现金分红而言，等价于把分红再投资。
         fill_df = fill_df.with_columns(
             pl.col("adjust")
             .shift(1)
@@ -316,45 +328,76 @@ class BacktestBroker(AbstractBroker):
             .otherwise(pl.lit(1.0))
             .alias("adjust_ratio"),
         ]).with_columns([
-            ((pl.col("adjust_ratio") - 1.0) * pl.col("shares") * pl.col("close")).alias("cash_adj"),
-            (pl.col("shares") * pl.col("close")).alias("mv"),
+            pl.col("adjust_ratio").cum_prod().over("asset").alias("cum_adjust_ratio"),
+        ]).with_columns([
+            # A 股股数必须为整数：现金分红按拆股近似会产生小数，取整后再
+            # 用「总成本不变」反推每股成本，避免宿主卖出时因零股被拒。
+            # 与 _apply_day_adjustment 的 round() 保持一致（half-to-even）
+            (pl.col("shares") * pl.col("cum_adjust_ratio"))
+            .round(0)
+            .cast(pl.Int64)
+            .alias("new_shares"),
+        ]).with_columns([
+            pl.when(pl.col("new_shares") > 0)
+            .then(
+                (pl.col("shares") * pl.col("price")) / pl.col("new_shares")
+            )
+            .otherwise(pl.col("price"))
+            .alias("new_price"),
+        ]).with_columns([
+            (pl.col("new_shares") * pl.col("close")).alias("mv"),
+            ((pl.col("close") - pl.col("new_price")) * pl.col("new_shares")).alias(
+                "profit"
+            ),
         ])
 
-        # 6. 汇总每日统计量
+        # 6. 汇总每日统计量。公司行为不产生现金，现金余额保持不变。
         daily_stats = fill_df.group_by("date").agg([
             pl.col("mv").sum().alias("market_value"),
-            pl.col("cash_adj").sum().alias("daily_cash_adj")
         ]).sort("date")
-
-        # 核心：计算展仓期间每日的现金余额 (累加复权补偿)
-        # 每一天的现金 = 初始现金 + 到该日为止的所有复权补偿之和
         daily_stats = daily_stats.with_columns(
-            (last_asset.cash + pl.col("daily_cash_adj").cum_sum()).alias("new_cash")
+            pl.lit(last_asset.cash).alias("new_cash")
         )
 
         # 同步更新内存中的现金余额，供展仓后的下一笔交易使用
         self._cash = daily_stats["new_cash"][-1]
+
+        # 同步内存持仓的股数/成本/市值，后续策略和风控 overlay 读取的是调整后的值
+        for row in (
+            fill_df.sort("date").group_by("asset").last().iter_rows(named=True)
+        ):
+            pos = self._positions.get(row["asset"])
+            if pos is None:
+                continue
+            pos.shares = row["new_shares"]
+            pos.price = row["new_price"]
+            pos.mv = row["mv"]
+            pos.profit = row["profit"]
+            pos.avail = row["new_shares"]
+            pos.dt = row["date"]
 
         # 7. 批量更新数据库 (资产表和持仓表)
         self._batch_update_history(fill_df, daily_stats, last_asset)
 
     def _batch_update_history(self, fill_df: pl.DataFrame, daily_stats: pl.DataFrame, last_asset: Asset):
         """执行数据库批量更新"""
-        # 批量写入持仓记录
-        positions_to_insert = [
-            Position(
-                portfolio_id=self._portfolio_id,
-                dt=row["date"],
-                asset=row["asset"],
-                shares=row["shares"],
-                price=row["price"],
-                avail=row["shares"],
-                mv=row["mv"], # 使用 fill_df 中计算好的 mv
-                profit=(row["close"] - row["price"]) * row["shares"]
-            )
-            for row in fill_df.to_dicts()
-        ]
-        db.upsert_positions(positions_to_insert)
+        # 批量写入持仓记录。每个日期必须写成完整快照，否则已清仓的标的
+        # 会残留在当天记录中，并在下一次 fill_history_gap 时被当成持仓。
+        for fill_date, group in fill_df.group_by("date", maintain_order=True):
+            positions = [
+                Position(
+                    portfolio_id=self._portfolio_id,
+                    dt=row["date"],
+                    asset=row["asset"],
+                    shares=row["new_shares"],
+                    price=row["new_price"],
+                    avail=row["new_shares"],
+                    mv=row["mv"],
+                    profit=row["profit"],
+                )
+                for row in group.to_dicts()
+            ]
+            db.replace_positions(self._portfolio_id, fill_date, positions)
 
         # 批量写入资产记录 (核心：更新每一天的 cash 字段)
         assets_to_insert = [
@@ -363,7 +406,7 @@ class BacktestBroker(AbstractBroker):
                 dt=row["date"],
                 principal=last_asset.principal,
                 cash=row["new_cash"], # 正确反映每日现金变动
-                frozen_cash=last_asset.frozen_cash,
+                frozen_cash=float(last_asset.frozen_cash or 0.0),
                 market_value=row["market_value"],
                 total=row["new_cash"] + row["market_value"]
             )
@@ -371,6 +414,40 @@ class BacktestBroker(AbstractBroker):
         ]
         db.upsert_asset(assets_to_insert)
 
+
+    def get_bar_for_date(
+        self, asset: str, date: datetime.date
+    ) -> dict[str, Any] | None:
+        """Return the raw daily bar for ``asset`` on ``date`` if available."""
+        try:
+            df = self._data_feed.get_price_for_match(
+                asset, datetime.datetime.combine(date, datetime.time(15, 0))
+            )
+        except Exception:
+            return None
+        if df is None or df.is_empty():
+            return None
+        return df.row(0, named=True)
+
+    async def run_risk_overlay(self, tm: datetime.datetime) -> None:
+        """Check open gaps/time exits before the host's ``on_bar``."""
+        if self._risk_overlay is None:
+            return
+        await self._risk_overlay.check_open(self, tm)
+
+    async def run_risk_overlay_intraday(self, tm: datetime.datetime) -> None:
+        """Check same-day barrier touches after the host's ``on_bar``."""
+        if self._risk_overlay is None:
+            return
+        await self._risk_overlay.check_intraday(self, tm)
+
+    def sync_risk_overlay(self, tm: datetime.datetime) -> None:
+        """Register positions opened/changed by the host's ``on_bar``."""
+        if self._risk_overlay is None:
+            return
+        self._risk_overlay.sync_positions(
+            self._positions, self.as_date(tm)
+        )
 
     def set_clock(self, dt: datetime.datetime) -> None:
         """设置回测时钟。
@@ -395,13 +472,66 @@ class BacktestBroker(AbstractBroker):
             # 1. 执行展仓逻辑，填补从 clock 到 new_dt 前一天的缺失数据
             prev_dt =  calendar.day_shift(new_dt, -1)
             self._fill_history_gaps(prev_dt)
+            # 2. 把 new_dt 当日的除权比例落到内存持仓，保证当日 raw 价格与
+            #    成本处于同一价格空间（不能等到 new_dt+1 展仓才调整）。
+            self._apply_day_adjustment(new_dt, prev_dt)
 
-            # 2. 内存状态迁移到新日期 (T+1 规则：所有持仓变为可用)
+            # 3. 内存状态迁移到新日期 (T+1 规则：所有持仓变为可用)
             for pos in self._positions.values():
                 pos.avail = pos.shares
                 pos.dt = new_dt
 
         self._clock = dt
+
+    def _apply_day_adjustment(
+        self, new_dt: datetime.date, prev_dt: datetime.date
+    ) -> None:
+        """把当日除权比例应用到内存持仓（FR-185）.
+
+        ``_fill_history_gaps`` 只结算到 ``prev_dt``，而 ``new_dt`` 的 raw 行情
+        已经反映除权。若不在开盘前调整内存持仓，风控 overlay 会用「除权前成本」
+        比较「除权后价格」，在送转/大额分红日产生假止损。这里按
+        ``r = adjust(new_dt) / adjust(prev_dt)`` 同步股数与成本；市值/浮盈保持
+        连续（拆股假设：现金分红视为再投资）。
+        """
+        held = {
+            asset: pos
+            for asset, pos in self._positions.items()
+            if float(pos.shares or 0) > 0
+        }
+        if not held:
+            return
+
+        frame = self._get_close_adjust_factors(list(held), prev_dt, new_dt)
+        if frame.is_empty():
+            return
+
+        factors: dict[str, dict[datetime.date, float]] = {}
+        for row in frame.iter_rows(named=True):
+            day = row["date"]
+            if day not in (prev_dt, new_dt):
+                continue
+            adjust = float(row["adjust"] or 0.0)
+            if adjust > 0 and math.isfinite(adjust):
+                factors.setdefault(row["asset"], {})[day] = adjust
+
+        for asset, pos in held.items():
+            values = factors.get(asset, {})
+            prev_adjust = values.get(prev_dt)
+            new_adjust = values.get(new_dt)
+            if not prev_adjust or not new_adjust:
+                continue
+            ratio = new_adjust / prev_adjust
+            if not math.isfinite(ratio) or ratio <= 0 or abs(ratio - 1.0) < 1e-12:
+                continue
+            old_shares = float(pos.shares)
+            old_cost = float(pos.price)
+            new_shares = int(round(old_shares * ratio))
+            if new_shares <= 0:
+                continue
+            pos.shares = float(new_shares)
+            # 取整后用总成本守恒反推每股成本，避免小数股残留。
+            pos.price = old_shares * old_cost / new_shares
 
     async def buy(
         self,
@@ -520,7 +650,10 @@ class BacktestBroker(AbstractBroker):
             )
             raise PriceNotMeet(order.asset, bid_price, match_price)
 
-        required_cash = order.shares * bid_price * (1 + self._commission)
+        estimated_amount = order.shares * bid_price
+        required_cash = estimated_amount + self._calc_fee(
+            estimated_amount, OrderSide.BUY
+        )
         if required_cash > self._cash:
             self._log(
                 "INFO",
@@ -571,6 +704,80 @@ class BacktestBroker(AbstractBroker):
             shares=filled,
         )
 
+    async def execute_exit(
+        self,
+        asset: str,
+        shares: int | float,
+        price: float,
+        order_time: datetime.datetime,
+        reason: str = "",
+    ) -> ExecutionResult:
+        """Execute a risk exit at an explicit simulated intraday price.
+
+        Used by the triple-barrier overlay for same-day stop/take-profit fills.
+        The fill is still constrained by A-share price limits and suspension.
+        """
+        self.set_clock(order_time)
+        pos = self._positions.get(asset)
+        if pos is None:
+            raise InsufficientPosition(asset, shares)
+        self._validate_sell_shares(pos, shares)
+
+        bars = self._data_feed.get_price_for_match(asset, order_time)
+        if bars is None or bars.is_empty():
+            raise NoDataForMatch(asset, order_time)
+        row = bars.row(0, named=True)
+        close = float(row["close"])
+        down_limit = float(row.get("down_limit", 0.0) or 0.0)
+        volume = float(row.get("volume", 0.0) or 0.0)
+        if volume <= 0:
+            raise TradingHaltedError(asset)
+        if down_limit > 0 and price <= down_limit:
+            raise LimitPrice(asset, price)
+
+        import json
+
+        order = Order(
+            portfolio_id=self._portfolio_id,
+            asset=asset,
+            price=float(price),
+            shares=shares,
+            side=OrderSide.SELL,
+            bid_type=BidType.FIXED,
+            tm=order_time,
+            extra=json.dumps({"reason": reason}) if reason else "",
+        )
+        db.insert_order(order)
+        try:
+            trade = self._execute_trade(
+                order,
+                float(price),
+                close=close,
+                tm=order_time,
+                shares=shares,
+            )
+            return ExecutionResult(qt_oid=order.qtoid, trades=[trade])
+        except TradeError as exc:
+            order.status = OrderStatus.JUNK
+            order.status_msg = str(exc)
+            db.update_order(
+                order.qtoid,
+                status=order.status.value,
+                status_msg=order.status_msg,
+                filled=order.filled,
+                error=str(exc),
+            )
+            raise
+
+    def _calc_fee(self, amount: float, side: OrderSide) -> float:
+        """计算单笔成交的全部费用（佣金、过户费、卖方印花税）。"""
+        if amount <= 0:
+            return 0.0
+        commission = max(amount * self._commission, self._min_commission)
+        transfer = amount * self._transfer_fee
+        stamp = amount * self._stamp_duty if side == OrderSide.SELL else 0.0
+        return commission + transfer + stamp
+
     def _execute_trade(
         self,
         order: Order,
@@ -598,7 +805,7 @@ class BacktestBroker(AbstractBroker):
         # 1. 创建成交记录
         amount = shares * price
 
-        fee = amount * self._commission
+        fee = self._calc_fee(amount, order.side)
 
         trade = Trade(
             portfolio_id=self._portfolio_id,
@@ -650,8 +857,10 @@ class BacktestBroker(AbstractBroker):
                 if pos.shares <= 0:
                     del self._positions[order.asset]
 
-        # 更新持仓记录
-        db.upsert_positions(self._positions.values())
+        # 更新持仓记录。按完整快照写入，清仓标的不能留在当天记录中。
+        db.replace_positions(
+            self._portfolio_id, self.as_date(tm), list(self._positions.values())
+        )
 
         # 更新 asset 记录
         mv = np.sum([pos.mv for pos in self._positions.values()])
@@ -724,7 +933,9 @@ class BacktestBroker(AbstractBroker):
         if est_price <= 0:
             raise NoDataForMatch(asset, order_time)
 
-        shares = amount / (est_price * (1 + self._commission))
+        shares = amount / (
+            est_price * (1 + self._commission + self._transfer_fee)
+        )
 
         shares = int(shares // 100) * 100
         if shares == 0:

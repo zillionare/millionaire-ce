@@ -56,6 +56,12 @@ class TushareDataFetcher:
     ) -> tuple[pd.DataFrame, list[list]]:
         return fetch_bars_ext(dates, phase_callback=phase_callback)
 
+    def fetch_daily_basic(
+        self,
+        dates: Iterable[datetime.date] | datetime.date,
+    ) -> tuple[pd.DataFrame, list[list]]:
+        return fetch_daily_basic(dates)
+
 
 def _fetch_by_dates(
     func_name: str, dates: Iterable[datetime.date] | datetime.date, **kwargs
@@ -227,6 +233,56 @@ def fetch_dividend(start: datetime.date, end: datetime.date) -> pd.DataFrame:
         df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", unit="ms")
 
     return df
+
+
+def fetch_daily_basic(
+    dates: Iterable[datetime.date] | datetime.date,
+) -> tuple[pd.DataFrame, list[list]]:
+    """Fetch point-in-time market capitalization for universe filtering.
+
+    Tushare returns ``total_mv`` / ``circ_mv`` in 10k CNY.  The values are kept
+    in their original unit because the strategy only uses cross-sectional
+    ranks.
+    """
+    _ensure_tushare_token()
+    pro = ts.pro_api()
+    fields = "ts_code,trade_date,total_mv,circ_mv"
+
+    if isinstance(dates, datetime.date):
+        dates = [dates]
+    dates = list(dates)
+
+    frames: list[pd.DataFrame] = []
+    errors: list[list] = []
+    for index, date in enumerate(dates, start=1):
+        str_date = date.strftime("%Y%m%d")
+        try:
+            df = pro.daily_basic(trade_date=str_date, fields=fields)
+        except Exception as exc:
+            logger.error("调用 daily_basic 时出错, {}", exc)
+            errors.append(["daily_basic", date, f"调用daily_basic时出现异常: {exc}"])
+            continue
+
+        if df is None or len(df) == 0:
+            errors.append(["daily_basic", date, f"daily_basic获取{date}日数据为空"])
+            continue
+
+        frames.append(df)
+        if index % 50 == 0 or index == len(dates):
+            logger.info("daily_basic progress {}/{}", index, len(dates))
+
+    if not frames:
+        return (
+            pd.DataFrame(columns=["asset", "date", "total_mv", "circ_mv"]),
+            errors,
+        )
+
+    result = pd.concat(frames, ignore_index=True)
+    result = result.rename(columns={"ts_code": "asset", "trade_date": "date"})
+    result["date"] = pd.to_datetime(result["date"], format="%Y%m%d").dt.date
+    result["total_mv"] = pd.to_numeric(result["total_mv"], errors="coerce")
+    result["circ_mv"] = pd.to_numeric(result["circ_mv"], errors="coerce")
+    return result[["asset", "date", "total_mv", "circ_mv"]], errors
 
 
 def fetch_stock_list() -> pd.DataFrame | None:

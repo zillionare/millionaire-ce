@@ -839,11 +839,18 @@ class StrategyRuntimeManager:
         if runtime.mode == "live":
             broker = StrategyBrokerProxy(runtime.broker, runtime.strategy_id)
         strategy = strategy_cls(broker, runtime.config)
+        risk_strategy = self._build_live_risk_strategy(
+            strategy_cls, broker, runtime.config
+        )
         frame = FrameType.MIN1 if interval == "1m" else FrameType.DAY
         strategy.interval = frame.value
+        risk_day: datetime.date | None = None
         try:
             await strategy.init()
-            await strategy.on_start(datetime.datetime.now())
+            await strategy.on_start()
+            if risk_strategy is not None:
+                await risk_strategy.init()
+                await risk_strategy.on_start()
             while runtime.stop_event is not None and not runtime.stop_event.is_set():
                 now = datetime.datetime.now()
                 if hasattr(runtime.broker, "set_clock"):
@@ -853,7 +860,14 @@ class StrategyRuntimeManager:
                 # the strategy pulls its data through ``get_bars``/``get_history``.
                 self._build_quotes(runtime.symbols, market_data)
                 strategy._current_time = now
+                if risk_strategy is not None and risk_day != now.date():
+                    if risk_day is not None:
+                        await risk_strategy.on_day_close(now)
+                    await risk_strategy.on_day_open(now)
+                    risk_day = now.date()
                 await strategy.on_bar(now)
+                if risk_strategy is not None:
+                    await risk_strategy.on_check(broker.positions, now)
                 runtime.updated_at = datetime.datetime.now()
                 await asyncio.sleep(2)
             if runtime.status in {"running", "stopping"}:
@@ -877,10 +891,32 @@ class StrategyRuntimeManager:
                 if spec is not None:
                     spec["status"] = runtime.status
                     self._save_specs()
+            if risk_strategy is not None:
+                try:
+                    await risk_strategy.on_stop()
+                except Exception:
+                    pass
             try:
-                await strategy.on_stop(datetime.datetime.now())
+                await strategy.on_stop()
             except Exception:
                 pass
+
+    def _build_live_risk_strategy(
+        self, strategy_cls: Any, broker: Any, config: dict[str, Any]
+    ) -> Any:
+        """Attach the live counterpart of the declared triple-barrier overlay."""
+        if getattr(strategy_cls, "RISK_OVERLAY", None) != "triple_barrier":
+            return None
+        if "use_broker_barriers" in config:
+            enabled = bool(config["use_broker_barriers"])
+        else:
+            defaults = getattr(strategy_cls, "default_config", None)
+            enabled = bool(defaults().get("use_broker_barriers", False)) if callable(defaults) else False
+        if not enabled:
+            return None
+        from quantide.strategies.triple_barrier_risk import TripleBarrierRiskStrategy
+
+        return TripleBarrierRiskStrategy(broker, config)
 
     def _build_quotes(self, symbols: list[str], market_data: Any) -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
