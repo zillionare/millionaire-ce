@@ -286,6 +286,7 @@ class StrategyRuntimeManager:
             portfolio_id=account_id,
             portfolio_name=f"{run.strategy_name}-paper",
             principal=principal,
+            commission=float((effective_config or {}).get("commission", 1e-4)),
             market_data=market_data,
         )
         runtime = self._runtime

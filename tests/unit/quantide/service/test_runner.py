@@ -249,3 +249,117 @@ def test_base_strategy_on_bar_has_only_tm_parameter() -> None:
     assert list(sig.parameters) == ["self", "tm"], (
         f"on_bar signature must be (self, tm); got {list(sig.parameters)}"
     )
+
+
+def test_clamp_end_date_to_market_data_limits_range(monkeypatch):
+    """回测结束日期超过行情数据覆盖范围时应收敛到最后有数据的交易日。"""
+    monkeypatch.setattr(
+        "quantide.service.runner.daily_bars",
+        type("Store", (), {"end": datetime.date(2024, 1, 5)}),
+    )
+    monkeypatch.setattr(
+        "quantide.service.runner.calendar",
+        type(
+            "Calendar",
+            (),
+            {
+                "floor": staticmethod(lambda d, frame: d),
+                "ceiling": staticmethod(lambda d, frame: d),
+            },
+        ),
+    )
+
+    runner = BacktestRunner()
+    start, end = runner._align_backtest_dates(
+        datetime.date(2024, 1, 2), datetime.date(2024, 1, 10)
+    )
+
+    assert start == datetime.date(2024, 1, 2)
+    assert end == datetime.date(2024, 1, 5)
+
+
+def test_clamp_end_date_keeps_range_within_market_data(monkeypatch):
+    """行情数据覆盖到更晚时不应修改回测区间。"""
+    monkeypatch.setattr(
+        "quantide.service.runner.daily_bars",
+        type("Store", (), {"end": datetime.date(2024, 2, 1)}),
+    )
+    monkeypatch.setattr(
+        "quantide.service.runner.calendar",
+        type(
+            "Calendar",
+            (),
+            {
+                "floor": staticmethod(lambda d, frame: d),
+                "ceiling": staticmethod(lambda d, frame: d),
+            },
+        ),
+    )
+
+    runner = BacktestRunner()
+    start, end = runner._align_backtest_dates(
+        datetime.date(2024, 1, 2), datetime.date(2024, 1, 10)
+    )
+
+    assert end == datetime.date(2024, 1, 10)
+
+
+def test_backtest_broker_receives_fee_params_from_config(monkeypatch):
+    """回测配置的费率参数必须透传给 broker。"""
+    captured = {}
+
+    class _FakeBroker:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("quantide.service.runner.BacktestBroker", _FakeBroker)
+    monkeypatch.setattr("quantide.service.runner.record_backtest_log", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "quantide.service.runner.calendar",
+        type(
+            "Calendar",
+            (),
+            {
+                "replace_time": staticmethod(
+                    lambda d, h, m: datetime.datetime(d.year, d.month, d.day, h, m)
+                ),
+                "day_shift": staticmethod(lambda d, n: d),
+            },
+        ),
+    )
+
+    class _Strategy:
+        __name__ = "FeeStrategy"
+
+        def __init__(self, broker, config):
+            self.broker = broker
+            self.config = config
+
+        @staticmethod
+        def default_config():
+            return {}
+
+    runner = BacktestRunner()
+    runner._init_backtest(
+        strategy_cls=_Strategy,
+        config={
+            "commission": 0.0002,
+            "stamp_duty": 0.001,
+            "transfer_fee": 0.00002,
+            "min_commission": 3.0,
+        },
+        start_date=datetime.date(2024, 1, 2),
+        end_date=datetime.date(2024, 1, 10),
+        frame_type=FrameType.DAY,
+        initial_cash=1000000,
+        portfolio_id="fee-pf",
+        db_path=None,
+        save_logs=False,
+    )
+
+    assert captured["commission"] == pytest.approx(0.0002)
+    assert captured["stamp_duty"] == pytest.approx(0.001)
+    assert captured["transfer_fee"] == pytest.approx(0.00002)
+    assert captured["min_commission"] == pytest.approx(3.0)
+    assert "commission" in captured["desc"]
+    assert "0.0002" in captured["desc"]

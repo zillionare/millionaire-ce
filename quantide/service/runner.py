@@ -1,5 +1,6 @@
 import datetime
 import inspect
+import json
 import uuid
 from typing import Any
 
@@ -70,7 +71,39 @@ class BacktestRunner:
         end_date = calendar.floor(end_date, FrameType.DAY)
         if start_date > end_date:
             raise ValueError(f"回测开始日期 {start_date} 不能晚于结束日期 {end_date}")
-        return start_date, end_date
+        return start_date, self._clamp_end_date_to_market_data(end_date, start_date)
+
+    @staticmethod
+    def _clamp_end_date_to_market_data(
+        end_date: datetime.date,
+        start_date: datetime.date,
+    ) -> datetime.date:
+        """把回测结束日期收敛到行情数据覆盖的最后交易日。
+
+        行情数据滞后时，最后一根 bar 没有行情，卖出/清仓会因为拿不到
+        撮合价而失败，因此这里提前收敛，避免回测在收尾阶段报错。
+
+        Args:
+            end_date: 对齐后的回测结束日期。
+            start_date: 对齐后的回测开始日期。
+
+        Returns:
+            datetime.date: 收敛后的结束日期。
+        """
+        last_data_date = daily_bars.end
+        if not isinstance(last_data_date, datetime.date) or end_date <= last_data_date:
+            return end_date
+        clamped = calendar.floor(last_data_date, FrameType.DAY)
+        if clamped < start_date:
+            raise ValueError(
+                f"行情数据仅覆盖到 {last_data_date}，无法回测 {start_date} 之后的区间"
+            )
+        logger.warning(
+            "回测结束日期 {} 超出行情数据范围，已收敛到 {}（请更新行情数据后重跑）",
+            end_date,
+            clamped,
+        )
+        return clamped
 
     def _init_backtest(
         self,
@@ -123,8 +156,12 @@ class BacktestRunner:
             if use_barriers:
                 risk_overlay = TripleBarrierOverlay(
                     TripleBarrierConfig(
-                        up_pct=float(config.get("take_profit_pct", 0.15)),
-                        down_pct=float(config.get("stop_loss_pct", 0.06)),
+                        up_pct=float(
+                            config.get("take_profit_pct", config.get("up_pct", 0.15))
+                        ),
+                        down_pct=float(
+                            config.get("stop_loss_pct", config.get("down_pct", 0.06))
+                        ),
                         horizon=int(config.get("horizon", 3)),
                         sell_fraction=float(config.get("sell_fraction", 1.0)),
                         slippage=float(config.get("slippage_pct", 0.001)),
@@ -136,8 +173,13 @@ class BacktestRunner:
             portfolio_id=portfolio_id,
             data_feed=daily_bars,  # type: ignore
             principal=initial_cash,
+            commission=float(config.get("commission", 1e-4)),
+            stamp_duty=float(config.get("stamp_duty", 5e-4)),
+            min_commission=float(config.get("min_commission", 5.0)),
+            transfer_fee=float(config.get("transfer_fee", 1e-5)),
             match_level="day" if frame_type == FrameType.DAY else "minute",
             portfolio_name=strategy_cls.__name__,
+            desc=json.dumps({"config": dict(config or {})}, ensure_ascii=False),
             save_logs=save_logs,
             risk_overlay=risk_overlay,
         )
@@ -372,6 +414,9 @@ class BacktestRunner:
                 strategy._current_time = close_tm
                 await strategy.on_day_close(close_tm)
 
+            # 收尾清仓放在 try 内：失败时同样记录错误日志
+            await broker.stop_backtest()
+
         except Exception as exc:
             self.logger.exception("Backtest failed: {}", exc)
             failure_tm = strategy._current_time or broker._clock
@@ -387,7 +432,6 @@ class BacktestRunner:
 
         finally:
             await strategy.on_stop()
-        await broker.stop_backtest()
 
         self.logger.info(f"Backtest finished: {portfolio_id}")
         finish_tm = strategy._current_time or broker._clock
