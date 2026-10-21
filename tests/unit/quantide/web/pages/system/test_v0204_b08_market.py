@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import polars as pl
 import pytest
 
 from quantide.web.pages.system.market import _get_market_data
-
 
 # ---------------------------------------------------------------------------
 # _get_market_data
@@ -74,7 +74,7 @@ def test_get_market_data_invalid_date_returns_empty():
 
 
 def test_get_market_data_with_adjust():
-    """adjust != 'none' is passed through."""
+    """Adjust != 'none' is passed through."""
     with patch("quantide.web.pages.system.market.daily_bars") as mock_db:
         class _DF:
             def is_empty(self_inner):
@@ -247,3 +247,73 @@ async def test_sync_market_handles_exception():
         # Should not raise.
         resp = await sync_market(req)
         assert resp is not None
+
+
+def _identity_test_row() -> dict:
+    return {
+        "date": "2024-01-01",
+        "asset": "000001.SZ",
+        "open": 9.5,
+        "high": 10.2,
+        "low": 9.4,
+        "close": 10.0,
+        "pre_close": 9.5,
+        "volume": 1000,
+        "amount": 10000.0,
+        "up_limit": 11.0,
+        "down_limit": 9.0,
+        "adjust": 1.0,
+        "is_st": False,
+    }
+
+
+def test_build_market_table_shows_identity_without_code_filter(monkeypatch):
+    """无代码筛选时展示证券代码和名称。"""
+    from quantide.web.pages.system import market as market_page
+
+    monkeypatch.setattr(
+        market_page.stock_list,
+        "_data",
+        pl.DataFrame({"asset": ["000001.SZ"], "name": ["平安银行"]}),
+    )
+    html = str(
+        market_page._build_market_table(
+            [_identity_test_row()], page=1, per_page=20, total=1, code=""
+        )
+    )
+    assert "证券代码" in html
+    assert "证券名称" in html
+    assert "000001.SZ" in html
+    assert "平安银行" in html
+
+
+def test_build_market_table_hides_identity_with_code_filter(monkeypatch):
+    """有代码筛选时不展示证券代码和名称列。"""
+    from quantide.web.pages.system import market as market_page
+
+    monkeypatch.setattr(
+        market_page.stock_list,
+        "_data",
+        pl.DataFrame({"asset": ["000001.SZ"], "name": ["平安银行"]}),
+    )
+    html = str(
+        market_page._build_market_table(
+            [_identity_test_row()], page=1, per_page=20, total=1, code="000001.SZ"
+        )
+    )
+    assert "证券代码" not in html
+    assert "证券名称" not in html
+    assert "平安银行" not in html
+
+
+def test_build_market_table_change_shows_percent_only():
+    """涨跌只显示百分比，不显示绝对值。"""
+    from quantide.web.pages.system.market import _build_market_table
+
+    html = str(
+        _build_market_table(
+            [_identity_test_row()], page=1, per_page=20, total=1, code="000001.SZ"
+        )
+    )
+    assert "+5.26%" in html
+    assert "+0.50" not in html

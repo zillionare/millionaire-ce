@@ -11,6 +11,7 @@ from loguru import logger
 from monsterui.all import *
 
 from quantide.data.models.daily_bars import daily_bars
+from quantide.data.models.stocks import stock_list
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -81,9 +82,26 @@ def _get_market_data(
         return [], 0
 
 
+def _load_asset_names() -> dict[str, str]:
+    """加载证券代码到名称的映射。"""
+    try:
+        data = stock_list.data
+        if data is None or len(data) == 0:
+            return {}
+        if "asset" not in data.columns or "name" not in data.columns:
+            return {}
+        return dict(zip(data["asset"].to_list(), data["name"].to_list(), strict=True))
+    except Exception as e:
+        logger.debug(f"加载证券名称失败: {e}")
+        return {}
+
+
 def _build_market_table(data: list, page: int = 1, per_page: int = 20, total: int = 0,
                         code: str = "", start_date: str = "", end_date: str = "", adjust: str = "none"):
     """构建行情数据表格"""
+    show_identity = not str(code or "").strip()
+    asset_names = _load_asset_names() if show_identity else {}
+
     rows = []
     if data:
         for row in data:
@@ -105,32 +123,39 @@ def _build_market_table(data: list, page: int = 1, per_page: int = 20, total: in
                 change = cur_close - pre_close
                 change_pct = (change / pre_close) * 100
                 change_cls = "text-red-500" if change > 0 else ("text-green-500" if change < 0 else "text-gray-500")
-                change_str = f"{change:+.2f} ({change_pct:+.2f}%)"
+                change_str = f"{change_pct:+.2f}%"
             else:
                 change_cls = "text-gray-500"
                 change_str = "-"
 
-            rows.append(
-                Tr(
-                    Td(trade_date, cls="px-4 py-2 text-sm text-gray-900"),
-                    Td(open_price, cls="px-4 py-2 text-sm text-gray-900"),
-                    Td(high_price, cls="px-4 py-2 text-sm text-gray-900"),
-                    Td(low_price, cls="px-4 py-2 text-sm text-gray-900"),
-                    Td(close_price, cls="px-4 py-2 text-sm text-gray-900"),
-                    Td(Span(change_str, cls=change_cls), cls="px-4 py-2 text-sm"),
-                    Td(volume, cls="px-4 py-2 text-sm text-gray-500"),
-                    Td(amount, cls="px-4 py-2 text-sm text-gray-500"),
-                    Td(up_limit, cls="px-4 py-2 text-sm text-gray-500"),
-                    Td(down_limit, cls="px-4 py-2 text-sm text-gray-500"),
-                    Td(adjust_val, cls="px-4 py-2 text-sm text-gray-500"),
-                    Td(is_st, cls="px-4 py-2 text-sm text-gray-500"),
-                    cls="hover:bg-gray-50"
-                )
-            )
+            cells = []
+            if show_identity:
+                asset = str(row.get("asset") or "-")
+                cells.extend([
+                    Td(asset, cls="px-4 py-2 text-sm font-medium text-gray-900"),
+                    Td(asset_names.get(asset, "-"), cls="px-4 py-2 text-sm text-gray-900"),
+                ])
+            cells.extend([
+                Td(trade_date, cls="px-4 py-2 text-sm text-gray-900"),
+                Td(open_price, cls="px-4 py-2 text-sm text-gray-900"),
+                Td(high_price, cls="px-4 py-2 text-sm text-gray-900"),
+                Td(low_price, cls="px-4 py-2 text-sm text-gray-900"),
+                Td(close_price, cls="px-4 py-2 text-sm text-gray-900"),
+                Td(Span(change_str, cls=change_cls), cls="px-4 py-2 text-sm"),
+                Td(volume, cls="px-4 py-2 text-sm text-gray-500"),
+                Td(amount, cls="px-4 py-2 text-sm text-gray-500"),
+                Td(up_limit, cls="px-4 py-2 text-sm text-gray-500"),
+                Td(down_limit, cls="px-4 py-2 text-sm text-gray-500"),
+                Td(adjust_val, cls="px-4 py-2 text-sm text-gray-500"),
+                Td(is_st, cls="px-4 py-2 text-sm text-gray-500"),
+            ])
+
+            rows.append(Tr(*cells, cls="hover:bg-gray-50"))
     else:
         rows.append(
             Tr(
-                Td("暂无数据", colspan="12", cls="px-4 py-8 text-center text-gray-500")
+                Td("暂无数据", colspan="14" if show_identity else "12",
+                   cls="px-4 py-8 text-center text-gray-500")
             )
         )
 
@@ -145,6 +170,10 @@ def _build_market_table(data: list, page: int = 1, per_page: int = 20, total: in
             Table(
                 Thead(
                     Tr(
+                        *([
+                            Th("证券代码", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
+                            Th("证券名称", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
+                        ] if show_identity else []),
                         Th("日期", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
                         Th("开盘", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
                         Th("最高", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),

@@ -741,3 +741,82 @@ async def test_handle_complete_redirects_to_root(monkeypatch):
 
     assert fake_wizard.complete_calls == 1
     assert "window.location.href = '/'" in html
+
+
+@pytest.mark.asyncio
+async def test_run_data_sync_updates_daily_basic(monkeypatch):
+    fake_wizard = FakeInitWizard()
+    fake_wizard.state.app_home = "/tmp/market-data"
+    fake_wizard.state.data_source = "tushare"
+    fake_wizard.state.tushare_token = "ts-token"
+    fake_wizard.state.epoch = datetime.date(2005, 1, 1)
+    fake_wizard.state.history_start_date = datetime.date(2025, 5, 15)
+    monkeypatch.setattr(init_wizard_page, "init_wizard", fake_wizard)
+    monkeypatch.setattr(init_wizard_page.calendar, "update", lambda: None)
+    monkeypatch.setattr(
+        init_wizard_page.calendar,
+        "last_trade_date",
+        lambda: datetime.date(2024, 12, 31),
+    )
+    monkeypatch.setattr(init_wizard_page.stock_list, "update", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        init_wizard_page.daily_bars,
+        "fetch_with_daily_progress",
+        lambda *a, **kw: 1,
+    )
+    observed: dict[str, datetime.date] = {}
+
+    def _record_daily_basic(start, end):
+        observed["start"] = start
+        observed["end"] = end
+
+    monkeypatch.setattr(init_wizard_page.daily_basic, "update", _record_daily_basic)
+    monkeypatch.setattr("quantide.data.init_data", lambda home, init_db=True: None)
+    monkeypatch.setattr(init_wizard_page.msg_hub, "subscribe", lambda *a, **kw: None)
+    monkeypatch.setattr(init_wizard_page.msg_hub, "unsubscribe", lambda *a, **kw: None)
+
+    await init_wizard_page._run_data_sync(fake_wizard.state.history_start_date)
+
+    assert observed == {
+        "start": datetime.date(2024, 12, 31),
+        "end": datetime.date(2024, 12, 31),
+    }
+    assert fake_wizard.complete_calls == 1
+    assert init_wizard_page._sync_status["completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_data_sync_continues_when_daily_basic_fails(monkeypatch):
+    fake_wizard = FakeInitWizard()
+    fake_wizard.state.app_home = "/tmp/market-data"
+    fake_wizard.state.data_source = "tushare"
+    fake_wizard.state.tushare_token = "ts-token"
+    fake_wizard.state.epoch = datetime.date(2005, 1, 1)
+    fake_wizard.state.history_start_date = datetime.date(2025, 5, 15)
+    monkeypatch.setattr(init_wizard_page, "init_wizard", fake_wizard)
+    monkeypatch.setattr(init_wizard_page.calendar, "update", lambda: None)
+    monkeypatch.setattr(
+        init_wizard_page.calendar,
+        "last_trade_date",
+        lambda: datetime.date(2024, 12, 31),
+    )
+    monkeypatch.setattr(init_wizard_page.stock_list, "update", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        init_wizard_page.daily_bars,
+        "fetch_with_daily_progress",
+        lambda *a, **kw: 1,
+    )
+
+    def _fail_daily_basic(*a, **kw):
+        raise RuntimeError("mv failed")
+
+    monkeypatch.setattr(init_wizard_page.daily_basic, "update", _fail_daily_basic)
+    monkeypatch.setattr("quantide.data.init_data", lambda home, init_db=True: None)
+    monkeypatch.setattr(init_wizard_page.msg_hub, "subscribe", lambda *a, **kw: None)
+    monkeypatch.setattr(init_wizard_page.msg_hub, "unsubscribe", lambda *a, **kw: None)
+
+    await init_wizard_page._run_data_sync(fake_wizard.state.history_start_date)
+
+    assert fake_wizard.complete_calls == 1
+    assert init_wizard_page._sync_status["completed"] is True
+    assert init_wizard_page._sync_status["error"] is None

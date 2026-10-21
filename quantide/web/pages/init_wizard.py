@@ -28,10 +28,11 @@ from quantide.core.init_wizard_steps import WIZARD_TOTAL_STEPS, build_wizard_ste
 from quantide.core.message import msg_hub
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
+from quantide.data.models.daily_basic import daily_basic
 from quantide.data.models.stocks import stock_list
 from quantide.service.init_wizard import init_wizard
 from quantide.web.layouts.base import BaseLayout
-from quantide.web.theme import PRIMARY_COLOR, AppTheme
+from quantide.web.theme import AppTheme
 
 init_wizard_app, rt = fast_app(hdrs=AppTheme.headers())
 
@@ -1789,6 +1790,12 @@ async def _run_data_sync(start_date: datetime.date | None = None):
             )
         finally:
             msg_hub.unsubscribe("fetch_data_progress", _on_fetch_progress)
+
+        _update_sync_status(97, "正在同步市值数据", "正在同步市值数据...")
+        try:
+            await asyncio.to_thread(daily_basic.update, effective_start, sync_end)
+        except Exception as exc:
+            logger.warning("市值数据同步失败，策略将回退到流动性 universe: {}", exc)
 
         _update_sync_status(98, "数据下载完成", "数据下载完成，正在收尾...")
         init_wizard.complete_initialization()

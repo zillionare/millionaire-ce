@@ -15,6 +15,7 @@ from starlette.responses import StreamingResponse
 from quantide.core.message import msg_hub
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
+from quantide.data.models.daily_basic import daily_basic
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -295,7 +296,6 @@ async def index(req):
 @rt("/do-verify", methods="post")
 async def do_verify(form: dict):
     # 模拟校验逻辑
-    assets = form.get("assets", "").split(",")
     start_year = int(form.get("start_year", 2024))
     end_year = int(form.get("end_year", 2024))
 
@@ -320,7 +320,8 @@ async def _run_market_sync(start_date, end_date):
 
     try:
         def _on_progress(payload):
-            if not isinstance(payload, dict): return
+            if not isinstance(payload, dict):
+                return
             if payload.get("error"):
                 _sync_status["error"] = str(payload["error"])
                 return
@@ -334,8 +335,19 @@ async def _run_market_sync(start_date, end_date):
         msg_hub.subscribe("fetch_data_progress", _on_progress)
         try:
             await asyncio.to_thread(daily_bars.fetch_with_daily_progress, start_date, end_date)
+            _sync_status["message"] = "正在同步市值数据..."
+            market_cap_error: Exception | None = None
+            try:
+                await asyncio.to_thread(daily_basic.update, start_date, end_date)
+            except Exception as exc:
+                market_cap_error = exc
+                logger.warning("市值数据同步失败: {}", exc)
             _sync_status["progress"] = 100
-            _sync_status["message"] = "同步完成"
+            _sync_status["message"] = (
+                "同步完成"
+                if market_cap_error is None
+                else f"行情同步完成，市值数据同步失败: {market_cap_error}"
+            )
             _sync_status["completed"] = True
         finally:
             msg_hub.unsubscribe("fetch_data_progress", _on_progress)
@@ -354,7 +366,7 @@ async def do_update(req):
     try:
         s_dt = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
         e_dt = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
-    except:
+    except Exception:
         return Div("日期格式不正确", cls="text-red-500")
 
     asyncio.create_task(_run_market_sync(s_dt, e_dt))
@@ -402,6 +414,7 @@ async def sync_progress():
     async def event_generator():
         while True:
             yield f"data: {json.dumps(_sync_status)}\n\n"
-            if _sync_status["completed"] or _sync_status["error"]: break
+            if _sync_status["completed"] or _sync_status["error"]:
+                break
             await asyncio.sleep(0.5)
     return StreamingResponse(event_generator(), media_type="text/event-stream")
