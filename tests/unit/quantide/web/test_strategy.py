@@ -2,6 +2,7 @@ import datetime
 from types import SimpleNamespace
 
 import pandas as pd
+import polars as pl
 import pytest
 from fasthtml.common import to_xml
 
@@ -953,11 +954,10 @@ def test_backtest_result_trades_tab_paginates_pairs(monkeypatch):
     ]
     html = _trades_tab_page(monkeypatch, rows, query={"tab": "trades", "page": "2"})
 
-    assert "第 2/2 页 · 共 150 笔成交对" in html
+    assert "第 2/3 页 · 共 150 笔成交对" in html
     assert html.count("trade/kline/modal") == 50
-    # 末页的“下一页”应为禁用态
-    assert "下一页</span>" in html
-    assert "page=3" not in html
+    # 每页 50 行
+    assert strategy_page.TRADE_PAIRS_PAGE_SIZE == 50
 
 
 def test_trade_kline_modal_route_renders_chart(monkeypatch):
@@ -1218,7 +1218,7 @@ def test_foldable_cell_wraps_long_text() -> None:
 
 
 def test_resolve_backtest_status_repairs_stale_running_state(monkeypatch):
-    """进程内没有运行记录却标记运行中 → 视为异常中断并修复状态。"""
+    """进程内没有运行记录、且运行没到结束日 → 视为异常中断并修复状态。"""
     monkeypatch.setattr(
         strategy_page.strategy_runtime_manager,
         "get_backtest_run",
@@ -1231,8 +1231,16 @@ def test_resolve_backtest_status_repairs_stale_running_state(monkeypatch):
             portfolio_id=portfolio_id,
             kind=strategy_page.BrokerKind.BACKTEST,
             start="2024-01-02",
+            end="2024-06-30",
             name="DemoStrategy",
             status=True,
+        ),
+    )
+    monkeypatch.setattr(
+        strategy_page.db,
+        "query_assets",
+        lambda portfolio_id=None: pl.DataFrame(
+            {"dt": [datetime.date(2024, 5, 6)], "total": [100.0]}
         ),
     )
     repaired: list[str] = []
@@ -1247,3 +1255,79 @@ def test_resolve_backtest_status_repairs_stale_running_state(monkeypatch):
     assert status == "failed"
     assert "异常中断" in error
     assert repaired == ["demo-pf"]
+
+
+def test_resolve_backtest_status_keeps_running_when_not_provable(monkeypatch):
+    """无法证明已失效时保持"运行中"语义（AC-NFR1101-01）。"""
+    monkeypatch.setattr(
+        strategy_page.strategy_runtime_manager,
+        "get_backtest_run",
+        lambda portfolio_id: None,
+    )
+    fake_portfolio = SimpleNamespace(status=True)
+    monkeypatch.setattr(
+        strategy_page.db,
+        "get_portfolio",
+        lambda portfolio_id: fake_portfolio,
+    )
+
+    status, error = strategy_page._resolve_backtest_status("demo-pf")
+
+    assert status == "running"
+    assert error == ""
+
+
+def test_trade_pairs_page_size_is_50() -> None:
+    """交易详情每页 50 行。"""
+    assert strategy_page.TRADE_PAIRS_PAGE_SIZE == 50
+
+
+def test_trade_pairs_sort_by_return_rate() -> None:
+    """按收益率排序：升序最差在前，未平仓（无收益率）排最后。"""
+    rows = [
+        {"asset": "A", "return_rate": 0.05, "buy_tm": "2024-01-03"},
+        {"asset": "B", "return_rate": -0.02, "buy_tm": "2024-01-02"},
+        {"asset": "C", "return_rate": None, "buy_tm": "2024-01-01"},
+        {"asset": "D", "return_rate": 0.01, "buy_tm": "2024-01-04"},
+    ]
+
+    asc = strategy_page._sort_trade_pair_rows(rows, "return", "asc")
+    desc = strategy_page._sort_trade_pair_rows(rows, "return", "desc")
+
+    assert [r["asset"] for r in asc] == ["B", "D", "A", "C"]
+    assert [r["asset"] for r in desc] == ["A", "D", "B", "C"]
+    # 非收益率排序时保持原顺序
+    assert [r["asset"] for r in strategy_page._sort_trade_pair_rows(rows, "", "asc")] == [
+        "A",
+        "B",
+        "C",
+        "D",
+    ]
+
+
+def test_trades_tab_renders_sort_link_and_jump_box(monkeypatch):
+    """交易详情页提供按收益率排序的表头与跳页输入框。"""
+    rows = [
+        {
+            "asset": "002078.SZ",
+            "buy_tm": "2024-01-02 09:30:00",
+            "sell_tm": "2024-01-10 14:55:00",
+            "buy_amount": 1250.0,
+            "pnl": 40.0,
+            "unrealized_pnl": None,
+            "return_rate": 0.032,
+            "fee": 10.0,
+            "status": "closed",
+            "buy_tid": "tid-1",
+            "sell_tid": "tid-2",
+        }
+    ]
+    html = _trades_tab_page(
+        monkeypatch, rows, query={"tab": "trades", "sort": "return", "dir": "desc"}
+    )
+
+    assert "sort=return" in html
+    assert "跳页" not in html  # 占位，确保不是误加
+    assert "跳转" in html
+    assert 'name="page"' in html
+    assert 'value="1"' in html

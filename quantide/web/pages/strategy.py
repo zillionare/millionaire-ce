@@ -4,7 +4,7 @@ import json
 import uuid
 from pathlib import Path as FilePath
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import arrow
 import fasthtml.common as fh
@@ -42,7 +42,11 @@ from quantide.web.layouts.main import MainLayout
 strategy_app, rt = fast_app()
 
 BENCHMARK_ASSET = "000300.SH"
-TRADE_PAIRS_PAGE_SIZE = 100
+TRADE_PAIRS_PAGE_SIZE = 50
+TRADE_SORT_BUY_TIME = "buy_time"
+TRADE_SORT_RETURN = "return"
+TRADE_SORT_DIRECTIONS = ("asc", "desc")
+
 BACKTEST_REPORT_TABS = {
     "overview": "收益概述",
     "trades": "交易详情",
@@ -451,6 +455,32 @@ def _build_metrics_payload(portfolio_id: str) -> dict:
     }
 
 
+def _is_stale_backtest_run(portfolio_id: str, portfolio: Any) -> bool:
+    """判断"运行中"是否已失效。
+
+    回测总是跑在本进程内，进程内没有运行记录时不可能还在运行；若组合的
+    资产快照还没到回测结束日，说明这次运行没跑完（进程重启或异常中断）。
+
+    Args:
+        portfolio_id: 回测组合 ID。
+        portfolio: 回测组合记录。
+
+    Returns:
+        bool: 状态是否已失效。
+    """
+    end = getattr(portfolio, "end", None)
+    if not isinstance(end, datetime.date):
+        return False
+    try:
+        assets = db.query_assets(portfolio_id=portfolio_id)
+    except Exception:
+        return False
+    if assets is None or assets.is_empty():
+        return True
+    last = assets["dt"].max()
+    return isinstance(last, datetime.date) and last < end
+
+
 def _resolve_backtest_status(portfolio_id: str) -> tuple[str, str]:
     """解析回测运行状态与错误信息。
 
@@ -470,15 +500,15 @@ def _resolve_backtest_status(portfolio_id: str) -> tuple[str, str]:
     portfolio = db.get_portfolio(portfolio_id)
     if portfolio is None:
         return "missing", "未找到回测记录。"
-    if portfolio.status:
-        # 进程内没有运行记录却仍标记为运行中：进程重启或运行异常中断导致的状态悬挂。
-        # 回测总是跑在本进程内，因此此时不可能还在运行，修好状态并允许删除。
+    if portfolio.status and _is_stale_backtest_run(portfolio_id, portfolio):
+        # 进程内没有运行记录、且能证明这次运行没跑到结束日：进程重启或异常中断
+        # 留下的悬挂状态。修好状态并允许删除。
         try:
             db.update_portfolio(portfolio_id, status=False)
         except Exception:
             pass
         return "failed", "回测异常中断，未正常结束（可删除该记录）"
-    return "finished", ""
+    return ("running" if portfolio.status else "finished"), ""
 
 
 def _build_trade_rows(portfolio_id: str, limit: int = 200) -> list[dict]:
@@ -563,6 +593,30 @@ def _build_trade_pair_rows(portfolio_id: str) -> list[dict]:
     return rows
 
 
+def _sort_trade_pair_rows(
+    rows: list[dict], sort: str = "", direction: str = "asc"
+) -> list[dict]:
+    """按指定字段排序成交对。
+
+    Args:
+        rows: 成交对明细。
+        sort: 排序字段（``return`` 表示按收益率，其余按买入时间）。
+        direction: ``asc`` 升序 / ``desc`` 降序。
+
+    Returns:
+        list[dict]: 排序后的成交对。
+    """
+    if sort != TRADE_SORT_RETURN:
+        return list(rows)
+    with_value = [row for row in rows if row.get("return_rate") is not None]
+    without_value = [row for row in rows if row.get("return_rate") is None]
+    with_value.sort(
+        key=lambda row: float(row["return_rate"]),
+        reverse=direction == "desc",
+    )
+    return with_value + without_value
+
+
 def _paginate_trade_pairs(
     rows: list[dict], page: int, page_size: int = TRADE_PAIRS_PAGE_SIZE
 ) -> tuple[list[dict], int, int, int]:
@@ -589,8 +643,30 @@ def _build_trade_pair_table(
     page: int,
     total_pages: int,
     total: int,
+    sort: str = "",
+    direction: str = "asc",
 ) -> Any:
     """构建成交对表格与分页控件。"""
+
+    def _query(**extra: Any) -> str:
+        params = {"tab": "trades", **extra}
+        return f"/strategy/backtest/{portfolio_id}?{urlencode(params)}"
+
+    def _sort_header(label: str, field: str) -> Any:
+        if sort == field:
+            next_dir = "desc" if direction == "asc" else "asc"
+            arrow = " ↑" if direction == "asc" else " ↓"
+            return A(
+                label + arrow,
+                href=_query(sort=field, dir=next_dir, page=1),
+                cls="cursor-pointer select-none hover:text-blue-600",
+            )
+        return A(
+            label,
+            href=_query(sort=field, dir="asc", page=1),
+            cls="cursor-pointer select-none hover:text-blue-600",
+        )
+
     table = Table(
         Thead(
             Tr(
@@ -599,7 +675,7 @@ def _build_trade_pair_table(
                 Th("卖出时间"),
                 Th("金额(买入)"),
                 Th("PnL"),
-                Th("收益率"),
+                Th(_sort_header("收益率", TRADE_SORT_RETURN)),
                 Th("费用"),
             )
         ),
@@ -647,9 +723,13 @@ def _build_trade_pair_table(
     def _page_link(target: int, label: str, *, disabled: bool = False) -> Any:
         if disabled:
             return Span(label, cls="px-2 py-1 text-xs text-gray-300")
+        extra: dict[str, Any] = {"page": target}
+        if sort:
+            extra["sort"] = sort
+            extra["dir"] = direction
         return A(
             label,
-            href=f"/strategy/backtest/{portfolio_id}?tab=trades&page={target}",
+            href=_query(**extra),
             cls="px-2 py-1 text-xs text-blue-600 hover:underline",
         )
 
@@ -665,15 +745,38 @@ def _build_trade_pair_table(
         else:
             page_links.append(_page_link(number, str(number)))
 
+    jump_form = Form(
+        Input(type="hidden", name="tab", value="trades"),
+        *(
+            [Input(type="hidden", name="sort", value=sort), Input(type="hidden", name="dir", value=direction)]
+            if sort
+            else []
+        ),
+        Input(
+            type="number",
+            name="page",
+            value=str(page),
+            min="1",
+            max=str(total_pages),
+            cls="input input-bordered input-xs w-16 text-center",
+        ),
+        Button("跳转", type="submit", cls="btn btn-xs ml-1"),
+        cls="flex items-center",
+    )
+
     pagination = Div(
-        _page_link(page - 1, "上一页", disabled=page <= 1),
-        *page_links,
-        _page_link(page + 1, "下一页", disabled=page >= total_pages),
+        jump_form,
+        Div(
+            _page_link(page - 1, "上一页", disabled=page <= 1),
+            *page_links,
+            _page_link(page + 1, "下一页", disabled=page >= total_pages),
+            cls="flex items-center gap-1",
+        ),
         Span(
             f"第 {page}/{total_pages} 页 · 共 {total} 笔成交对",
             cls="text-xs text-gray-500 ml-2",
         ),
-        cls="flex items-center justify-end gap-1 mt-3",
+        cls="flex items-center justify-end gap-2 mt-3",
     )
 
     return Div(table, pagination, cls="mt-2")
@@ -3559,6 +3662,12 @@ def backtest_result(req, session, portfolio_id: str):
         trade_page_param = int(query_params.get("page") or 1)
     except (TypeError, ValueError):
         trade_page_param = 1
+    trade_sort = str(query_params.get("sort") or "").strip()
+    if trade_sort not in {TRADE_SORT_BUY_TIME, TRADE_SORT_RETURN}:
+        trade_sort = ""
+    trade_direction = str(query_params.get("dir") or "asc").strip()
+    if trade_direction not in TRADE_SORT_DIRECTIONS:
+        trade_direction = "asc"
     layout.sidebar_menu = _build_backtest_sidebar_menu(portfolio_id, active_tab)
 
     status, backtest_error = _resolve_backtest_status(portfolio_id)
@@ -3918,6 +4027,9 @@ def backtest_result(req, session, portfolio_id: str):
     """)
 
     trade_pair_rows = _build_trade_pair_rows(portfolio_id)
+    trade_pair_rows = _sort_trade_pair_rows(
+        trade_pair_rows, trade_sort, trade_direction
+    )
     trade_pair_rows, trade_page, trade_total_pages, trade_total = _paginate_trade_pairs(
         trade_pair_rows, trade_page_param
     )
@@ -3928,6 +4040,8 @@ def backtest_result(req, session, portfolio_id: str):
         trade_page,
         trade_total_pages,
         trade_total,
+        sort=trade_sort,
+        direction=trade_direction,
     )
     position_trs = []
     last_date = None
