@@ -43,6 +43,10 @@ FEATURE_COLS: list[str] = [
     # Group 2: 短线 K 线博弈形态
     "upper_shadow",
     "lower_shadow",
+    "upper_shadow_atr",
+    "lower_shadow_atr",
+    "upper_shadow_limit",
+    "lower_shadow_limit",
     "overnight_gap",
     "intraday_ret",
     "vol_ratio_5_20",
@@ -73,6 +77,10 @@ PRIOR_WEIGHTS: dict[str, float] = {
     "downside_resilience": 0.06,
     "upper_shadow": -0.05,
     "lower_shadow": 0.04,
+    "upper_shadow_atr": -0.06,
+    "lower_shadow_atr": 0.05,
+    "upper_shadow_limit": -0.07,
+    "lower_shadow_limit": 0.06,
     "overnight_gap": -0.02,
     "intraday_ret": 0.05,
     "vol_ratio_5_20": 0.03,
@@ -91,6 +99,160 @@ PRIOR_WEIGHTS: dict[str, float] = {
     "sharpe_mom_20d": 0.10,
     "rev_5d_shrink_vol": 0.08,
     "shadow_bias_reversal": 0.09,
+}
+
+#: 每个特征的「计算方法 / 含义 / 示例」说明，键与 :data:`FEATURE_COLS` 一一对应。
+#: 计算口径里的公共中间量：
+#: - ``prev_close``：上一交易日收盘价（``close.shift(1).over("asset")``）。
+#: - ``true_range``：``max(最高-最低, |最高-昨收|, |最低-昨收|)``。
+#: - ``atr20``：``true_range`` 的 20 日均值（min_samples=5），个股自身波动尺度。
+#: - ``limit_pct``：``(涨停价 - 昨收) / 昨收 * 100``，ST/板块不同则不同
+#:   （ST≈5%、主板≈10%、创业板/科创板≈20%）。
+FEATURE_DOCS: dict[str, str] = {
+    "rs_board_5d": (
+        "计算：ret_5d − 同日同板块 ret_5d 均值。\n"
+        "含义：个股相对本板块的 5 日超额收益（板块口径按代码前缀划分）。\n"
+        "示例：个股 5 日 +2.0%、板块均值 −5.0% → +7.0%。"
+    ),
+    "rs_board_20d": (
+        "计算：ret_20d − 同日同板块 ret_20d 均值。\n"
+        "含义：个股相对本板块的 20 日超额收益。\n"
+        "示例：个股 20 日 +4.0%、板块均值 −13.9% → +17.9%。"
+    ),
+    "rs_market_rank": (
+        "计算：当日截面 ret_10d 升序名次 / 当日资产数。\n"
+        "含义：10 日收益在全市场的百分位（序数，丢失幅度）。\n"
+        "示例：5344 只中排第 400 → 400/5344 ≈ 0.075。"
+    ),
+    "downside_resilience": (
+        "计算：近 10 日 (个股日收益 − 市场日收益) 的均值；市场下跌的日子权重 1.0，"
+        "上涨的日子权重 0.3。\n"
+        "含义：市场走弱时能否相对抗跌。\n"
+        "示例：市场连跌 5 日，个股每天都少跌 1% → 约 +1.0。"
+    ),
+    "upper_shadow": (
+        "计算：(最高 − max(开,收)) / (最高 − 最低)。\n"
+        "含义：上影线占当日振幅的比例（形态，分母为当日振幅，安静日噪声大）。\n"
+        "示例：开 10.00、收 10.20、高 11.00、低 10.00 → (11.00-10.20)/1.00 = 0.80。"
+    ),
+    "lower_shadow": (
+        "计算：(min(开,收) − 最低) / (最高 − 最低)。\n"
+        "含义：下影线占当日振幅的比例。\n"
+        "示例：开 10.00、收 10.20、高 11.00、低 10.00 → (10.00-10.00)/1.00 = 0.00。"
+    ),
+    "upper_shadow_atr": (
+        "计算：(最高 − max(开,收)) / atr20。\n"
+        "含义：上影线相当于该股近 20 日常态波动的多少倍（自身波动归一）。\n"
+        "示例：上影 0.80 元、atr20 = 2.00 元 → 0.40。"
+    ),
+    "lower_shadow_atr": (
+        "计算：(min(开,收) − 最低) / atr20。\n"
+        "含义：下影线相当于该股近 20 日常态波动的多少倍。\n"
+        "示例：下影 0.40 元、atr20 = 2.00 元 → 0.20。"
+    ),
+    "upper_shadow_limit": (
+        "计算：((最高 − max(开,收)) / 昨收 × 100) / limit_pct。\n"
+        "含义：上影线占当日允许涨跌空间的比例（ST/板块口径统一，跨股票可比）。\n"
+        "示例：昨收 10.00、上影 0.30 元(3%)；ST 限 5% → 3/5 = 0.60；"
+        "创业板限 20% → 3/20 = 0.15。"
+    ),
+    "lower_shadow_limit": (
+        "计算：((min(开,收) − 最低) / 昨收 × 100) / limit_pct。\n"
+        "含义：下影线占当日允许涨跌空间的比例。\n"
+        "示例：昨收 10.00、下影 0.50 元(5%)、主板限 10% → 5/10 = 0.50。"
+    ),
+    "overnight_gap": (
+        "计算：开盘 / 昨收 − 1。\n"
+        "含义：隔夜跳空幅度（前复权价，除权日无跳空）。\n"
+        "示例：昨收 10.00、今开 10.30 → +3.0%。"
+    ),
+    "intraday_ret": (
+        "计算：收盘 / 开盘 − 1。\n"
+        "含义：当日开盘到收盘的盘中涨跌。\n"
+        "示例：开 10.00、收 10.50 → +5.0%。"
+    ),
+    "vol_ratio_5_20": (
+        "计算：5 日平均成交额 / 20 日平均成交额。\n"
+        "含义：近期量能相对常态的放大倍数。\n"
+        "示例：5 日均额 2 亿、20 日均额 1 亿 → 2.00。"
+    ),
+    "high_open_bear": (
+        "计算：max(隔夜跳空, 0) × max(−盘中收益, 0) × vol_ratio_5_20。\n"
+        "含义：高开低走的形态强度（高开幅度 × 低走幅度 × 放量）。\n"
+        "示例：高开 +3%、盘中 −2%、量比 2 → 0.03×0.02×2 = 0.0012。"
+    ),
+    "low_open_bull": (
+        "计算：max(−隔夜跳空, 0) × max(盘中收益, 0) × vol_ratio_5_20。\n"
+        "含义：低开高走的形态强度。\n"
+        "示例：低开 −2%、盘中 +4%、量比 1.5 → 0.02×0.04×1.5 = 0.0012。"
+    ),
+    "intraday_vs_overnight_5d": (
+        "计算：近 5 日 (盘中收益 − 隔夜跳空) 之和。\n"
+        "含义：近 5 日的收益是来自盘中还是隔夜。\n"
+        "示例：5 日盘中累计 +6%、隔夜累计 +1% → +5%。"
+    ),
+    "ma10_slope": (
+        "计算：MA10 / MA10[5日前] − 1。\n"
+        "含义：10 日均线的 5 日斜率。\n"
+        "示例：MA10 从 10.0 升到 10.5 → +5.0%。"
+    ),
+    "ma20_slope": (
+        "计算：MA20 / MA20[5日前] − 1。\n"
+        "含义：20 日均线的 5 日斜率。\n"
+        "示例：MA20 从 20.0 升到 21.0 → +5.0%。"
+    ),
+    "ma_alignment": (
+        "计算：(收 > MA5 + MA5 > MA10 + MA10 > MA20) / 3。\n"
+        "含义：均线多头排列程度。\n"
+        "示例：三条条件全满足 → 1.00；全不满足 → 0.00。"
+    ),
+    "bias_5": (
+        "计算：收盘 / MA5 − 1。\n"
+        "含义：短期乖离率（相对 5 日线）。\n"
+        "示例：收 11.0、MA5 10.0 → +10.0%。"
+    ),
+    "bias_20": (
+        "计算：收盘 / MA20 − 1。\n"
+        "含义：中期乖离率（相对 20 日线）。\n"
+        "示例：收 22.0、MA20 20.0 → +10.0%。"
+    ),
+    "ma20_support_bounce": (
+        "计算：当 ma20_slope > 0 且 最低 ≤ MA20×1.02 且 收盘 ≥ MA20×0.995 时，"
+        "取 (下影线/atr20 + max(盘中收益/atr20, 0) + 0.5)，否则取 0。\n"
+        "含义：回踩 20 日线后获支撑并反弹的强度（0 表示未触发该形态）。\n"
+        "示例：下影 0.20/atr20 2.0 = 0.10，盘中 +1% = 0.50 → 0.10+0.50+0.5 = 1.10。"
+    ),
+    "clv_money_flow": (
+        "计算：近 5 日 ((2×收盘 − 最高 − 最低) / atr20 × vol_ratio_5_20) 的均值。\n"
+        "含义：收盘位置（CLV）与量能配合的资金流强度。\n"
+        "示例：某日收在当日区间上沿 → CLV/atr20 = 1.0，量比 2 → 当日 2.0。"
+    ),
+    "pv_sync_10d": (
+        "计算：近 10 日 sign(日收益) × (成交额 / 20 日均额 − 1) 的均值。\n"
+        "含义：量价是否同步（涨时放量、跌时缩量为正）。\n"
+        "示例：涨日成交额为均额 2 倍 → sign=+1、倍数 1.0 → +1.0。"
+    ),
+    "limit_up_gene": (
+        "计算：近 20 日中「收盘达到涨停价×0.992 以上或日涨幅 ≥ 9.5%」的天数。\n"
+        "含义：涨停基因（游资/题材属性）。\n"
+        "示例：近 20 日涨停 3 次 → 3。"
+    ),
+    "sharpe_mom_20d": (
+        "计算：ret_20d / (20 日收益波动率 × √20)。\n"
+        "含义：20 日动量的风险调整强度。\n"
+        "示例：20 日 +10%、波动率 2% → 10/(2×4.47) ≈ 1.12。"
+    ),
+    "rev_5d_shrink_vol": (
+        "计算：−ret_5d / (vol_ratio_5_20 + 0.5)。\n"
+        "含义：5 日回撤且缩量的反转特征。\n"
+        "示例：5 日 −3%、量比 0.8 → 0.03/1.3 ≈ 0.023。"
+    ),
+    "shadow_bias_reversal": (
+        "计算：−(上影线/atr20) × max(bias_20, 0) × vol_ratio_5_20 "
+        "+ (下影线/atr20) × max(−bias_5, 0)。\n"
+        "含义：高位长上影（负）与低位长下影（正）的反转交互。\n"
+        "示例：高位上影 0.4/atr20、bias_20=+5%、量比 2 → −0.4×0.05×2 = −0.04。"
+    ),
 }
 
 
@@ -167,9 +329,39 @@ def compute_alpha_features(
 ) -> pl.DataFrame:
     """Compute 5 groups of momentum, reversal, and microstructure features.
 
+    特征分组（与 :data:`FEATURE_COLS` 一一对应，每个特征的「计算方法 / 含义 /
+    示例」见 :data:`FEATURE_DOCS`）：
+
+    1. 板块与市场相对强弱：``rs_board_5d`` ``rs_board_20d`` ``rs_market_rank``
+       ``downside_resilience``
+    2. 短线 K 线博弈形态：``upper_shadow`` ``lower_shadow``（当日振幅比例口径）
+       ``upper_shadow_atr`` ``lower_shadow_atr``（ATR 归一）
+       ``upper_shadow_limit`` ``lower_shadow_limit``（涨跌停限归一）
+       ``overnight_gap`` ``intraday_ret`` ``vol_ratio_5_20`` ``high_open_bear``
+       ``low_open_bull`` ``intraday_vs_overnight_5d``
+    3. 均线支撑与斜率：``ma10_slope`` ``ma20_slope`` ``ma_alignment`` ``bias_5``
+       ``bias_20`` ``ma20_support_bounce``
+    4. 资金推动与量价：``clv_money_flow`` ``pv_sync_10d`` ``limit_up_gene``
+    5. 动量与反转交互：``sharpe_mom_20d`` ``rev_5d_shrink_vol``
+       ``shadow_bias_reversal``
+
+    影线族的三种口径（同一根 K 线同时给出，便于模型区分「形态」与「量级」）：
+
+    - 比例口径 ``upper_shadow``/``lower_shadow``：影线 ÷ 当日振幅，取值 [0,1]，
+      但分母是当日振幅，安静日容易被小分母放大成噪声。
+    - ATR 口径 ``*_shadow_atr``：影线 ÷ ``atr20``（个股近 20 日真实波动的均值），
+      表示"相当于自身常态波动的多少倍"，跨股票跨日期可比。
+    - 涨跌停限口径 ``*_shadow_limit``：影线占昨收的百分比 ÷ 当日涨停幅度，
+      自动适配 ST(5%)、主板(10%)、创业板/科创板(20%)，跨股票横向可比。
+
+    ``clv`` 的分母同样从 ``bar_range`` 换成 ``atr20``（``clv_atr``），
+    ``ma20_support_bounce`` / ``shadow_bias_reversal`` / ``clv_money_flow``
+    一并改用 ATR 归一后的影线与 CLV。
+
     Args:
         df: Daily bar DataFrame containing at least
-            ``[date, asset, open, high, low, close, volume]``.
+            ``[date, asset, open, high, low, close, volume]``.  ``up_limit`` /
+            ``down_limit`` 可选，提供时才能计算涨跌停限口径的影线。
         stock_meta: Optional metadata DataFrame with ``[asset, industry]``.
 
     Returns:
@@ -381,6 +573,61 @@ def compute_alpha_features(
         ]
     )
 
+    # Volatility / price-limit normalization basis for the shadow family.
+    # ``bar_range`` (today's range) is a noisy denominator: on a quiet day the
+    # ratio form explodes (a 0.8% range with a 0.2% body reads as a 0.8 shadow),
+    # so the shadows are also expressed in ATR units and in units of the daily
+    # price limit (which is ST/board aware).
+    out = out.with_columns(
+        [
+            pl.col("close").shift(1).over("asset").alias("prev_close"),
+            (pl.col("high") - pl.col("body_top")).alias("upper_wick"),
+            (pl.col("body_bot") - pl.col("low")).alias("lower_wick"),
+        ]
+    )
+    out = out.with_columns(
+        pl.max_horizontal(
+            (pl.col("high") - pl.col("low")),
+            (pl.col("high") - pl.col("prev_close")).abs(),
+            (pl.col("low") - pl.col("prev_close")).abs(),
+        ).alias("true_range")
+    )
+    out = out.with_columns(
+        pl.col("true_range")
+        .rolling_mean(window_size=20, min_samples=5)
+        .over("asset")
+        .alias("atr20")
+    )
+    out = out.with_columns(
+        pl.when(pl.col("up_limit") > 0)
+        .then(
+            (pl.col("up_limit") - pl.col("prev_close")) / pl.col("prev_close") * 100.0
+        )
+        .otherwise(None)
+        .alias("limit_pct")
+    )
+    out = out.with_columns(
+        [
+            (pl.col("upper_wick") / pl.col("atr20")).alias("upper_shadow_atr"),
+            (pl.col("lower_wick") / pl.col("atr20")).alias("lower_shadow_atr"),
+            (
+                (pl.col("upper_wick") / pl.col("prev_close") * 100.0)
+                / pl.col("limit_pct")
+            ).alias("upper_shadow_limit"),
+            (
+                (pl.col("lower_wick") / pl.col("prev_close") * 100.0)
+                / pl.col("limit_pct")
+            ).alias("lower_shadow_limit"),
+            (
+                (2.0 * pl.col("close") - pl.col("high") - pl.col("low"))
+                / pl.col("atr20")
+            ).alias("clv_atr"),
+            (
+                pl.col("intraday_ret") * pl.col("prev_close") / pl.col("atr20")
+            ).alias("intraday_ret_atr"),
+        ]
+    )
+
     # All 5 feature groups
     out = out.with_columns(
         [
@@ -420,14 +667,14 @@ def compute_alpha_features(
                 & (pl.col("close") >= pl.col("ma20") * 0.995)
             )
             .then(
-                pl.col("lower_shadow")
-                + pl.max_horizontal(pl.col("intraday_ret") * 10.0, pl.lit(0.0))
+                pl.col("lower_shadow_atr")
+                + pl.max_horizontal(pl.col("intraday_ret_atr"), pl.lit(0.0))
                 + 0.5
             )
             .otherwise(0.0)
             .alias("ma20_support_bounce"),
             # Group 4: Money Flow & Volume-Price
-            (pl.col("clv") * pl.col("vol_ratio_5_20"))
+            (pl.col("clv_atr") * pl.col("vol_ratio_5_20"))
             .rolling_mean(window_size=5, min_samples=1)
             .over("asset")
             .alias("clv_money_flow"),
@@ -454,10 +701,10 @@ def compute_alpha_features(
                 "rev_5d_shrink_vol"
             ),
             (
-                -pl.col("upper_shadow")
+                -pl.col("upper_shadow_atr")
                 * pl.max_horizontal(pl.col("bias_20"), pl.lit(0.0))
                 * pl.col("vol_ratio_5_20")
-                + pl.col("lower_shadow")
+                + pl.col("lower_shadow_atr")
                 * pl.max_horizontal(-pl.col("bias_5"), pl.lit(0.0))
             ).alias("shadow_bias_reversal"),
         ]
