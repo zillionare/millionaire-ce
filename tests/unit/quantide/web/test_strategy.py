@@ -1192,3 +1192,58 @@ def test_parse_params_keeps_single_value_as_scalar():
     config = strategy_page._parse_params(_Form({"param_top_k": "5"}))
 
     assert config == {"top_k": 5}
+
+
+def test_params_to_text_compacts_list_values() -> None:
+    """列表型参数（如因子选择）只显示项数，避免刷屏。"""
+    text = strategy_page._params_to_text(
+        {"top_k": 5, "features": ["a", "b", "c"], "commission": 0.0001}
+    )
+
+    assert "top_k=5" in text
+    assert "features=3项" in text
+    assert "commission=0.0001" in text
+
+
+def test_foldable_cell_wraps_long_text() -> None:
+    """过长的参数文本折叠，点击展开。"""
+    short = strategy_page._foldable_cell("top_k=5")
+    long_text = "x" * 200
+    long_cell = strategy_page._foldable_cell(long_text)
+
+    assert "<details" not in str(short)
+    assert "<details" in str(long_cell)
+    assert "<summary" in str(long_cell)
+    assert long_text in str(long_cell)
+
+
+def test_resolve_backtest_status_repairs_stale_running_state(monkeypatch):
+    """进程内没有运行记录却标记运行中 → 视为异常中断并修复状态。"""
+    monkeypatch.setattr(
+        strategy_page.strategy_runtime_manager,
+        "get_backtest_run",
+        lambda portfolio_id: None,
+    )
+    monkeypatch.setattr(
+        strategy_page.db,
+        "get_portfolio",
+        lambda portfolio_id: Portfolio(
+            portfolio_id=portfolio_id,
+            kind=strategy_page.BrokerKind.BACKTEST,
+            start="2024-01-02",
+            name="DemoStrategy",
+            status=True,
+        ),
+    )
+    repaired: list[str] = []
+    monkeypatch.setattr(
+        strategy_page.db,
+        "update_portfolio",
+        lambda portfolio_id, **updates: repaired.append(portfolio_id),
+    )
+
+    status, error = strategy_page._resolve_backtest_status("demo-pf")
+
+    assert status == "failed"
+    assert "异常中断" in error
+    assert repaired == ["demo-pf"]

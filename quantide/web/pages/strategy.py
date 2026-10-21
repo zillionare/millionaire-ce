@@ -470,7 +470,15 @@ def _resolve_backtest_status(portfolio_id: str) -> tuple[str, str]:
     portfolio = db.get_portfolio(portfolio_id)
     if portfolio is None:
         return "missing", "未找到回测记录。"
-    return ("running" if portfolio.status else "finished"), ""
+    if portfolio.status:
+        # 进程内没有运行记录却仍标记为运行中：进程重启或运行异常中断导致的状态悬挂。
+        # 回测总是跑在本进程内，因此此时不可能还在运行，修好状态并允许删除。
+        try:
+            db.update_portfolio(portfolio_id, status=False)
+        except Exception:
+            pass
+        return "failed", "回测异常中断，未正常结束（可删除该记录）"
+    return "finished", ""
 
 
 def _build_trade_rows(portfolio_id: str, limit: int = 200) -> list[dict]:
@@ -989,8 +997,38 @@ def _params_to_text(params: dict) -> str:
         text_value = value
         if isinstance(value, dict):
             text_value = value.get("default", "")
+        elif isinstance(value, (list, tuple, set)):
+            text_value = f"{len(value)}项"
         items.append(f"{key}={text_value}")
     return ", ".join(items) if items else "--"
+
+
+def _foldable_cell(text: str, *, limit: int = 90) -> Any:
+    """构建可折叠的文本单元格。
+
+    Args:
+        text: 完整文本。
+        limit: 摘要保留的字符数。
+
+    Returns:
+        Any: 表格单元格节点。
+    """
+    if not text or len(text) <= limit:
+        return Td(text, cls="text-gray-600")
+    return Td(
+        fh.Details(
+            fh.Summary(
+                text[:limit] + " …",
+                cls="cursor-pointer text-gray-600 hover:text-blue-600",
+            ),
+            Div(
+                text,
+                cls="text-xs text-gray-700 whitespace-pre-wrap break-all mt-1",
+            ),
+            cls="text-xs",
+        ),
+        cls="align-top",
+    )
 
 
 def _extract_params_from_info(info) -> dict:
@@ -1303,7 +1341,7 @@ def _build_backtest_rows(
             Tr(
                 _build_backtest_name_cell(name, portfolio_id),
                 Td(version, cls="text-gray-600"),
-                Td(params_text, cls="text-gray-600"),
+                _foldable_cell(params_text),
                 Td(range_text, cls="text-gray-600"),
                 Td(_format_percent(annual_return), cls=f"{annual_cls} font-medium"),
                 Td(_format_number(sharpe), cls="text-gray-900"),
