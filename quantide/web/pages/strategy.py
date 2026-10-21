@@ -27,6 +27,10 @@ from quantide.service.backtest_logs import (
     saved_backtest_log_exists,
     saved_backtest_log_path,
 )
+from quantide.service.backtest_params import (
+    default_backtest_params,
+    format_changed_params,
+)
 from quantide.service.discovery import strategy_loader
 from quantide.service.grid_search import GridSearch
 from quantide.service.metrics import metrics
@@ -1419,9 +1423,16 @@ def _build_backtest_rows(
         strategy_cls = strategies.get(name)
         version = _strategy_version(strategy_cls)
         info_params = _extract_params_from_info(row.get("info"))
-        if not info_params and strategy_cls:
-            info_params = _get_strategy_default_params(strategy_cls)
-        params_text = _params_to_text(info_params)
+        if info_params:
+            # 只展示与默认不同的参数（用户改过的）
+            params_text = format_changed_params(
+                info_params, default_backtest_params(strategy_cls)
+            )
+        elif strategy_cls:
+            # 老回测没有落库配置，只能回退到策略默认参数
+            params_text = _params_to_text(_get_strategy_default_params(strategy_cls))
+        else:
+            params_text = "默认"
         range_text = _format_range(row.get("start"), row.get("end"))
         deployment_modes = strategy_runtime_manager.backtest_deployment_modes(portfolio_id)
         metrics_payload = _build_metrics_payload(portfolio_id)

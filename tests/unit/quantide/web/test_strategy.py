@@ -1331,3 +1331,60 @@ def test_trades_tab_renders_sort_link_and_jump_box(monkeypatch):
     assert "跳转" in html
     assert 'name="page"' in html
     assert 'value="1"' in html
+
+
+def test_backtest_list_shows_only_changed_params(monkeypatch):
+    """回测报告列表的参数列只显示与默认不同的参数。"""
+    from quantide.service import backtest_params
+
+    defaults = backtest_params.default_backtest_params(_ModalDemoStrategy)
+    config = {
+        "top_k": 5,
+        "keep_top_n": 15,
+        "universe_size": 2000,
+        "universe_mode": "market_cap_trim",
+        "market_cap_trim_pct": 0.05,
+        "universe_rebalance_days": 20,
+        "train_window": 45,
+        "horizon": 3,
+        "retrain_days": 5,
+        "stop_loss_pct": 0.06,
+        "take_profit_pct": 0.15,
+        "slippage_pct": 0.001,
+        "use_lightgbm": True,
+        "use_broker_barriers": True,
+        "use_alpha_exit": False,
+        "commission": 0.0001,
+        "stamp_duty": 0.0005,
+        "transfer_fee": 1e-05,
+        "min_commission": 5.0,
+        "features": list(FEATURE_COLS),
+    }
+    monkeypatch.setattr(
+        strategy_page.db,
+        "portfolios_all",
+        lambda: __import__("polars").DataFrame(
+            {
+                "portfolio_id": ["pf-1"],
+                "kind": ["bt"],
+                "name": ["DemoStrategy"],
+                "start": ["2024-01-02"],
+                "end": ["2024-06-30"],
+                "info": [__import__("json").dumps({"config": config})],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        strategy_page.strategy_loader,
+        "load_from_cache",
+        lambda: {"DemoStrategy": _ModalDemoStrategy},
+    )
+    monkeypatch.setattr(strategy_page, "_build_metrics_payload", lambda portfolio_id: {})
+
+    rows = strategy_page._build_backtest_rows({"DemoStrategy": _ModalDemoStrategy})
+    html = str(rows[0])
+
+    assert "use_alpha_exit=False" in html
+    assert "top_k=5" not in html
+    assert "features" not in html
+    assert "commission" not in html
