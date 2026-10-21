@@ -433,3 +433,51 @@ def test_render_panel_tabs_switches_between_features_and_shap(monkeypatch) -> No
     assert "#7 / 4505" in html
     # 归因页不再显示通用特征明细
     assert "bias_5" not in html
+
+
+def test_shap_panel_shows_buy_and_sell_attribution(monkeypatch) -> None:
+    """SHAP 面板同时给出买入侧与卖出侧归因。"""
+    buy = _trade(tid="t1", tm=datetime.datetime(2024, 6, 3, 9, 30))
+    sell = _trade(
+        tid="t2",
+        side=OrderSide.SELL,
+        tm=datetime.datetime(2024, 6, 10, 14, 55),
+        price=13.0,
+    )
+    _install(
+        monkeypatch,
+        [buy, sell],
+        _bars(datetime.date(2022, 1, 3), datetime.date(2024, 6, 10)),
+        store_end=datetime.date(2024, 6, 10),
+    )
+
+    payload = build_trade_kline_payload("pf-1", "t1", "t2")
+    assert payload is not None
+    payload["available_panels"] = ["features", "shap"]
+    payload["active_panel"] = "shap"
+    payload["attribution"] = {
+        "asset": "002078.SZ",
+        "date": datetime.date(2024, 6, 3),
+        "engine": "LightGBM",
+        "score": 1.5,
+        "baseline": -0.1,
+        "rank": 3,
+        "cross_section": 100,
+        "features": [{"name": "bias_5", "z": 1.0, "total": 0.05}],
+    }
+    payload["sell_attribution"] = {
+        "asset": "002078.SZ",
+        "date": datetime.date(2024, 6, 10),
+        "engine": "LightGBM",
+        "score": -0.8,
+        "baseline": -0.1,
+        "rank": 88,
+        "cross_section": 100,
+        "features": [{"name": "bias_5", "z": -1.2, "total": -0.06}],
+    }
+
+    html = _html(render_trade_kline_chart(payload, {}))
+
+    assert "卖出归因" in html
+    assert "#88 / 100" in html
+    assert "#3 / 100" in html

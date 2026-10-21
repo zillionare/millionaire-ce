@@ -48,17 +48,34 @@ def _portfolio_supports_attribution(portfolio_id: str) -> bool:
     return supports_attribution(strategy_cls)
 
 
-def _decision_attribution(
-    portfolio_id: str, asset: str, buy_dt: datetime.date
-) -> dict[str, Any] | None:
-    """计算该笔买入在决策日的预测归因（按策略能力动态加载）。"""
+def _signal_date_for(
+    decision_date: datetime.date, decision_tm: datetime.datetime | None
+) -> datetime.date:
+    """推算决策时可��的因子日期。
+
+    开盘决策（09:30 及之前）只能用上一交易日的完整 K 线；盘中决策
+    （如 14:55 的障碍止损）可以用当日 K 线。
+    """
     from quantide.data.models.calendar import calendar
+
+    if decision_tm is not None and decision_tm.time() > datetime.time(9, 30):
+        return decision_date
+    try:
+        return calendar.day_shift(decision_date, -1)
+    except Exception:
+        return decision_date - datetime.timedelta(days=1)
+
+
+def _decision_attribution(
+    portfolio_id: str,
+    asset: str,
+    decision_date: datetime.date,
+    decision_tm: datetime.datetime | None = None,
+) -> dict[str, Any] | None:
+    """计算某次决策的预测归因（按策略能力动态加载）。"""
     from quantide.service.attribution import explain_prediction
 
-    try:
-        signal_date = calendar.day_shift(buy_dt, -1)
-    except Exception:
-        signal_date = buy_dt - datetime.timedelta(days=1)
+    signal_date = _signal_date_for(decision_date, decision_tm)
     return explain_prediction(portfolio_id, asset, signal_date)
 
 
@@ -346,10 +363,15 @@ def build_trade_kline_payload(
     if _portfolio_supports_attribution(portfolio_id):
         available_panels.append(TRADE_KLINE_PANEL_SHAP)
     active_panel = panel if panel in available_panels else TRADE_KLINE_PANEL_FEATURES
+    sell_attribution: dict[str, Any] | None = None
     if active_panel == TRADE_KLINE_PANEL_SHAP:
-        attribution = _decision_attribution(portfolio_id, asset, buy_dt)
+        attribution = _decision_attribution(portfolio_id, asset, buy_dt, pair.buy_tm)
         if attribution is None:
             active_panel = TRADE_KLINE_PANEL_FEATURES
+        elif sell_dt is not None:
+            sell_attribution = _decision_attribution(
+                portfolio_id, asset, sell_dt, pair.sell_tm
+            )
     if active_panel == TRADE_KLINE_PANEL_FEATURES:
         features = _decision_features(asset, buy_dt)
 
@@ -385,6 +407,7 @@ def build_trade_kline_payload(
         "post_sell_trend": sell_dt is not None,
         "features": features or [],
         "attribution": attribution,
+        "sell_attribution": sell_attribution,
         "available_panels": available_panels,
         "active_panel": active_panel,
     }
@@ -701,8 +724,10 @@ def _render_panel_tabs(
     return Div(*tabs, cls="flex items-center gap-1 mb-2")
 
 
-def _render_attribution_panel(attribution: dict[str, Any]) -> Any:
-    """构建 SHAP 归因面板。"""
+def _render_attribution_panel(
+    attribution: dict[str, Any], sell_attribution: dict[str, Any] | None = None
+) -> Any:
+    """构建 SHAP 归因面板（买入侧 + 卖出侧）。"""
     rows: list[Any] = [
         _panel_row("决策日", str(attribution.get("date", ""))),
         _panel_row("模型", str(attribution.get("engine", ""))),
@@ -712,14 +737,9 @@ def _render_attribution_panel(attribution: dict[str, Any]) -> Any:
             f"#{attribution.get('rank')} / {attribution.get('cross_section')}",
         ),
         _panel_row("基线分", f"{float(attribution.get('baseline') or 0):+.4f}"),
-        _panel_row(
-            "权重",
-            f"模型 {float(attribution.get('model_weight') or 0):.1f}"
-            f" / 先验 {float(attribution.get('prior_weight') or 0):.1f}",
-        ),
     ]
     header = Div(
-        Div("归因（模型 TreeSHAP + 先验分项）", cls="text-xs font-semibold text-gray-700 mb-1"),
+        Div("买入归因（模型 TreeSHAP）", cls="text-xs font-semibold text-gray-700 mb-1"),
         *rows,
         cls="mb-2",
     )
@@ -741,7 +761,46 @@ def _render_attribution_panel(attribution: dict[str, Any]) -> Any:
         ),
         *feature_rows,
     )
-    return Div(header, legend)
+    blocks = [header, legend]
+    if sell_attribution:
+        blocks.append(_render_attribution_block(sell_attribution, "卖出归因"))
+    return Div(*blocks)
+
+
+def _render_attribution_block(
+    attribution: dict[str, Any], title: str
+) -> Any:
+    """构建一段归因（标题 + 概览 + 特征贡献）。"""
+    rows: list[Any] = [
+        _panel_row("决策日", str(attribution.get("date", ""))),
+        _panel_row("模型", str(attribution.get("engine", ""))),
+        _panel_row("最终得分", f"{float(attribution.get('score') or 0):+.4f}"),
+        _panel_row(
+            "截面排名",
+            f"#{attribution.get('rank')} / {attribution.get('cross_section')}",
+        ),
+        _panel_row("基线分", f"{float(attribution.get('baseline') or 0):+.4f}"),
+    ]
+    feature_rows = [
+        Div(
+            Span(item["name"], cls="text-xs text-gray-600 truncate"),
+            Span(
+                f"{float(item.get('total') or 0):+.4f}",
+                cls="text-xs text-gray-900 font-medium text-right tabular-nums",
+            ),
+            cls="flex items-center justify-between gap-2 py-0.5 border-b border-gray-100",
+        )
+        for item in attribution.get("features") or []
+    ]
+    return Div(
+        Div(title, cls="text-xs font-semibold text-gray-700 mb-1 mt-3"),
+        *rows,
+        Div(
+            "特征（合计贡献）",
+            cls="text-xs font-semibold text-gray-700 mb-1 mt-2",
+        ),
+        *feature_rows,
+    )
 
 
 def render_trade_kline_chart(
@@ -792,7 +851,9 @@ def render_trade_kline_chart(
             Div(
                 _render_panel_tabs(payload, tab_urls),
                 (
-                    _render_attribution_panel(payload["attribution"])
+                    _render_attribution_panel(
+                        payload["attribution"], payload.get("sell_attribution")
+                    )
                     if payload.get("attribution")
                     else _render_trade_panel(payload)
                 ),
