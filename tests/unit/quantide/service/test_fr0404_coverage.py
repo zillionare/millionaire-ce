@@ -44,6 +44,9 @@ class _Executor:
         self.submitted.append(config)
         return _CompletedFuture({"portfolio_id": config["alpha"], "metrics": {"score": 1}})
 
+    def shutdown(self, wait=True, cancel_futures=False):
+        return None
+
 
 def test_backtest_log_row_preserves_required_display_fields() -> None:
     """FR-0404 AC-1: a log entry retains time, level, message, and extra fields for display."""
@@ -83,7 +86,11 @@ def test_optimizer_submits_each_parameter_combination_once(monkeypatch) -> None:
     """FR-0404 AC-2: 参数优化恰好评估一次完整笛卡尔积。"""
     _Executor.submitted = []
     monkeypatch.setattr(param_optimizer_module, "ProcessPoolExecutor", _Executor)
-    monkeypatch.setattr(param_optimizer_module, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(
+        param_optimizer_module,
+        "wait",
+        lambda futures, timeout=None, return_when=None: (set(futures), set()),
+    )
     monkeypatch.setattr(
         ParamOptimizer, "_resolve_strategy", lambda self: object()
     )
@@ -102,7 +109,11 @@ def test_optimizer_uses_fresh_worker_processes_for_cleanup(monkeypatch) -> None:
     _Executor.submitted = []
     _Executor.contexts = []
     monkeypatch.setattr(param_optimizer_module, "ProcessPoolExecutor", _Executor)
-    monkeypatch.setattr(param_optimizer_module, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(
+        param_optimizer_module,
+        "wait",
+        lambda futures, timeout=None, return_when=None: (set(futures), set()),
+    )
     monkeypatch.setattr(
         ParamOptimizer, "_resolve_strategy", lambda self: object()
     )

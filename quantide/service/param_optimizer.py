@@ -13,7 +13,7 @@ import itertools
 import random
 import threading
 import uuid
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass, field
 from multiprocessing import get_context
 from typing import Any
@@ -281,6 +281,16 @@ def build_combinations(spec: OptimizationSpec) -> list[dict[str, Any]]:
     return combos
 
 
+def _terminate_workers(executor: Any) -> None:
+    """终止仍在运行的 worker 进程（中断或超时时调用）。"""
+    for process in list(getattr(executor, "_processes", {}).values()):
+        try:
+            if process.is_alive():
+                process.terminate()
+        except Exception:  # pragma: no cover - 进程已退出
+            continue
+
+
 class ParamOptimizer:
     """参数优化执行器（多进程 + 可中断）。"""
 
@@ -340,13 +350,16 @@ class ParamOptimizer:
                 minutes=spec.time_budget_minutes
             )
 
-        with ProcessPoolExecutor(
+        executor = ProcessPoolExecutor(
             max_workers=max(1, spec.max_workers),
             mp_context=get_context("spawn"),
-        ) as executor:
+        )
+        stopped = False
+        try:
             futures = {}
             for config in combinations:
                 if self._cancel.is_set():
+                    stopped = True
                     break
                 futures[
                     executor.submit(
@@ -359,27 +372,40 @@ class ParamOptimizer:
                     )
                 ] = config
             done = 0
-            for future in as_completed(futures):
-                config = futures[future]
-                done += 1
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    logger.warning(f"参数组合失败 {config}: {exc}")
-                    result = {"error": str(exc)}
-                result["params"] = {
-                    key: config.get(key) for key in spec.param_grid
-                }
-                result["config"] = config
-                results.append(result)
-                if on_progress is not None:
-                    on_progress(done, total, result)
+            pending = set(futures)
+            while pending:
+                finished, pending = wait(
+                    pending,
+                    timeout=1,
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in finished:
+                    config = futures[future]
+                    done += 1
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        logger.warning(f"参数组合失败 {config}: {exc}")
+                        result = {"error": str(exc)}
+                    result["params"] = {
+                        key: config.get(key) for key in spec.param_grid
+                    }
+                    result["config"] = config
+                    results.append(result)
+                    if on_progress is not None:
+                        on_progress(done, total, result)
                 if self._cancel.is_set():
                     logger.info("参数优化已被中断")
+                    stopped = True
                     break
                 if deadline is not None and datetime.datetime.now() > deadline:
                     logger.info("参数优化达到时间预算，提前结束")
+                    stopped = True
                     break
+        finally:
+            if stopped:
+                _terminate_workers(executor)
+            executor.shutdown(wait=not stopped, cancel_futures=stopped)
         return results
 
 

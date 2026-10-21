@@ -184,12 +184,15 @@ def test_optimizer_run_collects_results_and_params():
     with patch("quantide.service.param_optimizer.get_context"), patch(
         "quantide.service.param_optimizer.ProcessPoolExecutor"
     ) as mock_pool, patch(
-        "quantide.service.param_optimizer.as_completed",
-        side_effect=lambda futures: list(futures.keys()),
+        "quantide.service.param_optimizer.wait",
+        side_effect=lambda futures, timeout=None, return_when=None: (
+            set(futures),
+            set(),
+        ),
     ), patch.object(
         ParamOptimizer, "_resolve_strategy", return_value=MagicMock()
     ):
-        pool = mock_pool.return_value.__enter__.return_value
+        pool = mock_pool.return_value
         pool.submit.side_effect = lambda fn, payload: _FakeFuture(
             {"objective": payload["config"]["a"]}
         )
@@ -216,12 +219,15 @@ def test_optimizer_run_handles_future_exception():
     with patch("quantide.service.param_optimizer.get_context"), patch(
         "quantide.service.param_optimizer.ProcessPoolExecutor"
     ) as mock_pool, patch(
-        "quantide.service.param_optimizer.as_completed",
-        side_effect=lambda futures: list(futures.keys()),
+        "quantide.service.param_optimizer.wait",
+        side_effect=lambda futures, timeout=None, return_when=None: (
+            set(futures),
+            set(),
+        ),
     ), patch.object(
         ParamOptimizer, "_resolve_strategy", return_value=MagicMock()
     ):
-        pool = mock_pool.return_value.__enter__.return_value
+        pool = mock_pool.return_value
         pool.submit.return_value = _FailingFuture()
         results = optimizer.run()
 
@@ -276,3 +282,38 @@ def test_run_combo_reports_in_and_out_sample_metrics():
     assert result["objective"] == pytest.approx(1.0)
     assert result["out_objective"] == pytest.approx(1.0)
     assert result["in_sample"]["Sharpe Ratio"] == "1.00"
+
+
+def test_optimizer_cancel_terminates_running_workers():
+    """中断请求会终止仍在运行的 worker 并取消未开始的组合。"""
+    spec = OptimizationSpec(
+        strategy_name="demo",
+        base_config={},
+        param_grid={"a": [1, 2, 3]},
+    )
+    optimizer = ParamOptimizer(spec)
+
+    class _FakeFuture:
+        def result(self):
+            return {"objective": 1.0}
+
+    with patch("quantide.service.param_optimizer.get_context"), patch(
+        "quantide.service.param_optimizer.ProcessPoolExecutor"
+    ) as mock_pool, patch(
+        "quantide.service.param_optimizer.wait",
+        side_effect=lambda futures, timeout=None, return_when=None: (
+            set(futures),
+            set(),
+        ),
+    ), patch.object(
+        ParamOptimizer, "_resolve_strategy", return_value=MagicMock()
+    ):
+        pool = mock_pool.return_value
+        pool.submit.return_value = _FakeFuture()
+        optimizer.run(on_progress=lambda d, t, r: optimizer.cancel())
+
+    assert optimizer.cancelled is True
+    assert pool.shutdown.call_args.kwargs == {
+        "wait": False,
+        "cancel_futures": True,
+    }
