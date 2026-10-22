@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -482,3 +483,134 @@ def test_fresh_page_contains_run_button_and_its_target():
     assert "开始优化" in html
     assert 'id="optimize-task-wrapper"' in html
     assert 'hx-target="#optimize-task-wrapper"' in html
+
+
+def _task_for_sort() -> dict:
+    """构造含不同样本内外指标的排序测试数据。"""
+    return {
+        "task_id": "t1",
+        "status": "done",
+        "objective": "sharpe",
+        "total": 3,
+        "done": 3,
+        "spec": {"start_date": "2024-01-02", "end_date": "2024-06-30"},
+        "results": [
+            {
+                "objective": 0.5,
+                "out_objective": 1.5,
+                "params": {"top_k": 3},
+                "in_sample": {"CAGR": "5.00%", "Max Drawdown": "-30.00%"},
+                "out_sample": {"CAGR": "20.00%", "Max Drawdown": "-10.00%"},
+                "overfit": False,
+            },
+            {
+                "objective": 1.5,
+                "out_objective": 0.5,
+                "params": {"top_k": 5},
+                "in_sample": {"CAGR": "20.00%", "Max Drawdown": "-10.00%"},
+                "out_sample": {"CAGR": "5.00%", "Max Drawdown": "-30.00%"},
+                "overfit": False,
+            },
+            {
+                "objective": 1.0,
+                "out_objective": 0.9,
+                "params": {"top_k": 8},
+                "in_sample": {"CAGR": "10.00%", "Max Drawdown": "-20.00%"},
+                "out_sample": {"CAGR": "9.00%", "Max Drawdown": "-20.00%"},
+                "overfit": False,
+            },
+        ],
+    }
+
+
+def _sorted_params(task: dict, sort: str, desc: bool) -> list[str]:
+    """返回排序后的参数序列。"""
+    html = optimize_page_mod.to_xml(
+        optimize_page_mod._render_results(
+            "demo", task, sort=sort, desc=desc, task_id="t1"
+        )
+    )
+    order = []
+    for match in re.finditer(r'<td class="text-xs font-mono">([^<]+)</td>', html):
+        order.append(match.group(1).strip())
+    return order
+
+
+def test_results_sort_by_in_objective_desc():
+    """按样本内目标降序。"""
+    task = _task_for_sort()
+    assert _sorted_params(task, "in_objective", True) == [
+        "top_k=5",
+        "top_k=8",
+        "top_k=3",
+    ]
+
+
+def test_results_sort_by_in_objective_asc():
+    """按样本内目标升序。"""
+    task = _task_for_sort()
+    assert _sorted_params(task, "in_objective", False) == [
+        "top_k=3",
+        "top_k=8",
+        "top_k=5",
+    ]
+
+
+def test_results_sort_by_out_objective():
+    """按样本外目标排序。"""
+    task = _task_for_sort()
+    assert _sorted_params(task, "out_objective", True)[0] == "top_k=3"
+    assert _sorted_params(task, "out_objective", False)[0] == "top_k=5"
+
+
+def test_results_sort_by_cagr_columns():
+    """按样本内/样本外年化排序。"""
+    task = _task_for_sort()
+    assert _sorted_params(task, "in_cagr", True) == [
+        "top_k=5",
+        "top_k=8",
+        "top_k=3",
+    ]
+    assert _sorted_params(task, "out_cagr", True)[0] == "top_k=3"
+
+
+def test_results_sort_by_drawdown_uses_displayed_value():
+    """回撤列按显示值排序：降序时回撤更浅（-10% > -30%）排前面。"""
+    task = _task_for_sort()
+    assert _sorted_params(task, "in_mdd", True) == [
+        "top_k=5",
+        "top_k=8",
+        "top_k=3",
+    ]
+    assert _sorted_params(task, "in_mdd", False)[0] == "top_k=3"
+
+
+def test_results_header_contains_sort_links():
+    """表头带排序链接与方向标记。"""
+    task = _task_for_sort()
+    html = optimize_page_mod.to_xml(
+        optimize_page_mod._render_results(
+            "demo", task, sort="in_objective", desc=True, task_id="t1"
+        )
+    )
+    assert "sort=in_cagr" in html
+    assert "sort=out_cagr" in html
+    assert "sort=in_mdd" in html
+    assert "sort=out_objective" in html
+    assert "↓" in html
+
+
+def test_status_route_accepts_sort_query():
+    """状态路由按查询参数排序。"""
+    task = _task_for_sort()
+    with patch("quantide.web.pages.optimize.get_task", return_value=task):
+        html = optimize_page_mod.to_xml(
+            optimize_page_mod.optimize_status(
+                "demo", "t1", sort="in_cagr", dir="asc"
+            )
+        )
+    order = [
+        m.group(1).strip()
+        for m in re.finditer(r'<td class="text-xs font-mono">([^<]+)</td>', html)
+    ]
+    assert order[:2] == ["top_k=3", "top_k=8"]

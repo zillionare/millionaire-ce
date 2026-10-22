@@ -27,6 +27,7 @@ from quantide.service.param_optimizer import (
     MODES,
     OBJECTIVES,
     OptimizationSpec,
+    parse_metric,
 )
 from quantide.web.layouts.main import MainLayout
 
@@ -270,8 +271,97 @@ def _render_monthly_matrix(task: dict[str, Any]) -> Any:
     )
 
 
-def _render_results(name: str, task: dict[str, Any]) -> Any:
-    """渲染结果对比表。"""
+#: 可排序的列：键 -> (表头, 取值函数)
+SORT_COLUMNS: dict[str, str] = {
+    "in_objective": "样本内目标",
+    "out_objective": "样本外",
+    "in_cagr": "样本内年化",
+    "out_cagr": "样本外年化",
+    "in_mdd": "样本内回撤",
+}
+DEFAULT_SORT = "in_objective"
+
+
+def _row_sort_value(row: dict[str, Any], key: str) -> float:
+    """取用于排序的数值（与表头显示的数值一致）。
+
+    回撤按显示值排序：降序时回撤更浅（-10% > -30%）的组合排在前面。
+    """
+    in_sample = row.get("in_sample") or {}
+    out_sample = row.get("out_sample") or {}
+    if key == "in_objective":
+        value = row.get("objective")
+    elif key == "out_objective":
+        value = row.get("out_objective")
+    elif key == "in_cagr":
+        value = parse_metric(in_sample.get("CAGR"))
+    elif key == "out_cagr":
+        value = parse_metric(out_sample.get("CAGR"))
+    elif key == "in_mdd":
+        value = parse_metric(in_sample.get("Max Drawdown"))
+    else:
+        value = None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float("inf")
+    if number != number:  # NaN
+        return float("inf")
+    return number
+
+
+def _sort_results(
+    results: list[dict[str, Any]], key: str, desc: bool
+) -> list[dict[str, Any]]:
+    """按指定列排序结果。"""
+    if key not in SORT_COLUMNS:
+        key = DEFAULT_SORT
+    ordered = sorted(
+        results,
+        key=lambda row: _row_sort_value(row, key),
+        reverse=desc,
+    )
+    return ordered
+
+
+def _sort_header(
+    name: str,
+    task_id: str,
+    key: str,
+    label: str,
+    current: str,
+    desc: bool,
+) -> Any:
+    """渲染可点击排序的表头。"""
+    next_desc = not desc if current == key else False
+    arrow = ""
+    if current == key:
+        arrow = " ↓" if desc else " ↑"
+    href = (
+        f"/strategy/{name}/optimize/status/{task_id}"
+        f"?sort={key}&dir={'desc' if next_desc else 'asc'}"
+    )
+    return Th(
+        A(
+            f"{label}{arrow}",
+            href=href,
+            hx_get=href,
+            hx_target="#optimize-task-wrapper",
+            hx_swap="outerHTML",
+            cls="text-xs cursor-pointer select-none hover:text-blue-600",
+        ),
+        cls="text-xs whitespace-nowrap",
+    )
+
+
+def _render_results(
+    name: str,
+    task: dict[str, Any],
+    sort: str = DEFAULT_SORT,
+    desc: bool = True,
+    task_id: str = "",
+) -> Any:
+    """渲染结果对比表（支持按列排序）。"""
     results = task.get("results") or []
     objective = task.get("objective", "sharpe")
     param_keys = sorted(
@@ -283,19 +373,38 @@ def _render_results(name: str, task: dict[str, Any]) -> Any:
     )
     is_risk = objective == "max_drawdown"
     direction = "（越小越好）" if is_risk else "（越大越好）"
+    if sort not in SORT_COLUMNS:
+        sort = DEFAULT_SORT
+    ordered = _sort_results(results, sort, desc)
+
     header_cells = [Th("#", cls="text-xs"), Th("参数", cls="text-xs")]
     header_cells.append(
-        Th(f"样本内{objective_label(objective)}{direction}", cls="text-xs")
+        _sort_header(
+            name,
+            task_id,
+            "in_objective",
+            f"样本内{objective_label(objective)}{direction}",
+            sort,
+            desc,
+        )
     )
-    header_cells.append(Th("样本外", cls="text-xs"))
-    header_cells.append(Th("样本内年化", cls="text-xs"))
-    header_cells.append(Th("样本外年化", cls="text-xs"))
-    header_cells.append(Th("样本内回撤", cls="text-xs"))
+    header_cells.append(
+        _sort_header(name, task_id, "out_objective", "样本外", sort, desc)
+    )
+    header_cells.append(
+        _sort_header(name, task_id, "in_cagr", "样本内年化", sort, desc)
+    )
+    header_cells.append(
+        _sort_header(name, task_id, "out_cagr", "样本外年化", sort, desc)
+    )
+    header_cells.append(
+        _sort_header(name, task_id, "in_mdd", "样本内回撤", sort, desc)
+    )
     header_cells.append(Th("告警", cls="text-xs"))
     header_cells.append(Th("操作", cls="text-xs"))
 
     rows: list[Any] = []
-    for index, row in enumerate(results, start=1):
+    for index, row in enumerate(ordered, start=1):
         params = row.get("params") or {}
         in_sample = row.get("in_sample") or {}
         out_sample = row.get("out_sample") or {}
@@ -353,15 +462,21 @@ def _render_results(name: str, task: dict[str, Any]) -> Any:
             cls="table table-zebra text-xs",
         ),
         P(
-            "样本内用于挑选参数，样本外仅用于检验；收益类目标在样本外转负、"
-            "回撤类目标在样本外变深时提示疑似过拟合。",
+            "点击表头可排序（再次点击切换升序/降序）；样本内用于挑选参数，"
+            "样本外仅用于检验；收益类目标在样本外转负、回撤类目标在样本外变深时"
+            "提示疑似过拟合。",
             cls="text-xs text-gray-500 mt-2",
         ),
         cls="bg-white p-4 rounded-lg border border-gray-100 overflow-x-auto",
     )
 
 
-def _render_task_panel(name: str, task_id: str) -> Any:
+def _render_task_panel(
+    name: str,
+    task_id: str,
+    sort: str = DEFAULT_SORT,
+    desc: bool = True,
+) -> Any:
     """渲染任务进度与结果面板（始终返回 #optimize-task-wrapper 容器）。
 
     容器必须始终存在：否则首次进入页面时「开始优化」按钮的 HTMX 目标缺失，
@@ -429,14 +544,17 @@ def _render_task_panel(name: str, task_id: str) -> Any:
             cls="flex items-center justify-between mb-2",
         ),
         progress,
-        _render_results(name, task),
+        _render_results(name, task, sort=sort, desc=desc, task_id=task_id),
         _render_monthly_matrix(task),
         id="optimize-task-panel",
     )
     if running:
         panel = Div(
             panel,
-            hx_get=f"/strategy/{name}/optimize/status/{task_id}",
+            hx_get=(
+                f"/strategy/{name}/optimize/status/{task_id}"
+                f"?sort={sort}&dir={'desc' if desc else 'asc'}"
+            ),
             hx_trigger=f"every {OPTIMIZE_POLL_SECONDS}s",
             hx_swap="outerHTML",
             id="optimize-task-wrapper",
@@ -539,6 +657,10 @@ def optimize_page(req, session, name: str):
 
     query_params = getattr(req, "query_params", {}) or {}
     task_id = str(query_params.get("task_id") or "")
+    sort_key = str(query_params.get("sort") or DEFAULT_SORT)
+    if sort_key not in SORT_COLUMNS:
+        sort_key = DEFAULT_SORT
+    sort_desc = str(query_params.get("dir") or "desc") != "asc"
 
     today = arrow.now().format("YYYY-MM-DD")
     form = Form(
@@ -691,7 +813,7 @@ def optimize_page(req, session, name: str):
         )
     )
 
-    task_panel = _render_task_panel(name, task_id)
+    task_panel = _render_task_panel(name, task_id, sort=sort_key, desc=sort_desc)
 
     layout.main_block = lambda: Div(
         Div(
@@ -772,13 +894,23 @@ async def run_optimize(req, name: str):
 
 
 @rt("/{name}/optimize/status/{task_id}")
-def optimize_status(name: str, task_id: str):
-    """查询任务状态（前端轮询）。"""
-    return _render_task_panel(name, task_id)
+def optimize_status(name: str, task_id: str, sort: str = "", dir: str = "desc"):
+    """查询任务状态（前端轮询 / 排序切换）。"""
+    return _render_task_panel(
+        name,
+        task_id,
+        sort=sort or DEFAULT_SORT,
+        desc=(dir or "desc") != "asc",
+    )
 
 
 @rt("/{name}/optimize/cancel/{task_id}", methods=["POST"])
-def optimize_cancel(name: str, task_id: str):
+def optimize_cancel(name: str, task_id: str, sort: str = "", dir: str = "desc"):
     """中断运行中的优化任务。"""
     cancel_optimization(task_id)
-    return _render_task_panel(name, task_id)
+    return _render_task_panel(
+        name,
+        task_id,
+        sort=sort or DEFAULT_SORT,
+        desc=(dir or "desc") != "asc",
+    )
