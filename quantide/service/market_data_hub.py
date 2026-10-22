@@ -1,0 +1,291 @@
+"""实时行情发布/订阅协议（发行版公开接口）。
+
+设计目标
+--------
+发行版把"实时行情"定义为一个**发布/订阅**协议，而不是绑定某个行情 SDK：
+
+* **发布者**（用户或官方示例）周期性拉取行情，把快照发布到消息总线；
+* **订阅者**（Quantide 的 Paper 撮合、风控、UI）订阅所需标的的快照；
+* 双方只通过 :class:`~quantide.core.domain.events.QuoteSnapshot` 这一份结构通信。
+
+这样：
+* 官方可以提供基于 AkShare 的**示例发布者**（50 支标的轮询）；
+* 用户可以换成 pytdx / QMT / 自己的服务（全市场也不在话下），
+  只要发布同样结构的快照即可，Quantide 侧无需改动。
+
+用法（发布者）
+--------------
+```python
+from quantide.core.enums import Topics
+from quantide.core.message import msg_hub
+
+msg_hub.publish(
+    Topics.QUOTES_ALL.value,
+    {
+        "600519.SH": {
+            "price": 1318.49, "open": 1303.21, "high": 1322.0, "low": 1296.0,
+            "volume": 42491, "amount": 557622.0, "ts": "2026-10-22T15:00:00",
+        }
+    },
+)
+```
+
+用法（订阅者）
+--------------
+```python
+from quantide.service.market_data_hub import market_data_hub
+
+market_data_hub.start()
+market_data_hub.subscribe(["600519.SH"])
+snapshot = market_data_hub.snapshot(["600519.SH"])
+```
+
+字段约定
+--------
+``price``       最新价（撮合用）
+``open/high/low`` 当日开/高/低 —— 集合竞价期间 ``price`` 即为竞价价
+``volume``      累计成交量（股）
+``amount``      累计成交额（元）
+``ts``          行情时间戳（ISO 字符串或 datetime）
+``up_limit``/``down_limit``  可选；涨跌停价缺失时回落到本地日线数据
+"""
+
+from __future__ import annotations
+
+import datetime
+import threading
+from typing import Any
+
+from loguru import logger
+
+from quantide.core.domain.events import MarketEvent, QuoteSnapshot
+from quantide.core.enums import Topics
+from quantide.core.message import msg_hub
+
+#: 快照字段名（与 QuoteSnapshot 对应）
+FIELD_PRICE = "price"
+FIELD_OPEN = "open"
+FIELD_HIGH = "high"
+FIELD_LOW = "low"
+FIELD_VOLUME = "volume"
+FIELD_AMOUNT = "amount"
+FIELD_TS = "ts"
+FIELD_UP_LIMIT = "up_limit"
+FIELD_DOWN_LIMIT = "down_limit"
+
+
+def parse_snapshot(symbol: str, payload: dict[str, Any]) -> QuoteSnapshot | None:
+    """把发布者推送的原始字典转成 :class:`QuoteSnapshot`。
+
+    Args:
+        symbol: 标的代码。
+        payload: 原始字段。
+
+    Returns:
+        QuoteSnapshot | None: 解析失败或无价格时返回 None。
+    """
+    price = _to_float(payload.get(FIELD_PRICE))
+    if price is None or price <= 0:
+        return None
+    ts = _to_datetime(payload.get(FIELD_TS))
+    return QuoteSnapshot(
+        symbol=symbol,
+        price=price,
+        open=_to_float(payload.get(FIELD_OPEN)),
+        high=_to_float(payload.get(FIELD_HIGH)),
+        low=_to_float(payload.get(FIELD_LOW)),
+        volume=_to_float(payload.get(FIELD_VOLUME)),
+        amount=_to_float(payload.get(FIELD_AMOUNT)),
+        ts=ts,
+    )
+
+
+def _to_float(value: Any) -> float | None:
+    """任意值转 float，失败返回 None。"""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_datetime(value: Any) -> datetime.datetime | None:
+    """任意值转 datetime，失败返回 None。"""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime.datetime):
+        return value
+    if isinstance(value, (int, float)):
+        return datetime.datetime.fromtimestamp(float(value))
+    text = str(value).strip()
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+class MarketDataHub:
+    """行情订阅中心（订阅者侧）。
+
+    订阅消息总线上的 ``quotes.all`` 主题，维护最新快照缓存；
+    对外提供 :class:`~quantide.core.ports.market_data.MarketDataPort` 需要的接口。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._snapshots: dict[str, QuoteSnapshot] = {}
+        self._limits: dict[str, tuple[float, float]] = {}
+        self._subscribed: set[str] = set()
+        self._running = False
+        self._stream_queue: Any = None
+        self._stream_loop: Any = None
+
+    # ------------------------------------------------------------------
+    # 生命周期
+    # ------------------------------------------------------------------
+    def start(self) -> None:
+        """启动订阅。"""
+        if self._running:
+            return
+        msg_hub.subscribe(Topics.QUOTES_ALL.value, self._on_quotes)
+        msg_hub.subscribe(Topics.STOCK_LIMIT.value, self._on_limits)
+        self._running = True
+        logger.info("行情订阅中心已启动")
+
+    def stop(self) -> None:
+        """停止订阅。"""
+        if not self._running:
+            return
+        try:
+            msg_hub.unsubscribe(Topics.QUOTES_ALL.value, self._on_quotes)
+            msg_hub.unsubscribe(Topics.STOCK_LIMIT.value, self._on_limits)
+        except Exception:  # pragma: no cover - 退订失败忽略
+            pass
+        self._running = False
+
+    # ------------------------------------------------------------------
+    # 订阅
+    # ------------------------------------------------------------------
+    def subscribe(self, symbols: list[str]) -> None:
+        """订阅标的（仅用于过滤，收到全量推送时按此过滤）。"""
+        with self._lock:
+            self._subscribed.update(str(s) for s in symbols)
+
+    def unsubscribe(self, symbols: list[str]) -> None:
+        """取消订阅。"""
+        with self._lock:
+            for symbol in symbols:
+                self._subscribed.discard(str(symbol))
+
+    # ------------------------------------------------------------------
+    # 事件
+    # ------------------------------------------------------------------
+    def _on_quotes(self, payload: dict[str, Any]) -> None:
+        """处理行情推送。"""
+        if not payload:
+            return
+        updates: dict[str, QuoteSnapshot] = {}
+        with self._lock:
+            for symbol, raw in payload.items():
+                if self._subscribed and symbol not in self._subscribed:
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                snapshot = parse_snapshot(str(symbol), raw)
+                if snapshot is None:
+                    continue
+                self._snapshots[str(symbol)] = snapshot
+                updates[str(symbol)] = snapshot
+        if updates:
+            self._push_events(updates)
+
+    def _on_limits(self, payload: dict[str, Any]) -> None:
+        """处理涨跌停价推送。"""
+        if not payload:
+            return
+        with self._lock:
+            for symbol, raw in payload.items():
+                if not isinstance(raw, dict):
+                    continue
+                self._limits[str(symbol)] = (
+                    float(raw.get("down_limit") or 0.0),
+                    float(raw.get("up_limit") or 0.0),
+                )
+
+    def _push_events(self, snapshots: dict[str, QuoteSnapshot]) -> None:
+        """把快照转成事件推入流队列。"""
+        if self._stream_queue is None or self._stream_loop is None:
+            return
+        now = datetime.datetime.now()
+        for symbol, snapshot in snapshots.items():
+            event = MarketEvent(
+                symbol=symbol,
+                event_type="tick",
+                ts=snapshot.ts or now,
+                payload={
+                    FIELD_PRICE: snapshot.price,
+                    FIELD_OPEN: snapshot.open,
+                    FIELD_HIGH: snapshot.high,
+                    FIELD_LOW: snapshot.low,
+                    FIELD_VOLUME: snapshot.volume,
+                    FIELD_AMOUNT: snapshot.amount,
+                },
+                source="market_data_hub",
+            )
+            self._stream_loop.call_soon_threadsafe(self._put_event_safe, event)
+
+    def _put_event_safe(self, event: MarketEvent) -> None:
+        """线程安全地写入队列。"""
+        if self._stream_queue is None:
+            return
+        try:
+            self._stream_queue.put_nowait(event)
+        except Exception:  # pragma: no cover - 队列满忽略
+            pass
+
+    # ------------------------------------------------------------------
+    # 查询
+    # ------------------------------------------------------------------
+    def snapshot(self, symbols: list[str]) -> dict[str, QuoteSnapshot]:
+        """返回指定标的的最新快照。"""
+        with self._lock:
+            return {
+                str(s): self._snapshots[str(s)]
+                for s in symbols
+                if str(s) in self._snapshots
+            }
+
+    def get_limits(self, symbol: str) -> tuple[float, float]:
+        """返回标的的涨跌停价（未推送时返回 (0, 0)）。"""
+        with self._lock:
+            return self._limits.get(str(symbol), (0.0, 0.0))
+
+    def last_price(self, symbol: str) -> float:
+        """返回标的最新价（无数据返回 0）。"""
+        with self._lock:
+            snapshot = self._snapshots.get(str(symbol))
+        return float(snapshot.price) if snapshot and snapshot.price else 0.0
+
+    async def stream(self):
+        """行情事件流（异步迭代）。"""
+        import asyncio
+
+        queue: asyncio.Queue = asyncio.Queue()
+        self._stream_queue = queue
+        self._stream_loop = asyncio.get_running_loop()
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            self._stream_queue = None
+            self._stream_loop = None
+
+
+#: 全局单例
+market_data_hub = MarketDataHub()

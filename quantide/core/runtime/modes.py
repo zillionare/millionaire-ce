@@ -15,6 +15,7 @@ from quantide.core.runtime.registration import register_port_backed_broker
 from quantide.core.scheduler import scheduler
 from quantide.data import db
 from quantide.service.livequote import live_quote
+from quantide.service.market_data_hub import market_data_hub
 from quantide.service.registry import BrokerRegistry
 from quantide.service.sim_broker import PaperBroker
 
@@ -101,13 +102,20 @@ class RuntimeBootstrap:
     def _build_market_data(self, adapters: AdapterRegistry) -> MarketDataPort:
         """构建行情适配器.
 
-        数据源统一策略 (#48): 不再根据 runtime_market_adapter 分流 gateway / live_quote,
-        一律走 LiveQuote。gateway 行情接入点保留在 service 层 (`live_quote` 的实现里)。
+        行情来源是**发布/订阅**协议：任何发布者（官方 AkShare 示例、用户自带的
+        pytdx/QMT 服务）把快照发布到消息总线 ``quotes.all``，
+        这里统一由 :class:`MarketDataHub` 订阅并提供给 Paper 撮合与风控。
+
+        gateway 模式仍可用（``live_quote``），此时额外订阅其推送。
         """
-        live_quote.start()
-        market_data = live_quote
-        adapters.register("market_data", "live_quote", market_data)
-        return market_data
+        runtime = get_settings()
+        market_data_hub.start()
+        adapters.register("market_data", "market_data_hub", market_data_hub)
+        if runtime.livequote_mode == "gateway" or runtime.gateway_enabled:
+            live_quote.start()
+            adapters.register("market_data", "live_quote", live_quote)
+            return live_quote
+        return market_data_hub
 
     def _register_broker_adapters(
         self, registry: BrokerRegistry, adapters: AdapterRegistry

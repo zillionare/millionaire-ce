@@ -29,6 +29,7 @@ from quantide.data.models.daily_bars import daily_bars
 from quantide.data.sqlite import db
 from quantide.service.abstract_broker import AbstractBroker
 from quantide.service.livequote import live_quote
+from quantide.service.market_data_hub import market_data_hub
 
 
 class PaperBroker(AbstractBroker):
@@ -228,13 +229,33 @@ class PaperBroker(AbstractBroker):
         return live_quote.get_quote(asset)
 
     def _get_price_limits(self, asset: str) -> tuple[float, float]:
-        """获取涨跌停价格."""
+        """获取涨跌停价格.
+
+        优先顺序：本地缓存 → 行情订阅中心（发布者推送）→ live_quote → 本地日线数据。
+        涨跌停是日频静态数据，最后回落到本地存储，避免依赖实时行情源。
+        """
         limits = self._limits.get(asset)
         if limits is not None:
             return limits["down"], limits["up"]
-        if self._market_data is not None:
+        hub_limits = market_data_hub.get_limits(asset)
+        if hub_limits != (0.0, 0.0):
+            return hub_limits
+        if self._market_data is None:
+            quote_limits = live_quote.get_price_limits(asset)
+            if quote_limits != (0.0, 0.0):
+                return quote_limits
+        return self._limits_from_local_data(asset)
+
+    def _limits_from_local_data(self, asset: str) -> tuple[float, float]:
+        """从本地日线数据读取涨跌停价。"""
+        try:
+            from quantide.data.models.daily_bars import daily_bars
+
+            return daily_bars.get_trade_price_limits(
+                asset, datetime.date.today()
+            )
+        except Exception:  # pragma: no cover - 数据层未就绪
             return 0.0, 0.0
-        return live_quote.get_price_limits(asset)
 
     def get_history(
         self,
