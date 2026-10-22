@@ -866,6 +866,8 @@ class StrategyRuntimeManager:
                         await risk_strategy.on_day_close(now)
                     await risk_strategy.on_day_open(now)
                     risk_day = now.date()
+                # 日频策略按信号日去重（策略内部保证每个信号日只决策一次），
+                # 因此这里可以持续调用；集合竞价窗口由撮合侧按竞价价处理。
                 await strategy.on_bar(now)
                 if risk_strategy is not None:
                     await risk_strategy.on_check(broker.positions, now)

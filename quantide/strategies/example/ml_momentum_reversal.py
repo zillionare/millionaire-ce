@@ -749,6 +749,8 @@ class MLMomentumReversalStrategy(BaseStrategy):
         #: 重训计数按「交易日」推进（实盘每 2 秒一次 on_bar 不应算作一天）
         self._days_since_train: int = 0
         self._last_train_day: datetime.date | None = None
+        #: 已执行决策的信号日（实盘按日去重，避免重复下单）
+        self._last_executed_signal_date: datetime.date | None = None
         self._cached_norm_panel: pl.DataFrame | None = None
         self._panel_start: datetime.date | None = None
         self._panel_end: datetime.date | None = None
@@ -1510,7 +1512,15 @@ class MLMomentumReversalStrategy(BaseStrategy):
         return ranked, price_map, full_ranks
 
     async def on_bar(self, tm: datetime.datetime) -> None:
-        """Execute daily ML ranking, alpha exits, and portfolio rotation."""
+        """Execute daily ML ranking, alpha exits, and portfolio rotation.
+
+        实盘/模拟盘每个交易日只决策一次：策略按**信号日**去重，
+        避免运行时高频轮询导致重复下单。
+        """
+        signal_date = self._resolve_signal_date(tm)
+        if self._last_executed_signal_date == signal_date:
+            return
+        self._last_executed_signal_date = signal_date
         ranked, price_map, full_ranks = self._rank_for_bar(tm)
 
         current_positions = dict(self.broker.positions)

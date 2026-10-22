@@ -1050,3 +1050,30 @@ def test_retrain_cadence_matches_backtest_bar_grid(monkeypatch) -> None:
             strategy._mark_retrained()
 
     assert fits[:4] == [0, 5, 10, 15]
+
+
+def test_on_bar_is_idempotent_within_same_signal_day(monkeypatch) -> None:
+    """同一信号日内重复 on_bar 不会重复决策（实盘每 2 秒轮询）。"""
+    days = _weekdays(dt.date(2024, 1, 1), 20)
+    strategy = _stub_strategy(monkeypatch, days)
+
+    calls: list[dt.date] = []
+
+    def _fake_rank(tm):
+        calls.append(tm.date())
+        return [], {}, {}
+
+    monkeypatch.setattr(strategy, "_rank_for_bar", _fake_rank)
+
+    tm = dt.datetime(2024, 1, 2, 14, 58, 0)
+    import asyncio
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        strategy.on_bar(tm)
+    )
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        strategy.on_bar(tm)
+    )
+
+    # 第二次调用被去重拦截
+    assert len(calls) == 1

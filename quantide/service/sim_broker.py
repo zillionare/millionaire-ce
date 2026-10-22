@@ -51,6 +51,7 @@ class PaperBroker(AbstractBroker):
         info: str = "",
         market_value_update_interval: float = 10.0,
         market_data: MarketDataPort | None = None,
+        auction_epsilon: float = 0.001,
     ):
         """初始化 PaperBroker。
 
@@ -65,6 +66,7 @@ class PaperBroker(AbstractBroker):
             info: 账户描述信息
             market_value_update_interval: 持仓市值更新间隔（秒），默认10秒
             market_data: 行情端口实现
+            auction_epsilon: 集合竞价限价容差（竞价价 × (1+eps)），默认 0.1%
         """
         super().__init__(
             portfolio_id=portfolio_id,
@@ -82,6 +84,7 @@ class PaperBroker(AbstractBroker):
         self._market_value_update_interval = market_value_update_interval
         self._last_mv_update_time = 0.0
         self._market_data = market_data
+        self._auction_epsilon = float(auction_epsilon)
         self._stamp_tax = stamp_tax
         self._slippage = slippage
         self._dry_run = dry_run
@@ -123,6 +126,7 @@ class PaperBroker(AbstractBroker):
         info: str = "",
         market_value_update_interval: float = 10.0,
         market_data: MarketDataPort | None = None,
+        auction_epsilon: float = 0.001,
     ) -> "PaperBroker":
         """创建新的 PaperBroker 实例。
 
@@ -136,6 +140,7 @@ class PaperBroker(AbstractBroker):
             info: 账户描述信息
             market_value_update_interval: 持仓市值更新间隔（秒），默认10秒
             market_data: 行情端口实现
+            auction_epsilon: 集合竞价限价容差（竞价价 × (1+eps)）
 
         Returns:
             PaperBroker 实例
@@ -152,6 +157,7 @@ class PaperBroker(AbstractBroker):
             info=info,
             market_value_update_interval=market_value_update_interval,
             market_data=market_data,
+            auction_epsilon=auction_epsilon,
         )
 
         return broker
@@ -227,6 +233,23 @@ class PaperBroker(AbstractBroker):
                     "amount": snap.amount or 0,
                 }
         return live_quote.get_quote(asset)
+
+    def _in_auction(self, price: float) -> bool:
+        """当前是否处于集合竞价撮合窗口。"""
+        from quantide.service.execution_clock import execution_clock
+
+        now = self._now()
+        if now is None:
+            return False
+        return execution_clock.in_auction(now)
+
+    def _auction_limit_price(self, price: float) -> float:
+        """集合竞价的限价（竞价价 × (1+eps)）。"""
+        from quantide.service.execution_clock import execution_clock
+
+        return execution_clock.auction_price_limit(
+            price, epsilon=self._auction_epsilon
+        )
 
     def _get_price_limits(self, asset: str) -> tuple[float, float]:
         """获取涨跌停价格.
@@ -823,10 +846,6 @@ class PaperBroker(AbstractBroker):
             return 0.0, None
 
         # 价格判断
-        match_price = last_price
-        if self._slippage > 0:
-            direction = 1 if order.side == OrderSide.BUY else -1
-            match_price = round(last_price * (1.0 + self._slippage * direction), 4)
         if order.bid_type == BidType.FIXED:
             if order.side == OrderSide.BUY and order.price < last_price:
                 return 0.0, None
@@ -835,6 +854,23 @@ class PaperBroker(AbstractBroker):
             # 限价单成交价逻辑：
             # 买入：如果 last_price <= price，以 last_price 成交（更优价）
             # 卖出：如果 last_price >= price，以 last_price 成交
+
+        # 集合竞价成交：限价单按「竞价价 × (1+eps)」撮合，
+        # 成交价取竞价价本身（集合竞价以单一价格成交）。
+        if self._in_auction(last_price):
+            auction_limit = self._auction_limit_price(last_price)
+            if order.side == OrderSide.BUY and order.price > 0:
+                if order.price < auction_limit - 1e-9:
+                    return 0.0, None
+            match_price = last_price
+            if self._slippage > 0:
+                direction = 1 if order.side == OrderSide.BUY else -1
+                match_price = round(last_price * (1.0 + self._slippage * direction), 4)
+        else:
+            match_price = last_price
+            if self._slippage > 0:
+                direction = 1 if order.side == OrderSide.BUY else -1
+                match_price = round(last_price * (1.0 + self._slippage * direction), 4)
 
         # 计算成交数量
         needed_shares = order.shares - order.filled
