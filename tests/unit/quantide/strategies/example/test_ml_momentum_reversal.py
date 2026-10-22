@@ -1013,3 +1013,40 @@ def test_explain_cache_keys_include_build_signal(monkeypatch) -> None:
     assert days[0] in cross_key
     assert days[3] in cross_key
     assert model_key != cross_key
+
+
+def test_retrain_cadence_counts_trading_days_not_bar_calls(monkeypatch) -> None:
+    """重训节奏按交易日计：同一交易日内多次调用不触发重训。"""
+    days = _weekdays(dt.date(2024, 1, 1), 30)
+    strategy = _stub_strategy(monkeypatch, days, retrain_days=5)
+
+    # 第一天：没有模型 -> 需要重训
+    assert strategy._should_retrain(days[0]) is True
+    strategy._model = object()  # 模拟已拟合出模型
+    strategy._mark_retrained()
+
+    # 同一天内多次调用（实盘每 2 秒一次）不重训
+    for _ in range(50):
+        assert strategy._should_retrain(days[0]) is False
+
+    # 每过一个交易日计数 +1，第 5 个交易日再次重训
+    for index, day in enumerate(days[1:6], start=1):
+        expected = index >= 5
+        assert strategy._should_retrain(day) is expected
+        if expected:
+            strategy._mark_retrained()
+
+
+def test_retrain_cadence_matches_backtest_bar_grid(monkeypatch) -> None:
+    """回测里仍是每 5 个 bar 重训一次（与历史回测口径一致）。"""
+    days = _weekdays(dt.date(2024, 1, 1), 30)
+    strategy = _stub_strategy(monkeypatch, days, retrain_days=5)
+
+    fits = []
+    for index, day in enumerate(days):
+        if strategy._should_retrain(day):
+            fits.append(index)
+            strategy._model = object()  # 模拟已拟合出模型
+            strategy._mark_retrained()
+
+    assert fits[:4] == [0, 5, 10, 15]

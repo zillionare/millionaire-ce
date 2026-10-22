@@ -58,11 +58,15 @@ def _bars_fingerprint() -> tuple[Any, ...]:
         return ()
 
 
-#: 因子面板缓存（键：选池规格 + 因子集 + 信号日 + 持仓），跨回测/跨组合复用
+#: 因子面板缓存（键：选池规格 + 因子集 + 信号日 + 持仓 + 数据指纹）。
+#: 只保留最近 2 个面板：单个面板约 2000 只 × 80 天 × 45 列 ≈ 55MB，
+#: 上限 2 份把常驻内存压在 ~110MB。命中场景：同一进程内重复回测、
+#: 以及归因回放反复请求同一面板。
 _PANEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
-_PANEL_CACHE_MAX = 3
+_PANEL_CACHE_MAX = 2
 
-#: 三重障碍标签缓存（键：面板键 + 障碍参数 + 持有期），跨训练/跨组合复用
+#: 三重障碍标签缓存（键：面板键 + 障碍参数 + 持有期）。
+#: 只存训练真正用到的三列（date/asset/tb_ret），单条约 4MB。
 _LABEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
 _LABEL_CACHE_MAX = 6
 
@@ -292,7 +296,8 @@ def _fit_ml_model(
         )
         if len(_LABEL_CACHE) >= _LABEL_CACHE_MAX:
             _LABEL_CACHE.pop(next(iter(_LABEL_CACHE)))
-        _LABEL_CACHE[label_key] = labeled
+        # 只保留训练用得到的列，避免整面板副本放大内存占用
+        _LABEL_CACHE[label_key] = labeled.select(["date", "asset", "tb_ret"])
     valid_train = labeled.filter(
         pl.col("tb_ret").is_not_null() & pl.col("tb_ret").is_finite()
     )
@@ -741,7 +746,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self._model_engine: str = "LightGBM" if self.use_lightgbm else "Prior-Ridge"
         #: 归因用：回测期间的每日持仓快照（日期 → 资产 → 股数）
         self._positions_by_date: dict[datetime.date, dict[str, float]] = {}
-        self._bars_since_train: int = 0
+        #: 重训计数按「交易日」推进（实盘每 2 秒一次 on_bar 不应算作一天）
+        self._days_since_train: int = 0
+        self._last_train_day: datetime.date | None = None
         self._cached_norm_panel: pl.DataFrame | None = None
         self._panel_start: datetime.date | None = None
         self._panel_end: datetime.date | None = None
@@ -905,6 +912,29 @@ class MLMomentumReversalStrategy(BaseStrategy):
             if shares > 0:
                 held.append(str(asset))
         return sorted(held)
+
+    def _should_retrain(self, day_key: datetime.date) -> bool:
+        """判断是否需要重训模型。
+
+        重训节奏按**交易日**推进：只有当信号日（或最后可用 bar 日）发生变化时
+        计数才 +1。回测里每个 bar 对应一个交易日（每 5 个交易日重训一次）；
+        实盘里 on_bar 每 2 秒调用一次，但信号日一天只变一次，
+        因此实盘同样是每 5 个交易日重训一次。
+
+        Args:
+            day_key: 当前信号日（回测路径）或最后可用 bar 日（轻量路径）。
+
+        Returns:
+            bool: 是否需要重训。
+        """
+        if self._last_train_day != day_key:
+            self._last_train_day = day_key
+            self._days_since_train += 1
+        return self._model is None or self._days_since_train >= self.retrain_days
+
+    def _mark_retrained(self) -> None:
+        """记录一次重训完成，重置交易日计数。"""
+        self._days_since_train = 0
 
     def _panel_cache_key(self, signal_date: datetime.date) -> tuple[Any, ...]:
         """因子面板的缓存键（必须覆盖所有影响面板内容的要素）。"""
@@ -1350,6 +1380,14 @@ class MLMomentumReversalStrategy(BaseStrategy):
         )
 
         if use_pull_bars:
+            # 轻量路径：不走 2000 只成分股的面板，直接按需拉取少量标的的日线，
+            # 现场算因子并打分。适用两种情形：
+            #   1) 全局行情数据层未就绪（单测 / 独立脚本 / 数据未连接），
+            #      此时只能通过 get_bars 取数；
+            #   2) 配置显式指定了 <=10 只标的（symbols / universe / symbol），
+            #      拉少量标的比构建整面板更省。
+            # 注意：本路径与回测路径必须保持同样的重训节奏（按交易日），
+            # 否则实盘行为与回测不一致。
             assets = self.custom_assets or [
                 str(self.config.get("symbol", "000001.SZ"))
             ]
@@ -1378,15 +1416,20 @@ class MLMomentumReversalStrategy(BaseStrategy):
             feat_df = compute_alpha_features(panel)
             norm_df = standardize_features(feat_df, feature_cols)
             target_date: datetime.date = norm_df["date"].max()  # type: ignore[assignment]
-            model, engine = _fit_ml_model(
-                norm_df,
-                train_window=self.train_window,
-                horizon=self.horizon,
-                use_lightgbm=self.use_lightgbm,
-                up_barrier_pct=self.take_profit_pct,
-                down_barrier_pct=self.stop_loss_pct,
-                feature_cols=feature_cols,
-            )
+            if self._should_retrain(target_date):
+                self._model, self._model_engine = _fit_ml_model(
+                    norm_df,
+                    train_window=self.train_window,
+                    horizon=self.horizon,
+                    use_lightgbm=self.use_lightgbm,
+                    up_barrier_pct=self.take_profit_pct,
+                    down_barrier_pct=self.stop_loss_pct,
+                    feature_cols=feature_cols,
+                )
+                self._mark_retrained()
+            model, engine = self._model, self._model_engine
+            if model is None:
+                return [], {}, {}
             cross_df = norm_df.filter(pl.col("date") == target_date)
             scores = _score_cross_section(cross_df, model, engine, feature_cols)
             scored_df = cross_df.with_columns(pl.Series("ml_score", scores)).sort(
@@ -1420,7 +1463,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             return [], {}, {}
 
         target_date = hist_slice["date"].max()  # type: ignore[assignment]
-        if self._model is None or self._bars_since_train >= self.retrain_days:
+        if self._should_retrain(signal_date):
             self._model, self._model_engine = _fit_ml_model(
                 hist_slice,
                 train_window=self.train_window,
@@ -1431,8 +1474,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 feature_cols=self.selected_features or FEATURE_COLS,
                 label_cache_key=self._panel_cache_key(signal_date),
             )
-            self._bars_since_train = 0
-        self._bars_since_train += 1
+            self._mark_retrained()
 
         cross_df = hist_slice.filter(
             (pl.col("date") == target_date)
