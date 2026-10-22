@@ -62,6 +62,21 @@ class TushareDataFetcher:
     ) -> tuple[pd.DataFrame, list[list]]:
         return fetch_daily_basic(dates)
 
+    def fetch_index_bars(
+        self,
+        index_codes: Iterable[str] | str,
+        start_date: datetime.date,
+        end_date: datetime.date,
+    ) -> tuple[pd.DataFrame, list[list]]:
+        return fetch_index_bars(index_codes, start_date, end_date)
+
+    def fetch_index_weights(
+        self,
+        index_codes: Iterable[str] | str,
+        snapshot_dates: Iterable[datetime.date],
+    ) -> tuple[pd.DataFrame, list[list]]:
+        return fetch_index_weights(index_codes, snapshot_dates)
+
 
 def _fetch_by_dates(
     func_name: str, dates: Iterable[datetime.date] | datetime.date, **kwargs
@@ -581,3 +596,128 @@ def get_industry_info():
     pro = ts.pro_api()
     df = pro.index_classify(src="SW")
     return df
+
+
+def fetch_index_bars(
+    index_codes: Iterable[str] | str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> tuple[pd.DataFrame, list[list]]:
+    """获取指数日线行情。
+
+    字段：date, index_code, open, high, low, close, volume, amount
+
+    Args:
+        index_codes: 指数代码列表，如 ``000300.SH``。
+        start_date: 起始日。
+        end_date: 结束日。
+
+    Returns:
+        tuple[pd.DataFrame, list[list]]: 行情数据与错误信息。
+    """
+    _ensure_tushare_token()
+    pro = ts.pro_api()
+    if isinstance(index_codes, str):
+        index_codes = [index_codes]
+
+    frames: list[pd.DataFrame] = []
+    errors: list[list] = []
+    for code in index_codes:
+        try:
+            df = pro.index_daily(
+                ts_code=code,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+            )
+        except Exception as exc:
+            logger.warning("获取指数日线失败 {}: {}", code, exc)
+            errors.append(["index_daily", code, str(exc)])
+            continue
+        if df is None or len(df) == 0:
+            continue
+        df = df.rename(
+            columns={
+                "ts_code": "index_code",
+                "trade_date": "date",
+                "vol": "volume",
+            }
+        )
+        df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
+        frames.append(df)
+
+    if not frames:
+        return pd.DataFrame(), errors
+    out = pd.concat(frames, ignore_index=True)
+    keep = [
+        "date",
+        "index_code",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+    ]
+    for col in keep:
+        if col not in out.columns:
+            out[col] = pd.NA
+    out = out[keep].sort_values(["date", "index_code"])
+    return out.reset_index(drop=True), errors
+
+
+def fetch_index_weights(
+    index_codes: Iterable[str] | str,
+    snapshot_dates: Iterable[datetime.date],
+) -> tuple[pd.DataFrame, list[list]]:
+    """按快照日逐期获取指数成分（Tushare index_weight）。
+
+    **必须逐期调用**：``index_weight`` 的区间查询有 7000 行硬上限（滚动窗口），
+    逐期用 ``trade_date`` 精确查询才不受该限制（实测沪深300 可回溯到 2010）。
+
+    字段：date（快照日）, index_code, con_code, weight
+
+    Args:
+        index_codes: 指数代码列表。
+        snapshot_dates: 快照日列表。
+
+    Returns:
+        tuple[pd.DataFrame, list[list]]: 成分数据与错误信息。
+    """
+    _ensure_tushare_token()
+    pro = ts.pro_api()
+    if isinstance(index_codes, str):
+        index_codes = [index_codes]
+
+    frames: list[pd.DataFrame] = []
+    errors: list[list] = []
+    for code in index_codes:
+        for snapshot in snapshot_dates:
+            try:
+                df = pro.index_weight(
+                    index_code=code, trade_date=snapshot.strftime("%Y%m%d")
+                )
+            except Exception as exc:
+                logger.warning("获取指数成分失败 {} {}: {}", code, snapshot, exc)
+                errors.append(["index_weight", code, str(exc)])
+                continue
+            if df is None or len(df) == 0:
+                continue
+            df = df.rename(
+                columns={
+                    "index_code": "index_code",
+                    "con_code": "con_code",
+                    "trade_date": "date",
+                }
+            )
+            df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
+            frames.append(df)
+
+    if not frames:
+        return pd.DataFrame(), errors
+    out = pd.concat(frames, ignore_index=True)
+    keep = ["date", "index_code", "con_code", "weight"]
+    for col in keep:
+        if col not in out.columns:
+            out[col] = pd.NA
+    out = out[keep].sort_values(["date", "index_code", "con_code"])
+    return out.reset_index(drop=True), errors

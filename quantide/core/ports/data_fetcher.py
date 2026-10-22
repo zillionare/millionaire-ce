@@ -62,3 +62,20 @@ class DataFetcherPort(Protocol):
     ) -> tuple[pd.DataFrame, list[list]]:
         """获取每日市值等基本面数据."""
         ...
+
+    def fetch_index_bars(
+        self,
+        index_codes: Iterable[str] | str,
+        start_date: datetime.date,
+        end_date: datetime.date,
+    ) -> tuple[pd.DataFrame, list[list]]:
+        """获取指数日线行情（基准/超额分析用）."""
+        ...
+
+    def fetch_index_weights(
+        self,
+        index_codes: Iterable[str] | str,
+        snapshot_dates: Iterable[datetime.date],
+    ) -> tuple[pd.DataFrame, list[list]]:
+        """按快照日获取指数成分（point-in-time）."""
+        ...
