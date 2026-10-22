@@ -1352,6 +1352,18 @@ def _build_strategy_rows(strategies: dict) -> list:
                 type="button",
             )
         ]
+        action_controls.append(
+            A(
+                "优化",
+                title="参数优化：在样本内挑选参数并用样本外检验",
+                href=f"/strategy/{name}/optimize",
+                cls=(
+                    "px-2 py-1 text-xs font-medium text-purple-700 "
+                    "bg-purple-50 hover:bg-purple-100 rounded border "
+                    "border-purple-200"
+                ),
+            )
+        )
         if _supports_stock_selection(cls):
             action_controls.append(
                 Button(
@@ -1772,9 +1784,10 @@ def strategy_detail(req, session, name: str):
     detail_actions.append(
         A(
             "参数优化",
+            title="在样本内挑选参数并用样本外区间检验",
             href=f"/strategy/{name}/optimize",
             cls=(
-                "px-4 py-2 bg-purple-600 text-white rounded-lg "
+                "uk-btn px-4 py-2 bg-purple-600 text-white rounded-lg "
                 "hover:bg-purple-700 text-sm font-medium inline-block"
             ),
         )
