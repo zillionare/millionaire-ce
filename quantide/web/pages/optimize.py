@@ -151,6 +151,13 @@ def _format_num(value: Any) -> str:
         return "-"
 
 
+def _objective_cell(value: Any, is_risk: bool) -> str:
+    """目标值展示（回撤类按百分比，其余按数值）。"""
+    if is_risk:
+        return _format_pct(value)
+    return _format_num(value)
+
+
 def _metric(metrics: dict[str, Any], key: str) -> str:
     """读取指标文本。"""
     return str(metrics.get(key, "-"))
@@ -167,9 +174,11 @@ def _render_results(name: str, task: dict[str, Any]) -> Any:
             for key in (row.get("params") or {}).keys()
         }
     )
+    is_risk = objective == "max_drawdown"
+    direction = "（越小越好）" if is_risk else "（越大越好）"
     header_cells = [Th("#", cls="text-xs"), Th("参数", cls="text-xs")]
     header_cells.append(
-        Th(f"样本内{objective_label(objective)}", cls="text-xs")
+        Th(f"样本内{objective_label(objective)}{direction}", cls="text-xs")
     )
     header_cells.append(Th("样本外", cls="text-xs"))
     header_cells.append(Th("样本内年化", cls="text-xs"))
@@ -198,8 +207,8 @@ def _render_results(name: str, task: dict[str, Any]) -> Any:
             Tr(
                 Td(str(index), cls="text-xs"),
                 Td(param_text, cls="text-xs font-mono"),
-                Td(_format_num(row.get("objective")), cls="text-xs"),
-                Td(_format_num(row.get("out_objective")), cls="text-xs"),
+                Td(_objective_cell(row.get("objective"), is_risk), cls="text-xs"),
+                Td(_objective_cell(row.get("out_objective"), is_risk), cls="text-xs"),
                 Td(_metric(in_sample, "CAGR"), cls="text-xs"),
                 Td(_metric(out_sample, "CAGR"), cls="text-xs"),
                 Td(_metric(in_sample, "Max Drawdown"), cls="text-xs"),
@@ -237,7 +246,8 @@ def _render_results(name: str, task: dict[str, Any]) -> Any:
             cls="table table-zebra text-xs",
         ),
         P(
-            "样本内用于挑选参数，样本外仅用于检验；样本外为负或大幅劣于样本内时提示疑似过拟合。",
+            "样本内用于挑选参数，样本外仅用于检验；收益类目标在样本外转负、"
+            "回撤类目标在样本外变深时提示疑似过拟合。",
             cls="text-xs text-gray-500 mt-2",
         ),
         cls="bg-white p-4 rounded-lg border border-gray-100 overflow-x-auto",

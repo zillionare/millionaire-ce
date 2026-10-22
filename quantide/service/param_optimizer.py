@@ -33,6 +33,14 @@ OBJECTIVE_LABELS = {
     "sortino": "索提诺",
     "max_drawdown": "最大回撤",
 }
+#: 目标函数的优化方向（True 表示越大越好）
+OBJECTIVE_HIGHER_IS_BETTER = {
+    "sharpe": True,
+    "annual_return": True,
+    "calmar": True,
+    "sortino": True,
+    "max_drawdown": False,
+}
 #: 目标函数 -> 指标表中的键
 OBJECTIVE_METRIC_KEYS = {
     "sharpe": "Sharpe Ratio",
@@ -417,10 +425,21 @@ def rank_results(
     for row in valid:
         in_value = float(row.get("objective") or 0.0)
         out_value = float(row.get("out_objective") or 0.0)
-        row["overfit"] = bool(out_value < 0 and in_value > 0)
+        row["overfit"] = _is_overfit(objective, in_value, out_value)
         row["degradation"] = (in_value - out_value) if in_value else 0.0
     valid.sort(key=lambda r: float(r.get("objective") or 0.0), reverse=True)
     return valid
+
+
+def _is_overfit(objective: str, in_value: float, out_value: float) -> bool:
+    """判断样本外是否明显劣化（疑似过拟合）。
+
+    收益类目标：样本内为正而样本外转负。
+    风险类目标（最大回撤）：样本外回撤比样本内更深。
+    """
+    if objective == "max_drawdown":
+        return bool(out_value < in_value)
+    return bool(out_value < 0 < in_value)
 
 
 def new_task_id() -> str:

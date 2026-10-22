@@ -317,3 +317,40 @@ def test_optimizer_cancel_terminates_running_workers():
         "wait": False,
         "cancel_futures": True,
     }
+
+
+def test_rank_results_flags_deeper_out_of_sample_drawdown():
+    """回撤类目标：样本外回撤更深时标记过拟合。"""
+    results = [
+        # 目标值为 -abs(回撤)：样本内 -0.10，样本外 -0.30（更深）
+        {"objective": -0.10, "out_objective": -0.30, "params": {"a": 1}},
+    ]
+    ranked = rank_results(results, "max_drawdown")
+    assert ranked[0]["overfit"] is True
+
+
+def test_rank_results_keeps_shallower_out_of_sample_drawdown():
+    """回撤类目标：样本外回撤更浅时不标记过拟合。"""
+    results = [
+        {"objective": -0.30, "out_objective": -0.10, "params": {"a": 1}},
+    ]
+    ranked = rank_results(results, "max_drawdown")
+    assert ranked[0]["overfit"] is False
+
+
+def test_rank_results_prefers_smaller_drawdown():
+    """回撤类目标排序：回撤更小（目标值更大）排在前面。"""
+    results = [
+        {"objective": -0.30, "out_objective": -0.25, "params": {"a": 1}},
+        {"objective": -0.10, "out_objective": -0.12, "params": {"a": 2}},
+    ]
+    ranked = rank_results(results, "max_drawdown")
+    assert [r["params"]["a"] for r in ranked] == [2, 1]
+
+
+def test_objective_higher_is_better_flags_drawdown_as_lower_is_better():
+    """目标方向表：最大回撤是越小越好。"""
+    from quantide.service.param_optimizer import OBJECTIVE_HIGHER_IS_BETTER
+
+    assert OBJECTIVE_HIGHER_IS_BETTER["max_drawdown"] is False
+    assert OBJECTIVE_HIGHER_IS_BETTER["sharpe"] is True

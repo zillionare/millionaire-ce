@@ -355,3 +355,31 @@ def test_backtest_modal_ignores_invalid_prefill(monkeypatch):
         html = strategy_mod.to_xml(strategy_mod.backtest_modal("demo", req))
     assert 'name="param_top_k"' in html
     assert "2024-01-01" in html
+
+
+def test_drawdown_objective_shows_percentage_and_direction():
+    """回撤类目标展示为百分比并标注方向。"""
+    task = {
+        "task_id": "t1",
+        "status": "done",
+        "objective": "max_drawdown",
+        "total": 1,
+        "done": 1,
+        "spec": {"start_date": "2024-01-01", "end_date": "2024-12-31"},
+        "results": [
+            {
+                "objective": -0.3403,
+                "out_objective": -0.2,
+                "params": {"top_k": 5},
+                "in_sample": {"CAGR": "26.53%", "Max Drawdown": "-34.03%"},
+                "out_sample": {"CAGR": "10.00%", "Max Drawdown": "-20.00%"},
+                "overfit": True,
+            }
+        ],
+    }
+    with patch("quantide.web.pages.optimize.get_task", return_value=task):
+        html = optimize_page_mod.to_xml(
+            optimize_page_mod._render_task_panel("demo", "t1")
+        )
+    assert "越小越好" in html
+    assert "-34.03%" in html
