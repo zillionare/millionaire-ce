@@ -131,9 +131,10 @@ class IndexWeightStore(ParquetStorage):
         )
         result: dict[str, dict[str, object]] = {}
         for code, part in df.group_by("index_code"):
+            key = str(code[0] if isinstance(code, tuple) else code)
             dates = sorted(part["date"].to_list())
-            result[str(code)] = {
-                "name": DEFAULT_INDEX_CODES.get(str(code), str(code)),
+            result[key] = {
+                "name": DEFAULT_INDEX_CODES.get(key, key),
                 "start": dates[0] if dates else None,
                 "end": dates[-1] if dates else None,
                 "snapshots": len(dates),

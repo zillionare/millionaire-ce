@@ -61,6 +61,7 @@ from quantide.data.models.entities import (
     Trade,
 )
 from quantide.data.models.strategy_config import StrategyConfig, StrategyInfo
+from quantide.data.models.sync_task import DataSyncTask
 
 T = TypeVar("T")
 
@@ -138,6 +139,7 @@ class SQLiteDB:
             StrategyConfig,
             StrategyInfo,
             AppState,
+            DataSyncTask,
         ]:
             table = e.__table_name__
             pk = e.__pk__
