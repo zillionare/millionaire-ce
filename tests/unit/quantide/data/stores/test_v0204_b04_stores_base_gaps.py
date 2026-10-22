@@ -112,11 +112,8 @@ def test_partition_by_day_creates_partition_directory(calendar, tmp_store_path) 
 
     bars = _make_bars("2024-01-01", "2024-01-05")
 
-    # _save_as_partition will raise on the second iteration due to a
-    # date-vs-string comparison bug in _read_partition; catch and verify
-    # the first partition file was created.
-    with pytest.raises((Exception,)):
-        store._save_as_partition(bars)
+    # 分区写入已支持按目录精确读取，不再有 date-vs-string 比较问题
+    store._save_as_partition(bars)
 
     days = sorted(p.name for p in store_dir.iterdir() if p.is_dir())
     assert len(days) >= 1

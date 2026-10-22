@@ -59,6 +59,8 @@ class ParquetStorage:
         fetch_data_func: Callable[..., Any] | None = None,
         error_handler: Callable[[list[list]], None] | None = None,
         partition_by: Literal["year", "month", "day"] | None = None,
+        partition_levels: tuple[Literal["year", "month", "day"], ...] | None = None,
+        id_cols: list[str] | None = None,
     ):
         """初始化ParquetStorage
 
@@ -68,10 +70,15 @@ class ParquetStorage:
             calendar: 日历模型
             fetch_data_func: 数据获取回调函数
             error_handler: 错误处理函数
-            partition_by: 分区方式，可选 'year', 'month', 'day', None
+            partition_by: 单级分区方式，可选 'year', 'month', 'day', None
+            partition_levels: 多级分区（自粗到细），如 ``("year", "month")``；
+                目录形如 ``partition_key_year=2024/partition_key_month=03/``。
+                读取时只扫描命中的分区文件，避免数据量增长后读放大。
+            id_cols: 去重主键列，默认 ``["date", "asset"]``；成分类数据可改为
+                ``["date", "index_code", "con_code"]``。
         """
         self.store_name = store_name
-        self._id_cols = ["date", "asset"]
+        self._id_cols = list(id_cols) if id_cols else ["date", "asset"]
         self._store_path = Path(store_path).expanduser()
 
         if partition_by is not None and self._store_path.suffix == ".parquet":
@@ -79,7 +86,7 @@ class ParquetStorage:
                 f"partition_by is not allowed when store_path is a parquet file: {self._store_path}"
             )
 
-        if partition_by is not None:
+        if partition_by is not None or partition_levels is not None:
             if not self._store_path.exists():
                 self._store_path.mkdir(parents=True, exist_ok=True)
             assert (
@@ -88,9 +95,16 @@ class ParquetStorage:
 
         self._fetch_data_func = fetch_data_func
         self._error_handler = error_handler or self.default_error_handler
-        self._partition_by = (
-            f"partition_key_{partition_by}" if partition_by is not None else None
-        )
+        if partition_levels is not None:
+            self._partition_levels: tuple[str, ...] = tuple(
+                f"partition_key_{level}" for level in partition_levels
+            )
+            self._partition_by = self._partition_levels[-1]
+        else:
+            self._partition_levels = ()
+            self._partition_by = (
+                f"partition_key_{partition_by}" if partition_by is not None else None
+            )
 
         self._calendar = calendar
         self._dates: pl.Series = pl.Series([], dtype=pl.Date)
@@ -203,6 +217,117 @@ class ParquetStorage:
         if len(df):
             df.write_parquet(self._dates_file_path())
 
+    def _candidate_partition_files(
+        self, start: datetime.date | None, end: datetime.date | None
+    ) -> list[str]:
+        """按日期范围裁剪出需要读取的分区文件（读放大的关键）。
+
+        年+月两级分区时，查询一个季度只会打开 3-4 个文件，而不是全量文件。
+        """
+        if not self._store_path.exists():
+            return []
+        files: list[str] = []
+        if not self._partition_levels:
+            return sorted(str(f) for f in self._store_path.rglob("*.parquet"))
+
+        # 逐级遍历目录，只进入与日期范围相交的分支
+        def _walk(path: Path, depth: int, year: int | None) -> None:
+            if depth == len(self._partition_levels):
+                files.extend(str(f) for f in sorted(path.rglob("*.parquet")))
+                return
+            level = self._partition_levels[depth]
+            if not path.exists():
+                return
+            for child in sorted(path.iterdir()):
+                if not child.is_dir() or not child.name.startswith(f"{level}="):
+                    continue
+                value = child.name[len(level) + 1 :]
+                if not self._level_overlaps(level, value, start, end, year):
+                    continue
+                next_year = year
+                if level == "partition_key_year":
+                    try:
+                        next_year = int(value)
+                    except ValueError:
+                        next_year = None
+                _walk(child, depth + 1, next_year)
+
+        _walk(self._store_path, 0, None)
+        return files
+
+    def _level_overlaps(
+        self,
+        level: str,
+        value: str,
+        start: datetime.date | None,
+        end: datetime.date | None,
+        year: int | None = None,
+    ) -> bool:
+        """判断某个分区取值是否与日期范围相交。
+
+        ``year`` 为上层目录已确定的年份（两级分区时用于判断月份）。
+        """
+        if start is None and end is None:
+            return True
+        if level == "partition_key_year":
+            try:
+                level_year = int(value)
+            except ValueError:
+                return True
+            if start is not None and level_year < start.year:
+                return False
+            if end is not None and level_year > end.year:
+                return False
+            return True
+        if level == "partition_key_month":
+            try:
+                month = int(value)
+            except (TypeError, ValueError):
+                return True
+            level_year = year
+            if level_year is None:
+                try:
+                    year_s, month_s = value.split("-")
+                    level_year, month = int(year_s), int(month_s)
+                except (ValueError, AttributeError):
+                    return True
+            if start is not None and (level_year, month) < (start.year, start.month):
+                return False
+            if end is not None and (level_year, month) > (end.year, end.month):
+                return False
+            return True
+        if level == "partition_key_day":
+            try:
+                day = datetime.date.fromisoformat(value)
+            except ValueError:
+                return True
+            if start is not None and day < start:
+                return False
+            if end is not None and day > end:
+                return False
+            return True
+        return True
+
+    def _scan_store_range(
+        self,
+        start: datetime.date | None = None,
+        end: datetime.date | None = None,
+        keep_partition_col: bool = False,
+    ) -> pl.LazyFrame | None:
+        """按日期范围扫描（多级分区下只打开命中的文件）。"""
+        files = self._candidate_partition_files(start, end)
+        if not files:
+            return None
+        lf = pl.scan_parquet(files, hive_partitioning=True)
+        levels = self._partition_levels or (
+            (self._partition_by,) if self._partition_by else ()
+        )
+        if not keep_partition_col:
+            for level in levels:
+                if level in lf.collect_schema():
+                    lf = lf.select(pl.exclude(level))
+        return lf
+
     def _read_partition(
         self, start: Any = None, end: Any = None, keep_partition_col: bool = False
     ) -> pl.LazyFrame | None:
@@ -223,20 +348,46 @@ class ParquetStorage:
         return lf
 
     def _ensure_partition_col(self, lf: pl.LazyFrame) -> pl.LazyFrame:
-        if self._partition_by not in lf.collect_schema():
-            if self._partition_by == "partition_key_year":
+        """补齐缺失的分区列（多级分区会补齐所有层级）。"""
+        schema = lf.collect_schema()
+        for level in self._partition_levels or (
+            (self._partition_by,) if self._partition_by else ()
+        ):
+            if level in schema:
+                continue
+            if level == "partition_key_year":
                 lf = lf.with_columns(
-                    pl.col("date").dt.year().cast(pl.Int64).alias(self._partition_by)
+                    pl.col("date").dt.year().cast(pl.Int64).alias(level)
                 )
-            elif self._partition_by == "partition_key_month":
+            elif level == "partition_key_month":
+                if self._partition_levels and len(self._partition_levels) > 1:
+                    # 两级及以上：年已在上层目录，这里只放月份
+                    lf = lf.with_columns(
+                        pl.col("date").dt.month().cast(pl.Int64).alias(level)
+                    )
+                else:
+                    lf = lf.with_columns(
+                        pl.col("date").dt.strftime("%Y-%m").alias(level)
+                    )
+            elif level == "partition_key_day":
                 lf = lf.with_columns(
-                    pl.col("date").dt.strftime("%Y-%m").alias(self._partition_by)
-                )
-            elif self._partition_by == "partition_key_day":
-                lf = lf.with_columns(
-                    pl.col("date").dt.strftime("%Y-%m-%d").alias(self._partition_by)
+                    pl.col("date").dt.strftime("%Y-%m-%d").alias(level)
                 )
         return lf
+
+    def _partition_value(self, level: str, v: datetime.date | datetime.datetime | None) -> Any:
+        """单个分区层级对应的取值。"""
+        if v is None:
+            return None
+        if level == "partition_key_year":
+            return v.year
+        if level == "partition_key_month":
+            if self._partition_levels and len(self._partition_levels) > 1:
+                return v.month
+            return v.strftime("%Y-%m")
+        if level == "partition_key_day":
+            return v.strftime("%Y-%m-%d")
+        return None
 
     def _to_partition_key(self, v: datetime.date | datetime.datetime | None) -> Any:
         if self._partition_by == "partition_key_year":
@@ -246,24 +397,66 @@ class ParquetStorage:
         elif self._partition_by == "partition_key_day":
             return v.strftime("%Y-%m-%d") if v is not None else None
 
+    def _partition_dirs(self, lf: pl.LazyFrame) -> list[tuple[tuple[str, ...], pl.LazyFrame]]:
+        """按分区层级组合，把数据切分成 (目录键元组, 数据) 的列表。
+
+        多级分区时目录形如 ``partition_key_year=2024/partition_key_month=03``。
+        """
+        levels = self._partition_levels or (self._partition_by,)
+        lf = self._ensure_partition_col(lf)
+        keys = (
+            lf.select([pl.col(level) for level in levels])
+            .unique()
+            .collect()
+            .rows()
+        )
+        groups: list[tuple[tuple[str, ...], pl.LazyFrame]] = []
+        for key in keys:
+            mask = pl.all_horizontal(
+                [
+                    pl.col(level) == value
+                    for level, value in zip(levels, key, strict=True)
+                ]
+            )
+            groups.append((tuple(str(v) for v in key), lf.filter(mask)))
+        return groups
+
+    def _partition_path(self, key: tuple[str, ...]) -> Path:
+        """分区键元组对应的目录。"""
+        levels = self._partition_levels or (self._partition_by,)
+        path = self._store_path
+        for level, value in zip(levels, key, strict=True):
+            path = path / f"{level}={self._format_partition_value(level, value)}"
+        return path
+
+    def _format_partition_value(self, level: str, value: str) -> str:
+        """分区目录名的展示形式（月份补零便于排序）。"""
+        if level == "partition_key_month":
+            try:
+                return f"{int(value):02d}"
+            except (TypeError, ValueError):
+                return str(value)
+        return str(value)
+
+    def _read_partition_dir(self, path: Path) -> pl.LazyFrame | None:
+        """读取一个分区目录下的全部 parquet。"""
+        if not path.exists():
+            return None
+        files = sorted(path.rglob("*.parquet"))
+        if not files:
+            return None
+        return pl.scan_parquet([str(f) for f in files], hive_partitioning=True)
+
     def _save_as_partition(self, lf: pl.LazyFrame | pd.DataFrame):
         if isinstance(lf, pd.DataFrame):
             lf = pl.from_pandas(lf).lazy()
+        elif isinstance(lf, pl.DataFrame):
+            lf = lf.lazy()
 
-        lf = self._ensure_partition_col(lf)
-
-        partitions = (
-            lf.select(pl.col(self._partition_by))
-            .unique()
-            .collect()
-            .get_column(self._partition_by)
-        )
-        for partition in partitions:
-            part_lf = lf.filter(pl.col(self._partition_by) == partition)
-
-            base_lf = self._read_partition(
-                partition, partition, keep_partition_col=True
-            )
+        levels = self._partition_levels or (self._partition_by,)
+        for key, part_lf in self._partition_dirs(lf):
+            partition_dir = self._partition_path(key)
+            base_lf = self._read_partition_dir(partition_dir)
             if base_lf is None:
                 group = [part_lf]
             else:
@@ -273,16 +466,88 @@ class ParquetStorage:
                 .unique(subset=self._id_cols, keep="last")
                 .sort(self._id_cols)
             )
-            partition_value = (
-                partition.as_py() if hasattr(partition, "as_py") else partition
-            )
-            partition_dir = self._store_path / f"{self._partition_by}={partition_value}"
             partition_dir.mkdir(parents=True, exist_ok=True)
             output_file = partition_dir / "part-0.parquet"
             write_df = combined.collect()
-            if self._partition_by in write_df.columns:
-                write_df = write_df.drop(self._partition_by)
+            for level in levels:
+                if level in write_df.columns:
+                    write_df = write_df.drop(level)
             write_df.write_parquet(output_file, compression=self._compression)
+
+    def repartition_to_levels(
+        self, levels: tuple[str, ...], dry_run: bool = False
+    ) -> int:
+        """把旧的单级分区数据一次性重写为多级分区。
+
+        旧布局：``partition_key_year=2024/part-0.parquet``
+        新布局：``partition_key_year=2024/partition_key_month=03/part-0.parquet``
+
+        Args:
+            levels: 目标分区层级（自粗到细）。
+            dry_run: 只统计不写盘。
+
+        Returns:
+            int: 迁移的分区数量。
+        """
+        if not self._store_path.exists():
+            return 0
+        legacy_dirs = [
+            path
+            for path in sorted(self._store_path.iterdir())
+            if path.is_dir()
+            and path.name.startswith("partition_key_year=")
+            and any(path.glob("*.parquet"))
+        ]
+        migrated = 0
+        for legacy_dir in legacy_dirs:
+            files = sorted(legacy_dir.glob("*.parquet"))
+            if not files:
+                continue
+            frame = pl.read_parquet([str(f) for f in files])
+            frame = frame.drop(
+                [c for c in frame.columns if c.startswith("partition_key_")]
+            )
+            if dry_run:
+                migrated += 1
+                continue
+            for (year, month), part in self._split_by_levels(frame, levels):
+                target = (
+                    self._store_path
+                    / f"partition_key_year={year}"
+                    / f"partition_key_month={month:02d}"
+                )
+                target.mkdir(parents=True, exist_ok=True)
+                part.write_parquet(
+                    target / "part-0.parquet", compression=self._compression
+                )
+            for f in files:
+                f.unlink()
+            migrated += 1
+        return migrated
+
+    def _split_by_levels(
+        self, frame: pl.DataFrame, levels: tuple[str, ...]
+    ) -> list[tuple[tuple[int, int], pl.DataFrame]]:
+        """按 (年, 月) 切分数据帧。"""
+        work = frame.with_columns(pl.col("date").cast(pl.Date))
+        keys = (
+            work.select(
+                [
+                    pl.col("date").dt.year().alias("y"),
+                    pl.col("date").dt.month().alias("m"),
+                ]
+            )
+            .unique()
+            .rows()
+        )
+        out: list[tuple[tuple[int, int], pl.DataFrame]] = []
+        for year, month in sorted(keys):
+            part = work.filter(
+                (pl.col("date").dt.year() == year)
+                & (pl.col("date").dt.month() == month)
+            )
+            out.append(((int(year), int(month)), part))
+        return out
 
     def _save_single(self, lf: pl.LazyFrame | pd.DataFrame) -> None:
         """保存非分区数据"""
@@ -666,11 +931,17 @@ class ParquetStorage:
         if self._partition_by is None:
             lf = self._scan_store(keep_partition_col=False)
         else:
-            lf = self._read_partition(
-                self._to_partition_key(start),
-                self._to_partition_key(end),
+            lf = self._scan_store_range(
+                start,
+                end,
                 keep_partition_col=False,
             )
+            if lf is None:
+                lf = self._read_partition(
+                    self._to_partition_key(start),
+                    self._to_partition_key(end),
+                    keep_partition_col=False,
+                )
 
         if lf is None:
             if eager_mode:

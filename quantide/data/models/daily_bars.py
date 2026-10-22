@@ -43,9 +43,11 @@ class DailyBars(ParquetStorage):
         self._data_fetcher = get_data_fetcher()
 
         path = Path(store_path).expanduser()
-        partition_by = None if path.suffix == ".parquet" else "year"
+        is_dir = path.suffix != ".parquet"
 
         # 用真实路径重新初始化 ParquetStorage
+        # 目录型存储用「年+月」两级分区：读取时只打开命中的月份文件，
+        # 避免数据量增长后读放大（年分区会整年扫描）。
         ParquetStorage.__init__(
             self,
             store_name="DailyBars",
@@ -53,9 +55,29 @@ class DailyBars(ParquetStorage):
             calendar=self._calendar,
             fetch_data_func=self._fetch_bars_ext,
             error_handler=None,
-            partition_by=partition_by,
+            partition_levels=("year", "month") if is_dir else None,
         )
+        if is_dir:
+            self._migrate_legacy_partitions()
         self._initialized = True
+
+    def _migrate_legacy_partitions(self) -> None:
+        """把旧的年分区数据一次性迁移为年+月两级分区。"""
+        legacy = [
+            path
+            for path in sorted(self._store_path.iterdir())
+            if path.is_dir()
+            and path.name.startswith("partition_key_year=")
+            and any(path.glob("*.parquet"))
+        ]
+        if not legacy:
+            return
+        try:
+            migrated = self.repartition_to_levels(("year", "month"))
+            if migrated:
+                logger.info("日线分区已迁移为年+月两级：{} 个分区", migrated)
+        except Exception as exc:  # pragma: no cover - 迁移失败不阻塞启动
+            logger.warning("日线分区迁移失败，沿用旧布局: {}", exc)
 
     @property
     def store(self) -> "DailyBars":
