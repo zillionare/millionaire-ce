@@ -463,3 +463,22 @@ def test_monthly_matrix_empty_without_monthly_data():
         optimize_page_mod._render_monthly_matrix(task)
     )
     assert "月度分解" not in html
+
+
+def test_fresh_page_contains_run_button_and_its_target():
+    """首次进入页面时「开始优化」按钮与其 HTMX 目标必须同时存在。
+
+    回归测试：目标容器缺失会让点击按钮毫无反应。
+    """
+    with patch(
+        "quantide.service.discovery.strategy_loader.load_from_cache",
+        return_value={"demo": _fake_strategy()},
+    ), patch(
+        "quantide.web.pages.optimize.list_tasks", return_value=[]
+    ):
+        html = optimize_page_mod.to_xml(
+            optimize_page_mod.optimize_page(_make_req(), {}, "demo")
+        )
+    assert "开始优化" in html
+    assert 'id="optimize-task-wrapper"' in html
+    assert 'hx-target="#optimize-task-wrapper"' in html

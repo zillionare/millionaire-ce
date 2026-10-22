@@ -362,12 +362,20 @@ def _render_results(name: str, task: dict[str, Any]) -> Any:
 
 
 def _render_task_panel(name: str, task_id: str) -> Any:
-    """渲染任务进度与结果面板。"""
-    task = get_task(task_id)
+    """渲染任务进度与结果面板（始终返回 #optimize-task-wrapper 容器）。
+
+    容器必须始终存在：否则首次进入页面时「开始优化」按钮的 HTMX 目标缺失，
+    点击不会有任何反应。
+    """
+    task = get_task(task_id) if task_id else None
     if task is None:
         return Div(
-            P("任务不存在。", cls="text-sm text-gray-500"),
+            P(
+                "任务不存在。" if task_id else "尚未运行任务。",
+                cls="text-sm text-gray-500",
+            ),
             cls="bg-white p-4 rounded-lg border border-gray-100",
+            id="optimize-task-wrapper",
         )
 
     status = task.get("status")
@@ -407,7 +415,8 @@ def _render_task_panel(name: str, task_id: str) -> Any:
             type="button",
             cls="btn btn-ghost btn-sm",
             hx_post=f"/strategy/{name}/optimize/cancel/{task_id}",
-            hx_target="#optimize-task-panel",
+            hx_target="#optimize-task-wrapper",
+            hx_swap="outerHTML",
         )
         if running
         else Div()
@@ -672,6 +681,7 @@ def optimize_page(req, session, name: str):
                         cls="btn btn-primary",
                         hx_post=f"/strategy/{name}/optimize/run",
                         hx_target="#optimize-task-wrapper",
+                        hx_swap="outerHTML",
                         hx_include="closest form",
                     ),
                     cls="flex justify-end mt-4",
@@ -681,9 +691,7 @@ def optimize_page(req, session, name: str):
         )
     )
 
-    task_panel = (
-        _render_task_panel(name, task_id) if task_id else Div()
-    )
+    task_panel = _render_task_panel(name, task_id)
 
     layout.main_block = lambda: Div(
         Div(
