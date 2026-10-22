@@ -163,6 +163,113 @@ def _metric(metrics: dict[str, Any], key: str) -> str:
     return str(metrics.get(key, "-"))
 
 
+def _monthly_columns(results: list[dict[str, Any]]) -> list[str]:
+    """收集所有组合覆盖的月份列。"""
+    months: set[str] = set()
+    for row in results:
+        for item in row.get("monthly") or []:
+            month = str(item.get("month") or "")
+            if month:
+                months.add(month)
+    return sorted(months)
+
+
+def _render_monthly_matrix(task: dict[str, Any]) -> Any:
+    """渲染月度分解表：行=参数组合，列=月份，格子=当月收益。
+
+    每列最优的格子加粗高亮，用于直观判断"参数优劣是否随月份变化"。
+    """
+    results = task.get("results") or []
+    months = _monthly_columns(results)
+    if not months:
+        return Div()
+
+    best_by_month: dict[str, float] = {}
+    for row in results:
+        for item in row.get("monthly") or []:
+            month = str(item.get("month") or "")
+            ret = float(item.get("ret") or 0.0)
+            if month not in best_by_month or ret > best_by_month[month]:
+                best_by_month[month] = ret
+
+    header = [Th("参数", cls="text-xs")]
+    for month in months:
+        header.append(Th(month, cls="text-xs whitespace-nowrap"))
+    header.extend(
+        [
+            Th("正收益月", cls="text-xs whitespace-nowrap"),
+            Th("最差月", cls="text-xs whitespace-nowrap"),
+            Th("月度中位", cls="text-xs whitespace-nowrap"),
+        ]
+    )
+
+    body: list[Any] = []
+    for row in results:
+        params = row.get("params") or {}
+        param_text = ", ".join(
+            f"{key}={params.get(key)}" for key in sorted(params.keys())
+        ) or "-"
+        by_month = {
+            str(item.get("month") or ""): item for item in row.get("monthly") or []
+        }
+        rets = [
+            float(item.get("ret") or 0.0) for item in row.get("monthly") or []
+        ]
+        cells: list[Any] = [Td(param_text, cls="text-xs font-mono")]
+        for month in months:
+            item = by_month.get(month)
+            if item is None:
+                cells.append(Td("-", cls="text-xs text-gray-300"))
+                continue
+            ret = float(item.get("ret") or 0.0)
+            is_best = (
+                abs(ret - best_by_month.get(month, ret)) < 1e-12
+                and len(results) > 1
+            )
+            tone = "text-emerald-700 bg-emerald-50" if ret >= 0 else "text-red-700 bg-red-50"
+            weight = "font-bold" if is_best else ""
+            mark = "*" if item.get("partial") else ""
+            cells.append(
+                Td(
+                    f"{ret * 100:+.1f}%{mark}",
+                    cls=f"text-xs {tone} {weight}".strip(),
+                )
+            )
+        positive = sum(1 for ret in rets if ret > 0)
+        worst = min(rets) if rets else 0.0
+        worst_label = ""
+        if rets:
+            worst_month = min(
+                row.get("monthly") or [],
+                key=lambda item: float(item.get("ret") or 0.0),
+            )
+            worst_label = f" {worst_month.get('month')}"
+        median = sorted(rets)[len(rets) // 2] if rets else 0.0
+        cells.extend(
+            [
+                Td(f"{positive}/{len(rets)}", cls="text-xs"),
+                Td(f"{worst * 100:+.1f}%{worst_label}", cls="text-xs"),
+                Td(f"{median * 100:+.2f}%", cls="text-xs"),
+            ]
+        )
+        body.append(Tr(*cells))
+
+    return Div(
+        H4("月度分解", cls="text-sm font-semibold text-gray-600 mb-1"),
+        P(
+            "每格为该参数组当月收益（绿正红负）；加粗为当月最优。"
+            "带 * 的月份未覆盖完整交易月。本表仅作诊断，不含参数选择。",
+            cls="text-xs text-gray-500 mb-2",
+        ),
+        Table(
+            Thead(Tr(*header)),
+            Tbody(*body),
+            cls="table table-zebra text-xs",
+        ),
+        cls="bg-white p-4 rounded-lg border border-gray-100 overflow-x-auto mt-4",
+    )
+
+
 def _render_results(name: str, task: dict[str, Any]) -> Any:
     """渲染结果对比表。"""
     results = task.get("results") or []
@@ -314,6 +421,7 @@ def _render_task_panel(name: str, task_id: str) -> Any:
         ),
         progress,
         _render_results(name, task),
+        _render_monthly_matrix(task),
         id="optimize-task-panel",
     )
     if running:

@@ -179,6 +179,96 @@ def _metrics_to_dict(metrics_df: Any) -> dict[str, Any]:
     return {}
 
 
+def _monthly_returns(
+    portfolio_id: str,
+    start_date: datetime.date | None = None,
+    end_date: datetime.date | None = None,
+) -> list[dict[str, Any]]:
+    """按自然月切分净值曲线，返回每个月的收益率。
+
+    月收益 = 本月末净值 / 上月末净值 - 1；首月用区间开始前的最后一行做基准，
+    因此不会丢掉区间首日的收益。某个自然月没有覆盖完整交易月时标记
+    ``partial``（例如区间结束在月中）。
+
+    Args:
+        portfolio_id: 组合 ID。
+        start_date: 区间开始日（用于取首月基准）。
+        end_date: 区间结束日。
+
+    Returns:
+        list[dict]: 每项含 ``month``、``ret``、``partial``。
+    """
+    from quantide.data.sqlite import db
+
+    try:
+        assets = db.query_assets(portfolio_id)
+    except Exception as exc:  # pragma: no cover - 数据库异常兜底
+        logger.warning(f"月度分解读取净值失败: {exc}")
+        return []
+    if assets is None or assets.is_empty():
+        return []
+
+    rows = sorted(
+        (row["dt"], float(row["total"]))
+        for row in assets.select(["dt", "total"]).iter_rows(named=True)
+    )
+    if not rows:
+        return []
+
+    base_total: float | None = None
+    if start_date is not None:
+        prior = [total for dt, total in rows if dt < start_date]
+        if prior:
+            base_total = prior[-1]
+
+    in_range = [
+        (dt, total)
+        for dt, total in rows
+        if (start_date is None or dt >= start_date)
+        and (end_date is None or dt <= end_date)
+    ]
+    month_last: dict[tuple[int, int], tuple[datetime.date, float]] = {}
+    for dt, total in in_range:
+        month_last[(dt.year, dt.month)] = (dt, total)
+
+    expected_month_ends = _month_end_map()
+    prev_total = base_total
+    result: list[dict[str, Any]] = []
+    for key in sorted(month_last):
+        month_dt, month_total = month_last[key]
+        ret = 0.0
+        if prev_total:
+            ret = month_total / prev_total - 1.0
+        expected = expected_month_ends.get(key)
+        partial = bool(expected is not None and month_dt < expected)
+        result.append(
+            {
+                "month": f"{key[0]:04d}-{key[1]:02d}",
+                "ret": ret,
+                "partial": partial,
+            }
+        )
+        prev_total = month_total
+    return result
+
+
+def _month_end_map() -> dict[tuple[int, int], datetime.date]:
+    """各自然月的最后交易日（用于判断区间是否覆盖整月）。"""
+    try:
+        from quantide.data.models.calendar import calendar
+
+        frames = calendar.month_frames
+        if frames is None:
+            return {}
+        return {
+            (dt.year, dt.month): dt
+            for dt in frames.to_pylist()
+            if isinstance(dt, datetime.date)
+        }
+    except Exception:  # pragma: no cover - 日历未就绪
+        return {}
+
+
 def _run_combo(
     strategy_cls: type[BaseStrategy],
     config: dict[str, Any],
@@ -230,6 +320,7 @@ def _run_combo(
     row["out_sample"] = {k: str(v) for k, v in out_dict.items()}
     row["objective"] = objective_value(in_dict, objective)
     row["out_objective"] = objective_value(out_dict, objective)
+    row["monthly"] = _monthly_returns(portfolio_id, start_date, end_date)
     return row
 
 

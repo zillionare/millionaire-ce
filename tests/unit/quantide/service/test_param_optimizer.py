@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import datetime as dt
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from quantide.service.param_optimizer import (
     OBJECTIVE_METRIC_KEYS,
     OptimizationSpec,
     ParamOptimizer,
+    _monthly_returns,
     _split_date,
     build_combinations,
     objective_value,
@@ -354,3 +356,68 @@ def test_objective_higher_is_better_flags_drawdown_as_lower_is_better():
 
     assert OBJECTIVE_HIGHER_IS_BETTER["max_drawdown"] is False
     assert OBJECTIVE_HIGHER_IS_BETTER["sharpe"] is True
+
+
+def _monthly_returns_from_rows(rows, start_date=None, end_date=None, month_ends=None):
+    """用内存中的净值行验证月度切分（不触碰数据库）。"""
+    import polars as pl
+
+    frame = pl.DataFrame(
+        {"dt": [r[0] for r in rows], "total": [r[1] for r in rows]},
+        schema={"dt": pl.Date, "total": pl.Float64},
+    )
+
+    class _FakeDb:
+        @staticmethod
+        def query_assets(_portfolio_id, *_args, **_kwargs):
+            return frame
+
+    with patch("quantide.data.sqlite.db", _FakeDb), patch(
+        "quantide.service.param_optimizer._month_end_map",
+        return_value=month_ends or {},
+    ):
+        return _monthly_returns("p1", start_date, end_date)
+
+
+def test_monthly_returns_splits_by_calendar_month():
+    """净值曲线按自然月切分，首月用区间前的行做基准。"""
+    rows = [
+        (dt.date(2023, 12, 29), 100.0),
+        (dt.date(2024, 1, 31), 110.0),
+        (dt.date(2024, 2, 29), 121.0),
+        (dt.date(2024, 3, 28), 133.1),
+    ]
+    monthly = _monthly_returns_from_rows(
+        rows, dt.date(2024, 1, 2), dt.date(2024, 3, 28)
+    )
+    assert [item["month"] for item in monthly] == ["2024-01", "2024-02", "2024-03"]
+    assert monthly[0]["ret"] == pytest.approx(0.10)
+    assert monthly[1]["ret"] == pytest.approx(0.10)
+    assert monthly[2]["ret"] == pytest.approx(0.10)
+
+
+def test_monthly_returns_marks_partial_month():
+    """未覆盖整月的自然月标记 partial。"""
+    rows = [
+        (dt.date(2024, 1, 31), 100.0),
+        (dt.date(2024, 2, 20), 105.0),
+    ]
+    monthly = _monthly_returns_from_rows(
+        rows,
+        dt.date(2024, 1, 2),
+        dt.date(2024, 2, 20),
+        month_ends={(2024, 1): dt.date(2024, 1, 31), (2024, 2): dt.date(2024, 2, 29)},
+    )
+    assert monthly[0]["partial"] is False
+    assert monthly[1]["partial"] is True
+
+
+def test_monthly_returns_empty_without_assets():
+    """没有净值数据时返回空列表。"""
+    class _FakeDb:
+        @staticmethod
+        def query_assets(_portfolio_id, *_args, **_kwargs):
+            return None
+
+    with patch("quantide.data.sqlite.db", _FakeDb):
+        assert _monthly_returns("p1", dt.date(2024, 1, 1), dt.date(2024, 2, 1)) == []

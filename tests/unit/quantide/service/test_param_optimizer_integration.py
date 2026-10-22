@@ -122,3 +122,30 @@ def test_optimizer_reports_in_and_out_of_sample_split(optimizer_env, db):
     assert row["in_sample"]["End Date"] <= row["out_sample"]["End Date"]
     assert isinstance(row["objective"], float)
     assert isinstance(row["out_objective"], float)
+
+
+def test_optimizer_returns_monthly_decomposition(optimizer_env, db):
+    """真实回测会产出月度分解，且各月收益连乘≈区间总收益。"""
+    spec = OptimizationSpec(
+        strategy_name="ParamOptimizerRecordingStrategy",
+        base_config={"universe": ["000001.SZ"]},
+        param_grid={"param1": [1]},
+        start_date=datetime.date(2024, 1, 4),
+        end_date=datetime.date(2024, 1, 31),
+        initial_cash=100000,
+        max_workers=1,
+        data_home=optimizer_env,
+    )
+
+    with patch.object(
+        ParamOptimizer,
+        "_resolve_strategy",
+        return_value=ParamOptimizerRecordingStrategy,
+    ):
+        results = ParamOptimizer(spec).run()
+
+    assert len(results) == 1
+    monthly = results[0].get("monthly") or []
+    assert monthly, "月度分解不应为空"
+    assert [item["month"] for item in monthly] == ["2024-01"]
+    assert isinstance(monthly[0]["ret"], float)

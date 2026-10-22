@@ -383,3 +383,83 @@ def test_drawdown_objective_shows_percentage_and_direction():
         )
     assert "越小越好" in html
     assert "-34.03%" in html
+
+
+def _task_with_monthly() -> dict:
+    """构造带月度分解的任务数据。"""
+    return {
+        "task_id": "t1",
+        "status": "done",
+        "objective": "sharpe",
+        "total": 2,
+        "done": 2,
+        "spec": {"start_date": "2024-01-02", "end_date": "2024-03-29"},
+        "results": [
+            {
+                "objective": 1.2,
+                "out_objective": 0.3,
+                "params": {"train_window": 45},
+                "in_sample": {},
+                "out_sample": {},
+                "overfit": False,
+                "monthly": [
+                    {"month": "2024-01", "ret": 0.05, "partial": False},
+                    {"month": "2024-02", "ret": -0.02, "partial": False},
+                    {"month": "2024-03", "ret": 0.01, "partial": True},
+                ],
+            },
+            {
+                "objective": 0.8,
+                "out_objective": 0.2,
+                "params": {"train_window": 120},
+                "in_sample": {},
+                "out_sample": {},
+                "overfit": False,
+                "monthly": [
+                    {"month": "2024-01", "ret": 0.02, "partial": False},
+                    {"month": "2024-02", "ret": 0.03, "partial": False},
+                    {"month": "2024-03", "ret": -0.04, "partial": True},
+                ],
+            },
+        ],
+    }
+
+
+def test_monthly_matrix_renders_months_and_summary():
+    """月度分解表渲染出月份列与行尾统计。"""
+    html = optimize_page_mod.to_xml(
+        optimize_page_mod._render_monthly_matrix(_task_with_monthly())
+    )
+    assert "月度分解" in html
+    assert "2024-01" in html and "2024-03" in html
+    assert "+5.0%" in html and "-2.0%" in html
+    # 行尾统计：正收益月数 / 最差月 / 中位
+    assert "2/3" in html
+    assert "-4.0%" in html
+
+
+def test_monthly_matrix_marks_partial_month():
+    """未满月带星号标记。"""
+    html = optimize_page_mod.to_xml(
+        optimize_page_mod._render_monthly_matrix(_task_with_monthly())
+    )
+    assert "+1.0%*" in html
+
+
+def test_monthly_matrix_highlights_best_cell_per_month():
+    """每列最优的格子加粗。"""
+    html = optimize_page_mod.to_xml(
+        optimize_page_mod._render_monthly_matrix(_task_with_monthly())
+    )
+    assert "font-bold" in html
+
+
+def test_monthly_matrix_empty_without_monthly_data():
+    """没有月度数据时不渲染表格。"""
+    task = _task_with_monthly()
+    for row in task["results"]:
+        row.pop("monthly")
+    html = optimize_page_mod.to_xml(
+        optimize_page_mod._render_monthly_matrix(task)
+    )
+    assert "月度分解" not in html
