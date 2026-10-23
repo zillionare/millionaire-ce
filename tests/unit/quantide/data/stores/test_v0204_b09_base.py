@@ -124,12 +124,12 @@ def test_default_error_handler_logs_each_error(asset_dir, tmp_store_path):
 
 
 def test_dates_file_path_partition_mode(tmp_store_path, calendar):
-    """[AC-FR0700-132] partition mode -> dates.pq in the parent directory."""
+    """[AC-FR0700-132] partition mode -> <store>-dates.pq in the parent directory."""
     store_dir = tmp_store_path / "year"
     store_dir.mkdir()
     store = ParquetStorage("yearly", store_dir, calendar, partition_by="year")
     path = store._dates_file_path()
-    assert path.name == "dates.pq"
+    assert path.name == "year-dates.pq"
     assert path.parent == store_dir.parent
 
 
