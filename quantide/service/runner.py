@@ -516,12 +516,17 @@ class BacktestRunner:
         baseline = self._benchmark_returns(
             config.get("benchmark", "000300.SH"), start_date, end_date
         )
-        stats = metrics(
-            portfolio_id,
-            baseline_returns=baseline,
-            start=start_date,
-            end=end_date,
-        )
+        try:
+            stats = metrics(
+                portfolio_id,
+                baseline_returns=baseline,
+                start=start_date,
+                end=end_date,
+            )
+        except ValueError as exc:
+            # 基准日期覆盖不足时退回无基准指标，避免回测整体失败。
+            self.logger.warning(f"基准对齐失败，跳过超额指标: {exc}")
+            stats = metrics(portfolio_id, start=start_date, end=end_date)
 
         return {
             "portfolio_id": portfolio_id,
