@@ -1077,3 +1077,69 @@ def test_on_bar_is_idempotent_within_same_signal_day(monkeypatch) -> None:
 
     # 第二次调用被去重拦截
     assert len(calls) == 1
+
+
+def test_filter_universe_index_pit_uses_constituents(monkeypatch):
+    """index_pit 只保留目标日指数成分（PIT）。"""
+    import quantide.data as data_mod
+    from quantide.strategies.example.ml_momentum_reversal import _filter_universe
+
+    class _Store:
+        def constituents(self, code, as_of, include_weight=True):
+            assert code == "000300.SH"
+            return pl.DataFrame(
+                {
+                    "date": [as_of, as_of],
+                    "index_code": [code, code],
+                    "con_code": ["000001.SZ", "600000.SH"],
+                }
+            )
+
+    monkeypatch.setattr(data_mod, "get_index_weight_store", lambda: _Store())
+    bars = pl.DataFrame(
+        {
+            "date": [dt.date(2024, 3, 1)] * 3,
+            "asset": ["000001.SZ", "600000.SH", "000002.SZ"],
+            "close": [10.0, 10.0, 10.0],
+            "volume": [1000.0, 1000.0, 1000.0],
+            "is_st": [False, False, False],
+        }
+    )
+    picked = _filter_universe(
+        bars,
+        dt.date(2024, 3, 1),
+        2000,
+        mode="index_pit",
+        index_codes=["000300.SH"],
+    )
+    assert picked == ["000001.SZ", "600000.SH"]
+
+
+def test_filter_universe_index_pit_falls_back_when_empty(monkeypatch):
+    """成分数据缺失时退回市值/流动性裁剪，不返回空池。"""
+    import quantide.data as data_mod
+    from quantide.strategies.example.ml_momentum_reversal import _filter_universe
+
+    class _Store:
+        def constituents(self, code, as_of, include_weight=True):
+            return pl.DataFrame()
+
+    monkeypatch.setattr(data_mod, "get_index_weight_store", lambda: _Store())
+    bars = pl.DataFrame(
+        {
+            "date": [dt.date(2024, 5, 6)] * 2,
+            "asset": ["000001.SZ", "600000.SH"],
+            "close": [10.0, 20.0],
+            "volume": [1000.0, 2000.0],
+            "amount": [10000.0, 40000.0],
+            "is_st": [False, False],
+        }
+    )
+    picked = _filter_universe(
+        bars,
+        dt.date(2024, 5, 6),
+        2000,
+        mode="index_pit",
+        index_codes=["000300.SH"],
+    )
+    assert picked == ["000001.SZ", "600000.SH"]

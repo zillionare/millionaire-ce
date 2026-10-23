@@ -49,6 +49,7 @@ class BacktestBroker(AbstractBroker):
         desc: str = "",
         save_logs: bool = False,
         risk_overlay: TripleBarrierOverlay | None = None,
+        auction_epsilon: float = 0.001,
     ):
         """回测 broker
 
@@ -64,6 +65,7 @@ class BacktestBroker(AbstractBroker):
             - match_level, 匹配模式，day为日线，minute为分钟线
             - desc, 账户/策略描述
             - save_logs, 是否同步写入回测日志文件
+            - auction_epsilon, 集合竞价限价容差（竞价价 × (1+eps)）
         """
         super().__init__(
             portfolio_id=portfolio_id,
@@ -84,6 +86,7 @@ class BacktestBroker(AbstractBroker):
         self._desc: str = desc
         self._save_backtest_logs = save_logs
         self._risk_overlay = risk_overlay
+        self._auction_epsilon = max(0.0, float(auction_epsilon))
 
         # 回测时钟，初始化为 bt_start 的前一个交易日 (Day 0)
         prev = calendar.day_shift(bt_start, -1)
@@ -97,6 +100,20 @@ class BacktestBroker(AbstractBroker):
 
         # Use patched logger to support time-travel logging
         self.logger = logger.bind(portfolio_id=portfolio_id)
+
+    @staticmethod
+    def is_auction_time(tm: datetime.datetime) -> bool:
+        """是否处于集合竞价窗口（14:57-15:00）。"""
+        return datetime.time(14, 57) <= tm.time() <= datetime.time(15, 0)
+
+    def _auction_bid_price(self, bars: pl.DataFrame, side: OrderSide) -> float:
+        """集合竞价限价：竞价价（日线用收盘价近似）×(1±eps)。"""
+        row = bars.row(0, named=True)
+        base = float(row.get("close", 0.0) or 0.0)
+        if base <= 0:
+            return 0.0
+        direction = 1.0 if side == OrderSide.BUY else -1.0
+        return round(base * (1.0 + self._auction_epsilon * direction), 4)
 
     def _log(
         self,
@@ -581,11 +598,18 @@ class BacktestBroker(AbstractBroker):
         import json
         extra_json = json.dumps(extra) if extra else ""
 
+        # 集合竞价：市价买以「竞价价×(1+eps)」为限价，成交价仍为竞价价。
+        bid_price = price
+        if bid_price == 0 and self.is_auction_time(order_time):
+            bid_price = self._auction_bid_price(bars, OrderSide.BUY) or up_limit
+        if bid_price == 0:
+            bid_price = up_limit
+
         # 4. 创建 Order 记录（忠实记录用户请求的份额）
         order = Order(
             portfolio_id=self._portfolio_id,
             asset=asset,
-            price= price or up_limit,
+            price=bid_price,
             shares=shares,
             side=OrderSide.BUY,
             bid_type=BidType.MARKET if price == 0 else BidType.FIXED,
@@ -933,6 +957,18 @@ class BacktestBroker(AbstractBroker):
         # 获取预估价格
         if price > 0:
             est_price = price
+        elif self.is_auction_time(order_time):
+            bars = self._data_feed.get_price_for_match(asset, order_time)
+            est_price = (
+                self._auction_bid_price(bars, OrderSide.BUY)
+                if bars is not None and not bars.is_empty()
+                else 0.0
+            )
+            if est_price <= 0:
+                _, up_limit = self._data_feed.get_trade_price_limits(
+                    asset, self.as_date(order_time)
+                )
+                est_price = up_limit
         else:
             _, up_limit = self._data_feed.get_trade_price_limits(
                 asset, self.as_date(order_time)
@@ -981,7 +1017,11 @@ class BacktestBroker(AbstractBroker):
         # 2. 确定基准价格
         row = bars.row(0, named=True)
         down_limit = row.get("down_limit", 0.0)
-        ask_price = price or down_limit
+        ask_price = price
+        if ask_price == 0 and self.is_auction_time(order_time):
+            ask_price = self._auction_bid_price(bars, OrderSide.SELL) or down_limit
+        if ask_price == 0:
+            ask_price = down_limit
 
         if ask_price == 0:
             self._log(

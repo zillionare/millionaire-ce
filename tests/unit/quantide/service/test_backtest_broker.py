@@ -1243,3 +1243,58 @@ def test_stop_backtest_completes_when_liquidation_has_no_market_data(calendar):
     asset_rec = db.get_asset(portfolio_id="test_bt_empty_stop", dt=datetime.date(2024, 1, 10))
     assert asset_rec is not None
     assert asset_rec.market_value == pytest.approx(10000.0)
+
+
+def test_auction_buy_uses_close_with_epsilon_limit(broker, data_feed):
+    """集合竞价市价买：限价=收盘×(1+eps)，成交价=收盘。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 14, 57)
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "close": [10.5], "up_limit": [11.0], "down_limit": [9.0]
+    })
+
+    res = asyncio.run(broker.buy("000001.SZ", 100, 0, dt))
+    assert len(res.trades) == 1
+    assert res.trades[0].price == 10.5
+    order = db.orders_all(portfolio_id="test_bt").row(-1, named=True)
+    assert order["price"] == pytest.approx(10.5 * 1.001)
+
+
+def test_buy_amount_at_auction_sizes_with_auction_price(broker, data_feed):
+    """集合竞价 buy_amount 用收盘×(1+eps) 估算股数，而非涨停价。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 14, 58)
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "close": [10.0], "up_limit": [11.0], "down_limit": [9.0]
+    })
+
+    res = asyncio.run(broker.buy_amount("000001.SZ", 100_000, 0, dt))
+    assert res.trades[0].shares >= 9900
+
+
+def test_non_auction_market_buy_still_fills_at_open(broker, data_feed):
+    """非竞价窗口保持原有撮合语义。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "close": [10.5], "up_limit": [11.0], "down_limit": [9.0]
+    })
+    res = asyncio.run(broker.buy("000001.SZ", 100, 0, dt))
+    assert res.trades[0].price == 10.0
+
+
+def test_sell_at_auction_uses_close(broker, data_feed):
+    """集合竞价卖出以收盘价成交，限价为收盘×(1-eps)。"""
+    dt_open = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    dt_auction = make_dt(datetime.date(2024, 1, 3), 14, 57)
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "close": [10.5], "up_limit": [11.0], "down_limit": [9.0]
+    })
+    asyncio.run(broker.buy("000001.SZ", 100, 0, dt_open))
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 3)],
+        "open": [10.6], "close": [10.8], "up_limit": [11.5], "down_limit": [9.5]
+    })
+    res = asyncio.run(broker.sell("000001.SZ", 100, 0, dt_auction))
+    assert res.trades[0].price == 10.8

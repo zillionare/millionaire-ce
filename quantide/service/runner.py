@@ -53,6 +53,35 @@ class BacktestRunner:
         h, m = map(int, time_str.split(":"))
         return (h, m)
 
+    @classmethod
+    def _resolve_fill_timing(
+        cls,
+        strategy_cls: type[BaseStrategy],
+        config: dict[str, Any],
+    ) -> tuple[str, bool, tuple[int, int]]:
+        """解析成交时点。
+
+        支持：
+        - ``next_open``（默认）：次日开盘成交；
+        - ``auction_close``：14:57 用当日数据算信号，按收盘/竞价价成交；
+        - ``close``：收盘价成交（沿用 cheat_on_close_time）。
+        """
+        raw = config.get("fill_timing", getattr(strategy_cls, "fill_timing", None))
+        fill_timing = str(raw).strip().lower() if raw is not None else ""
+        if fill_timing in {"auction_close", "auction"}:
+            return "auction_close", True, (14, 57)
+        if fill_timing in {"close", "cheat_on_close"}:
+            return "close", True, cls._resolve_cheat_on_close_time(True)
+        if fill_timing in {"next_open", "open"}:
+            return "next_open", False, (9, 30)
+        # 未显式指定时保持旧行为：尊重 cheat_on_close 配置。
+        cheat = cls._resolve_cheat_on_close(strategy_cls, config)
+        return (
+            ("close", True, cls._resolve_cheat_on_close_time(True))
+            if cheat
+            else ("next_open", False, (9, 30))
+        )
+
     def _align_backtest_dates(
         self,
         start_date: datetime.date,
@@ -182,6 +211,7 @@ class BacktestRunner:
             desc=json.dumps({"config": dict(config or {})}, ensure_ascii=False),
             save_logs=save_logs,
             risk_overlay=risk_overlay,
+            auction_epsilon=float(config.get("auction_epsilon", 0.001)),
         )
 
         # Use patched logger
@@ -242,6 +272,42 @@ class BacktestRunner:
 
             return current_date
         return last_trade_day
+
+    @staticmethod
+    def _benchmark_returns(
+        benchmark: Any,
+        start_date: datetime.date,
+        end_date: datetime.date,
+    ):
+        """读取指数日线并计算基准日收益率；不可用时返回 None。"""
+        code = str(benchmark).strip() if benchmark else ""
+        if not code:
+            return None
+        try:
+            import polars as pl
+
+            from quantide.data import get_index_bars_store
+
+            store = get_index_bars_store()
+            frame = store.get([code], start_date, end_date)
+            if not isinstance(frame, pl.DataFrame) or frame.is_empty():
+                return None
+            frame = frame.sort("date")
+            dates = frame["date"].to_list()
+            if not dates or dates[0] > start_date or dates[-1] < end_date:
+                return None
+            returns = (
+                frame.select(
+                    pl.col("date").alias("dt"),
+                    (pl.col("close") / pl.col("close").shift(1) - 1).alias(
+                        "returns"
+                    ),
+                )
+                .drop_nulls()
+            )
+            return returns
+        except Exception:  # pragma: no cover - 缺数据时静默跳过基准
+            return None
 
     def _resolve_day_signal_date(
         self,
@@ -362,8 +428,10 @@ class BacktestRunner:
         last_trade_day = None
 
         try:
-            cheat = self._resolve_cheat_on_close(strategy_cls, config)
-            cheat_tm = self._resolve_cheat_on_close_time(cheat)
+            fill_timing, cheat, cheat_tm = self._resolve_fill_timing(
+                strategy_cls, config
+            )
+            self.logger.info(f"回测成交时点: {fill_timing}")
             # SC-04: announce the bar interval on the strategy before the loop
             # so consumers can observe the active frame via ``strategy.interval``.
             strategy.interval = frame_type.value
@@ -444,8 +512,16 @@ class BacktestRunner:
             save_to_file=save_logs,
         )
 
-        # 4. Metrics
-        stats = metrics(portfolio_id, start=start_date, end=end_date)
+        # 4. Metrics（可选指数基准 → 超额收益/Beta/Alpha）
+        baseline = self._benchmark_returns(
+            config.get("benchmark", "000300.SH"), start_date, end_date
+        )
+        stats = metrics(
+            portfolio_id,
+            baseline_returns=baseline,
+            start=start_date,
+            end=end_date,
+        )
 
         return {
             "portfolio_id": portfolio_id,

@@ -109,3 +109,35 @@ def test_fr_050_060_070_modes_are_string_enum():
     for mode in OrderExecutionMode:
         assert isinstance(mode.value, str)
         assert isinstance(mode, str)
+
+def test_fill_timing_auction_close_resolves_to_1457():
+    """fill_timing=auction_close → 14:57 决策/成交."""
+    runner = BacktestRunner()
+    timing, cheat, tm = runner._resolve_fill_timing(
+        _DummyBase, {"fill_timing": "auction_close"}
+    )
+    assert timing == "auction_close"
+    assert cheat is True
+    assert tm == (14, 57)
+
+
+def test_fill_timing_next_open_resolves_to_0930():
+    """fill_timing=next_open → 9:30，不启用收盘作弊."""
+    runner = BacktestRunner()
+    timing, cheat, tm = runner._resolve_fill_timing(
+        _DummyBase, {"fill_timing": "next_open", "cheat_on_close": True}
+    )
+    assert timing == "next_open"
+    assert cheat is False
+    assert tm == (9, 30)
+
+
+def test_fill_timing_defaults_to_legacy_cheat_on_close():
+    """未指定 fill_timing 时沿用 cheat_on_close 配置."""
+    runner = BacktestRunner()
+    timing, cheat, tm = runner._resolve_fill_timing(
+        _DummyBase, {"cheat_on_close": True}
+    )
+    assert timing == "close"
+    assert cheat is True
+    assert tm == runner._resolve_cheat_on_close_time(True)

@@ -554,6 +554,60 @@ def _stable_universe_rank(asset: str, mode: str) -> str:
     return digest
 
 
+_INDEX_POOL_CACHE: dict[tuple[tuple[str, ...], datetime.date], set[str]] = {}
+
+
+def _index_pit_universe(
+    target_date: datetime.date,
+    codes: list[str] | None,
+) -> set[str]:
+    """读取指数成分 PIT 快照（按代码+日期缓存）。"""
+    codes = [str(c).strip() for c in (codes or []) if str(c).strip()]
+    if not codes:
+        codes = ["000300.SH", "000905.SH", "000852.SH"]
+    key = (tuple(codes), target_date)
+    cached = _INDEX_POOL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    pool: set[str] = set()
+    try:
+        from quantide.data import get_index_weight_store
+
+        store = get_index_weight_store()
+        for code in codes:
+            try:
+                frame = store.constituents(code, target_date, include_weight=False)
+            except Exception:
+                continue
+            if frame is not None and not frame.is_empty() and "con_code" in frame.columns:
+                pool.update(frame["con_code"].to_list())
+    except Exception:
+        pool = set()
+    if len(_INDEX_POOL_CACHE) >= 256:
+        _INDEX_POOL_CACHE.clear()
+    _INDEX_POOL_CACHE[key] = pool
+    return pool
+
+
+def _cap_universe(
+    cap: pl.DataFrame,
+    universe_size: int,
+    holdings: list[str] | None,
+    mode: str,
+) -> list[str]:
+    """按稳定哈希把可选池精确裁剪到 universe_size（持仓优先保留）。"""
+    assets = sorted(cap["asset"].unique().to_list())
+    if universe_size > 0 and len(assets) > universe_size:
+        held = [a for a in (holdings or []) if a in set(assets)]
+        ranked = sorted(
+            [a for a in assets if a not in set(held)],
+            key=lambda asset: _stable_universe_rank(asset, mode),
+        )
+        picked = held + ranked[: max(0, universe_size - len(held))]
+        cap = cap.filter(pl.col("asset").is_in(picked))
+    return sorted(cap["asset"].unique().to_list())
+
+
 def _filter_universe(
     bars_df: pl.DataFrame,
     target_date: datetime.date,
@@ -561,6 +615,7 @@ def _filter_universe(
     mode: str = "market_cap_trim",
     trim_pct: float = 0.05,
     holdings: list[str] | None = None,
+    index_codes: list[str] | None = None,
 ) -> list[str]:
     """Select the tradable universe on ``target_date``.
 
@@ -572,6 +627,9 @@ def _filter_universe(
     by a per-asset stable hash (exact size, no rotation with the rebalance
     date, uncorrelated with market cap; ``universe_size <= 0`` means no cap).
     ``liquidity`` keeps the legacy top-N by 20-day mean amount.
+    ``index_pit`` restricts the pool to index constituents as of
+    ``target_date`` (point-in-time, no look-ahead); it falls back to
+    ``market_cap_trim`` when the constituent store has no coverage.
     """
     on_date = bars_df.filter(pl.col("date") == target_date)
     if on_date.is_empty():
@@ -597,6 +655,22 @@ def _filter_universe(
             pass
         return frame
 
+    if mode == "index_pit":
+        pool = _index_pit_universe(target_date, index_codes)
+        if pool:
+            cap = on_date.filter(pl.col("asset").is_in(pool))
+            cap = cap.filter(pl.col("volume") > 0)
+            if "is_st" in cols:
+                cap = cap.filter(~pl.col("is_st").fill_null(False))
+            cap = _drop_st_names(cap)
+            if cap.is_empty():
+                return []
+            return _cap_universe(
+                cap, universe_size, holdings, mode
+            )
+        # 成分数据缺失时退回市值裁剪，避免策略失效。
+        mode = "market_cap_trim"
+
     if mode == "market_cap_trim" and "total_mv" in cols:
         cap = on_date.filter(
             (pl.col("close") > 0)
@@ -619,16 +693,7 @@ def _filter_universe(
             # - 持仓一定在池内 → 不会被「未入池」强卖，可按排名正常卖出；
             # - 非持仓成员的顺序与调仓日无关 → 不会整池轮换；
             # - 与市值大小无关，避免市值偏置。
-            assets = sorted(cap["asset"].unique().to_list())
-            if universe_size > 0 and len(assets) > universe_size:
-                held = [a for a in (holdings or []) if a in set(assets)]
-                ranked = sorted(
-                    [a for a in assets if a not in set(held)],
-                    key=lambda asset: _stable_universe_rank(asset, mode),
-                )
-                picked = held + ranked[: max(0, universe_size - len(held))]
-                cap = cap.filter(pl.col("asset").is_in(picked))
-            return sorted(cap["asset"].unique().to_list())
+            return _cap_universe(cap, universe_size, holdings, mode)
 
     cond = (pl.col("close") > 0) & (pl.col("volume") > 0)
     if "is_st" in cols:
@@ -695,6 +760,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
         "use_lightgbm": True,
         "use_broker_barriers": True,
         "use_alpha_exit": True,
+        "fill_timing": "auction_close",
+        "auction_epsilon": 0.001,
+        "index_pool_codes": ["000300.SH", "000905.SH", "000852.SH"],
     }
     params = PARAMS
 
@@ -714,6 +782,10 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self.universe_mode = str(
             self.config.get("universe_mode", "market_cap_trim")
         ).strip()
+        self.index_pool_codes = list(
+            self.config.get("index_pool_codes")
+            or ["000300.SH", "000905.SH", "000852.SH"]
+        )
         self.market_cap_trim_pct = min(
             0.5,
             max(0.0, float(self.config.get("market_cap_trim_pct", 0.05))),
@@ -846,6 +918,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 universe_size,
                 mode=universe_mode,
                 trim_pct=market_cap_trim_pct,
+                index_codes=cfg.get("index_pool_codes"),
             )
         if not candidates:
             return []
@@ -948,6 +1021,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             _coerce_date(bt_end),
             self.universe_size,
             self.universe_mode,
+            tuple(self.index_pool_codes),
             round(self.market_cap_trim_pct, 6),
             tuple(self.selected_features or FEATURE_COLS),
             tuple(self._held_assets(signal_date)),
@@ -1014,6 +1088,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 mode=self.universe_mode,
                 trim_pct=self.market_cap_trim_pct,
                 holdings=self._held_assets(latest_init_dt),
+                index_codes=self.index_pool_codes,
             )
             self.log(
                 f"Universe selected on {latest_init_dt}: "
