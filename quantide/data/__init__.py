@@ -3,15 +3,18 @@ from pathlib import Path
 from quantide.config.paths import get_app_db_path
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
+from quantide.data.models.minute_bars import minute_bars
 from quantide.data.models.stocks import stock_list
 from quantide.data.sqlite import db
 from quantide.data.stores.index_bars import IndexBarsStore
 from quantide.data.stores.index_weight import IndexWeightStore
 from quantide.data.stores.limit_price import LimitPriceStore
+from quantide.data.stores.minute_bars import MinuteBarsStore
 
 _index_bars_store: IndexBarsStore | None = None
 _index_weight_store: IndexWeightStore | None = None
 _limit_price_store: LimitPriceStore | None = None
+_minute_bars_store: MinuteBarsStore | None = None
 
 
 def get_index_bars_store() -> IndexBarsStore:
@@ -35,6 +38,13 @@ def get_limit_price_store() -> LimitPriceStore:
     return _limit_price_store
 
 
+def get_minute_bars_store() -> MinuteBarsStore:
+    """返回 MinuteBarsStore 单例（日线级别分钟行情，不含复权因子与涨跌停，读取时关联）。"""
+    if _minute_bars_store is None:
+        raise RuntimeError("MinuteBarsStore 未初始化，请先调用 init_data()")
+    return _minute_bars_store
+
+
 def init_data(
     home: str | Path,
     init_db: bool = True,
@@ -50,7 +60,7 @@ def init_data(
     Returns:
         None
     """
-    global _index_bars_store, _index_weight_store, _limit_price_store
+    global _index_bars_store, _index_weight_store, _limit_price_store, _minute_bars_store
 
     home_dir = Path(home).expanduser()
     home_dir.mkdir(parents=True, exist_ok=True)
@@ -60,11 +70,13 @@ def init_data(
     index_bars_path = home_dir / "data/bars/index"
     index_weight_path = home_dir / "data/index_weight"
     limit_price_path = home_dir / "data/limit_price"
+    minute_bars_path = home_dir / "data/bars/minute30"
 
     daily_bars_path.mkdir(parents=True, exist_ok=True)
     index_bars_path.mkdir(parents=True, exist_ok=True)
     index_weight_path.mkdir(parents=True, exist_ok=True)
     limit_price_path.mkdir(parents=True, exist_ok=True)
+    minute_bars_path.mkdir(parents=True, exist_ok=True)
 
     calendar.load(calendar_path)
     stock_list.load(stocklist_path)
@@ -73,6 +85,8 @@ def init_data(
     _index_bars_store = IndexBarsStore(str(index_bars_path), calendar)
     _index_weight_store = IndexWeightStore(str(index_weight_path), calendar)
     _limit_price_store = LimitPriceStore(str(limit_price_path), calendar)
+    _minute_bars_store = MinuteBarsStore(str(minute_bars_path), calendar)
+    minute_bars.connect(_minute_bars_store)
 
     if init_db:
         target_db_path = Path(db_path).expanduser() if db_path is not None else get_app_db_path()

@@ -361,9 +361,9 @@ def test_sell_amount_raises_when_est_price_zero(broker, data_feed):
 
 
 def test_get_history_raises_for_non_1d_frame(broker):
-    """Lines 1090-1095: frame_type != '1d' -> NotImplementedError."""
+    """不支持的周期（如周线）-> NotImplementedError。"""
     with pytest.raises(NotImplementedError):
-        broker.get_history("000001.SZ", 5, frame_type="1min")
+        broker.get_history("000001.SZ", 5, frame_type="1w")
 
 
 def test_get_history_shifts_end_date_before_open(broker, data_feed):

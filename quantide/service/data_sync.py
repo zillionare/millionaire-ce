@@ -42,7 +42,7 @@ class SyncParams:
     start_date: datetime.date
     end_date: datetime.date
     index_codes: list[str] = field(default_factory=list)
-    include_minute: bool = False
+    include_minute: bool = True
     minute_frequency: str = "30"
     minute_assets: list[str] = field(default_factory=list)
 
@@ -280,6 +280,8 @@ class DataSyncService:
             self._sync_index_bars(params)
         elif stage == "index_weight":
             self._sync_index_weight(params)
+        elif stage == "minute_bars":
+            self._sync_minute_bars(params)
         else:  # pragma: no cover - 未知阶段
             raise ValueError(f"未知同步阶段: {stage}")
 
@@ -365,6 +367,99 @@ class DataSyncService:
         store = get_index_bars_store()
         store.append_data(_to_index_bars_frame(frame))
 
+    def _sync_minute_bars(self, params: SyncParams) -> None:
+        """同步 30 分钟线：BaoStock 回补历史，腾讯补最近几天。"""
+        from quantide.data import get_minute_bars_store
+        from quantide.data.fetchers.baostock_minute import BaostockMinuteFetcher
+        from quantide.data.fetchers.multi import (
+            BaostockMinuteAdapter,
+            MultiSourceDataFetcher,
+        )
+        from quantide.data.models.stocks import stock_list
+
+        if not params.include_minute and not params.minute_assets:
+            return
+        assets = [str(a) for a in (params.minute_assets or []) if str(a).strip()]
+        if not assets and stock_list.size > 0:
+            assets = [str(a) for a in stock_list.data["asset"].to_list()]
+        if not assets:
+            logger.warning("30 分钟同步没有可用的标的（股票列表为空）")
+            return
+        period = str(params.minute_frequency or "30")
+        if period not in {"1", "5", "15", "30", "60"}:
+            period = "30"
+        store = get_minute_bars_store()
+        total = len(assets)
+
+        # 1) 历史回补：仅在本地覆盖不足时执行（BaoStock 单连接、按日预算）。
+        need_history = store.end is None or store.end < params.end_date
+        if need_history:
+            baostock = BaostockMinuteFetcher()
+            adapter = BaostockMinuteAdapter(baostock)
+            try:
+                for index, asset in enumerate(assets, start=1):
+                    if self._cancel.is_set():
+                        return
+                    try:
+                        frame, _errors = adapter.fetch_minute_bars(
+                            asset,
+                            params.start_date,
+                            params.end_date,
+                            period=period,
+                            count=100000,
+                        )
+                    except Exception as exc:
+                        logger.warning("BaoStock 30 分钟回补失败 {}: {}", asset, exc)
+                        continue
+                    if frame is not None and not frame.empty:
+                        store.append_data(_to_minute_bars_frame(frame))
+                    if index % 50 == 0 or index == total:
+                        percent = 50 + int(index * 40 / total)
+                        _publish(
+                            {
+                                "task_id": "",
+                                "stage": "minute_bars",
+                                "progress": percent,
+                                "message": f"30 分钟历史回补 {index}/{total}",
+                            }
+                        )
+                        logger.info(
+                            "30 分钟历史回补进度 {}/{}（{}）", index, total, asset
+                        )
+            finally:
+                baostock.close()
+
+        # 2) 增量：腾讯 K 线补最近 3 天（含当日已收盘部分）。
+        recent_start = max(
+            params.start_date, params.end_date - datetime.timedelta(days=3)
+        )
+        multi = MultiSourceDataFetcher(stages={"minute_bars": ["tencent"]})
+        for index, asset in enumerate(assets, start=1):
+            if self._cancel.is_set():
+                return
+            try:
+                frame, _errors = multi.fetch_minute_bars(
+                    asset,
+                    recent_start,
+                    params.end_date,
+                    period=period,
+                    count=64,
+                )
+            except Exception:
+                continue
+            if frame is not None and not frame.empty:
+                store.append_data(_to_minute_bars_frame(frame))
+            if index % 100 == 0 or index == total:
+                percent = 90 + int(index * 10 / total)
+                _publish(
+                    {
+                        "task_id": "",
+                        "stage": "minute_bars",
+                        "progress": min(percent, 100),
+                        "message": f"30 分钟增量更新 {index}/{total}",
+                    }
+                )
+
     def _sync_index_weight(self, params: SyncParams) -> None:
         """同步指数成分（逐期抓取，绕过 7000 行上限）。"""
         if not params.index_codes:
@@ -381,6 +476,20 @@ class DataSyncService:
         if frame is None or len(frame) == 0:
             return
         store.append_data(frame)
+
+
+def _to_minute_bars_frame(frame: Any) -> Any:
+    """把分钟线转成存储字段（date 保留时分，单位：手/千元）。"""
+    import polars as pl
+
+    out = frame if isinstance(frame, pl.DataFrame) else pl.from_pandas(frame)
+    if "date" in out.columns:
+        out = out.with_columns(pl.col("date").cast(pl.Datetime("ms")))
+    cols = ["date", "asset", "open", "high", "low", "close", "volume", "amount"]
+    for col in cols:
+        if col not in out.columns:
+            out = out.with_columns(pl.lit(None).alias(col))
+    return out.select(cols)
 
 
 def _to_index_bars_frame(frame: Any) -> Any:

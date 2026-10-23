@@ -87,10 +87,21 @@ class BaostockMinuteAdapter:
             )
         else:
             frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
-        frame = frame.dropna(subset=["date"]).sort_values("date").tail(int(count))
+        frame = frame.dropna(subset=["date"]).sort_values("date")
+        # BaoStock 的时间是 bar 收盘时刻（如 30 分钟线 10:00 表示 09:30-10:00），
+        # 统一改为 bar 起点，避免与腾讯（起点口径）重复。
+        frame["date"] = frame["date"] - pd.Timedelta(minutes=int(period))
         for col in ("volume", "amount"):
             if col not in frame.columns:
                 frame[col] = 0.0
+        # 单位统一为 Tushare/腾讯口径：成交量「手」、成交额「千元」。
+        frame["volume"] = (
+            pd.to_numeric(frame["volume"], errors="coerce").fillna(0.0) / 100.0
+        )
+        frame["amount"] = (
+            pd.to_numeric(frame["amount"], errors="coerce").fillna(0.0) / 1000.0
+        )
+        frame = frame.tail(int(count))
         return frame[STANDARD_MINUTE_BAR_COLUMNS].reset_index(drop=True), []
 
 

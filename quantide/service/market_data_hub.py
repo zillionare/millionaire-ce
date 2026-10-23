@@ -44,8 +44,8 @@ snapshot = market_data_hub.snapshot(["600519.SH"])
 --------
 ``price``       最新价（撮合用）
 ``open/high/low`` 当日开/高/低 —— 集合竞价期间 ``price`` 即为竞价价
-``volume``      累计成交量（股）
-``amount``      累计成交额（元）
+``volume``      累计成交量（手，与 Tushare/日线存储一致）
+``amount``      累计成交额（千元，与 Tushare/日线存储一致）
 ``ts``          行情时间戳（ISO 字符串或 datetime）
 ``up_limit``/``down_limit``  可选；涨跌停价缺失时回落到本地日线数据
 """

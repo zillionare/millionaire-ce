@@ -20,6 +20,7 @@ SYNC_STAGES: tuple[str, ...] = (
     "daily_basic",    # 市值/换手
     "index_bars",     # 指数日线
     "index_weight",   # 指数成分（PIT）
+    "minute_bars",    # 30 分钟线（baostock 历史 + 腾讯增量）
 )
 
 #: 任务状态

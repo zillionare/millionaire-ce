@@ -304,10 +304,10 @@ class PaperBroker(AbstractBroker):
             include_forming_bar: 是否合并今日 forming bar（默认 True）。
                 end_dt 早于今日时此参数无效。
         """
-        if frame_type != "1d":
-            raise NotImplementedError("PaperBroker currently only supports 1d history")
-        # 委托给 LiveBarView：已完成日线来自存储，今日 forming bar 来自行情订阅中心。
-        return self._bar_view.get_history(asset, count, end_dt, frame_type, include_forming_bar)
+        # 委托给 LiveBarView：已完成日线/分钟线来自存储，forming bar 来自行情订阅中心。
+        return self._bar_view.get_history(
+            asset, count, end_dt, frame_type, include_forming_bar
+        )
 
     def _previous_trade_date(self, today: datetime.date) -> datetime.date:
         """返回 today 的前一个交易日（基于 calendar 优先，fallback 自然日 -1）。"""

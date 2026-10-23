@@ -583,3 +583,36 @@ A 股收盘集合竞价：**14:57-15:00**（3 分钟）→ 15:00 以集合竞价
    30 分钟存储；
 3. 盘中：实时快照合成 forming 30 分钟与 forming 日线，只在内存中使用，
    不写入历史存储。
+
+### 13.5 30 分钟线的存储与读取口径
+
+- **存储** `quantide/data/stores/minute_bars.py`：只存原始
+  `date, asset, open, high, low, close, volume, amount`；
+  - `date` 统一为 **bar 起点**（09:30 表示 09:30-10:00）；
+  - 成交量单位 **手**、成交额单位 **千元**（与 Tushare 日线一致）；
+  - 按年分区，主键 `(date, asset)`，重复写入保留最新。
+- **写入口径统一**：
+  - BaoStock 返回的时间是 bar **收盘时刻** → 写入前减去周期（30 分钟线 10:00 → 09:30）；
+  - BaoStock 成交量单位是**股**、成交额是**元** → 转换为手/千元；
+  - 腾讯 K 线本身就是起点口径，成交量手、成交额按 `量×价` 估算为千元。
+- **读取** `quantide/data/models/minute_bars.py`：
+  - 关联当日 `daily_bars` 的 `adjust / is_st / up_limit / down_limit`；
+  - `qfq` 时按同一比例调整 OHLC、**以及涨跌停价**（保证限价与复权后的 close 可比），
+    成交量反向调整；`hfq` 同理；
+  - 日线辅助字段缺失时按未复权 + 无涨跌停处理并告警。
+- **Broker 入口**：`get_history(..., frame_type="30m")`（也接受 `30`/`m30`），
+  回测走 `HistBarView`（仅完成 bar），实盘走 `LiveBarView`（完成 bar + 当前桶）。
+
+### 13.6 盘中 forming 30 分钟桶
+
+`LiveBarView.get_minute_history(include_forming_bar=True)` 在
+`end_dt` 为今日且晚于 09:30 时，把当前桶追加到分钟线末尾：
+
+- 桶起点按交易时段取整（09:30 起、跳过 11:30-13:00 午休）；
+- `close` = 实时快照价（集合竞价期间即竞价价）；
+- `open` = 上一根完成 bar 的 close（当日第一桶用当日开盘价）；
+- `high/low` = open 与现价的较大/较小值；
+- `volume/amount` = 当日累计值 − 今日已完成桶的合计（近似当前桶增量）；
+- `adjust/is_st/up_limit/down_limit` 继承上一根完成 bar。
+
+该 forming 行只存在于内存返回值，不写入分钟线存储。

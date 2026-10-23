@@ -212,6 +212,43 @@ class DataFetcherPort(Protocol):
         ...
 
     # ------------------------------------------------------------------
+    # 分钟线 / 实时行情（P0 实盘/回测用）
+    # ------------------------------------------------------------------
+    def fetch_minute_bars(
+        self,
+        asset: str,
+        start_date: datetime.date | None = None,
+        end_date: datetime.date | None = None,
+        period: str = "30",
+        count: int = 320,
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        """获取分钟线行情。
+
+        Args:
+            asset: 证券代码
+            start_date: 起始日
+            end_date: 结束日
+            period: 周期，"30" 表示 30 分钟
+            count: 最多返回多少根
+
+        Returns:
+            列等于 :data:`STANDARD_MINUTE_BAR_COLUMNS`；无数据返回空 DataFrame。
+        """
+        ...
+
+    def fetch_quote_snapshot(
+        self,
+        symbols: Iterable[str] | str,
+    ) -> dict[str, dict]:
+        """获取实时行情快照。
+
+        Returns:
+            {symbol: {"price", "open", "high", "low", "volume", "amount",
+            "up_limit", "down_limit", "ts"}}。缺失字段为 None。
+        """
+        ...
+
+    # ------------------------------------------------------------------
     # 分钟线 / 实时快照（分钟线仅用于模拟盘与 30 分钟策略，可不落盘）
     # ------------------------------------------------------------------
     def fetch_minute_bars(

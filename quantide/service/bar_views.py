@@ -70,6 +70,61 @@ class HistBarView:
             n=count, end=end_date, assets=[asset], adjust=None
         )
 
+    @staticmethod
+    def _minute_period(frame_type: str) -> str | None:
+        """把 frame_type 映射为分钟周期；非分钟返回 None。"""
+        text = str(frame_type or "").strip().lower()
+        if text in {"30m", "30", "m30", "30min"}:
+            return "30"
+        if text in {"60m", "60", "m60", "60min", "1h"}:
+            return "60"
+        if text in {"15m", "15", "m15", "15min"}:
+            return "15"
+        if text in {"5m", "5", "m5", "5min"}:
+            return "5"
+        if text in {"1m", "1", "m1", "1min"}:
+            return "1"
+        return None
+
+    @staticmethod
+    def _bucket_start(tm: datetime.datetime, period_minutes: int = 30) -> datetime.datetime:
+        """返回 A 股交易时段内分钟 bar 的起点（向下取整）。"""
+        session_start = datetime.time(9, 30)
+        if tm.time() < session_start:
+            return datetime.datetime.combine(tm.date(), session_start)
+        elapsed = (
+            datetime.datetime.combine(tm.date(), tm.time())
+            - datetime.datetime.combine(tm.date(), session_start)
+        ).total_seconds() / 60.0
+        period = max(1, int(period_minutes))
+        if elapsed <= 120:
+            index = int(max(0.0, elapsed) // period)
+            return datetime.datetime.combine(
+                tm.date(), session_start
+            ) + datetime.timedelta(minutes=index * period)
+        # 午休 11:30-13:00（90 分钟）不计入交易分钟
+        afternoon = max(0.0, elapsed - 120 - 90)
+        index = int(afternoon // period)
+        afternoon_start = datetime.datetime.combine(tm.date(), datetime.time(13, 0))
+        return afternoon_start + datetime.timedelta(minutes=index * period)
+
+    def get_minute_history(
+        self,
+        asset: str,
+        count: int,
+        end_dt: datetime.datetime | None = None,
+        period: str = "30",
+        include_forming_bar: bool = False,
+    ) -> pl.DataFrame:
+        """最近 n 根已完成分钟线（已关联复权因子/ST/涨跌停）。"""
+        from quantide.data.models.minute_bars import minute_bars
+
+        end_date = self._resolve_end_date(end_dt)
+        frame = minute_bars.get_bars(
+            count, end=end_date, assets=[asset], adjust="qfq"
+        )
+        return frame
+
     def get_history(
         self,
         asset: str,
@@ -78,9 +133,17 @@ class HistBarView:
         frame_type: str = "1d",
         include_forming_bar: bool = True,
     ) -> pl.DataFrame:
-        """最近 n 根已完成日线。"""
+        """最近 n 根已完成 bar（日线或分钟线）。"""
+        period = self._minute_period(frame_type)
+        if period is not None:
+            return self.get_minute_history(
+                asset, count, end_dt, period=period,
+                include_forming_bar=False,
+            )
         if frame_type != "1d":
-            raise NotImplementedError("BarView currently only supports 1d history")
+            raise NotImplementedError(
+                f"BarView 不支持的历史周期: {frame_type}"
+            )
         end_date = self._resolve_end_date(end_dt)
         return self._fetch_completed(asset, count, end_date, frame_type)
 
@@ -230,6 +293,104 @@ class LiveBarView(HistBarView):
         completed = merged.unique(subset=["date", "asset"], keep="last").sort(["date", "asset"])
         return completed
 
+    def _inject_forming_minute(
+        self,
+        completed: pl.DataFrame,
+        end_dt: datetime.datetime,
+        asset: str,
+        period: str,
+    ) -> pl.DataFrame:
+        """把当前 30 分钟桶的 forming bar 合进已完成分钟线。
+
+        成交量/成交额为「当日累计值减去今日已完成桶的合计」，近似当前桶增量；
+        open 用上一根完成 bar 的 close（当日第一桶用当日开盘价），
+        high/low 取 open 与现价的最大/最小。
+        """
+        snapshot = self._snapshot_for(asset)
+        if snapshot is None:
+            return completed
+        bucket = self._bucket_start(end_dt, int(period))
+        if completed is None or completed.is_empty():
+            return completed
+        today = bucket.date()
+        today_rows = completed.filter(pl.col("date").dt.date() == today)
+        latest_adj = 1.0
+        is_st = False
+        up_limit = 0.0
+        down_limit = 0.0
+        last_close = None
+        raw_volume_sum = 0.0
+        amount_sum = 0.0
+        if not today_rows.is_empty():
+            last = today_rows.sort("date").tail(1).row(0, named=True)
+            latest_adj = float(last.get("adjust") or 1.0)
+            is_st = bool(last.get("is_st") or False)
+            up_limit = float(last.get("up_limit") or 0.0)
+            down_limit = float(last.get("down_limit") or 0.0)
+            last_close = float(last.get("close") or 0.0)
+            latest_factor = pl.col("adjust").last()
+            raw = today_rows.with_columns(
+                (pl.col("volume") * pl.col("adjust") / latest_factor).alias(
+                    "_raw_volume"
+                ),
+                pl.col("amount").alias("_amount"),
+            )
+            raw_volume_sum = float(raw["_raw_volume"].sum() or 0.0)
+            amount_sum = float(raw["_amount"].sum() or 0.0)
+        price = float(snapshot.get("close") or snapshot.get("price") or 0.0)
+        if price <= 0:
+            return completed
+        open_price = last_close if last_close and last_close > 0 else price
+        bucket_volume = max(
+            0.0, float(snapshot.get("volume") or 0.0) - raw_volume_sum
+        )
+        bucket_amount = max(
+            0.0, float(snapshot.get("amount") or 0.0) - amount_sum
+        )
+        forming = pl.DataFrame(
+            [
+                {
+                    "date": bucket,
+                    "asset": asset,
+                    "open": open_price,
+                    "high": max(open_price, price),
+                    "low": min(open_price, price),
+                    "close": price,
+                    "volume": bucket_volume,
+                    "amount": bucket_amount,
+                    "adjust": latest_adj,
+                    "is_st": is_st,
+                    "up_limit": up_limit,
+                    "down_limit": down_limit,
+                }
+            ]
+        ).with_columns(pl.col("date").cast(pl.Datetime("ms")))
+        merged = pl.concat([completed, forming], how="vertical_relaxed")
+        merged = merged.unique(subset=["date", "asset"], keep="last")
+        return merged.sort(["date", "asset"])
+
+    def get_minute_history(
+        self,
+        asset: str,
+        count: int,
+        end_dt: datetime.datetime | None = None,
+        period: str = "30",
+        include_forming_bar: bool = True,
+    ) -> pl.DataFrame:
+        completed = super().get_minute_history(
+            asset, count, end_dt, period=period, include_forming_bar=False
+        )
+        if (
+            include_forming_bar
+            and end_dt is not None
+            and end_dt.date() == self._today()
+            and end_dt.time() > datetime.time(9, 30)
+        ):
+            completed = self._inject_forming_minute(
+                completed, end_dt, asset, period
+            )
+        return completed
+
     def get_history(
         self,
         asset: str,
@@ -238,8 +399,16 @@ class LiveBarView(HistBarView):
         frame_type: str = "1d",
         include_forming_bar: bool = True,
     ) -> pl.DataFrame:
+        period = self._minute_period(frame_type)
+        if period is not None:
+            return self.get_minute_history(
+                asset, count, end_dt, period=period,
+                include_forming_bar=include_forming_bar,
+            )
         if frame_type != "1d":
-            raise NotImplementedError("LiveBarView currently only supports 1d history")
+            raise NotImplementedError(
+                f"LiveBarView 不支持的历史周期: {frame_type}"
+            )
         end_date = self._resolve_end_date(end_dt)
         if not include_forming_bar and end_date == self._today():
             end_date = self._prev_trade_date(end_date)

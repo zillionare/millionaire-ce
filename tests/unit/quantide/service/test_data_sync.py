@@ -70,12 +70,12 @@ def test_run_records_stages_and_completion(db):
 
     with patch.object(DataSyncService, "_run_stage") as mock_stage:
         assert service.run(task.task_id) is True
-    assert mock_stage.call_count == 6  # 六个阶段各一次
+    assert mock_stage.call_count == 7  # 七个阶段各一次
 
     done = service.get_task(task.task_id)
     assert done.status == "done"
     assert done.progress == 100
-    assert len(done.stage_list()) == 6
+    assert len(done.stage_list()) == 7
 
 
 def test_run_marks_failed_on_stage_error(db):
@@ -107,7 +107,7 @@ def test_run_resumes_skipping_completed_stages(db):
 
     with patch.object(DataSyncService, "_run_stage") as mock_stage:
         assert service.run(task.task_id) is True
-    assert mock_stage.call_count == 4
+    assert mock_stage.call_count == 5
 
 
 def test_run_is_exclusive(db):
