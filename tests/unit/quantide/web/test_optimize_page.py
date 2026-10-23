@@ -21,7 +21,13 @@ def _make_req(query: dict | None = None) -> MagicMock:
 def _fake_strategy() -> type:
     """构造带 PARAMS 的策略替身。"""
     class _FakeStrategy:
-        PARAMS = {"top_k": 5, "train_window": 45, "horizon": 3}
+        PARAMS = {
+            "top_k": 5,
+            "train_window": 45,
+            "horizon": 3,
+            "use_lightgbm": True,
+            "index_pool_codes": ["000300.SH", "000905.SH"],
+        }
 
     return _FakeStrategy
 
@@ -238,9 +244,43 @@ def test_encode_prefill_round_trip():
 
 
 def test_parse_param_values_converts_types():
-    """取值解析为数值或字符串。"""
+    """取值解析为数值/布尔/字符串。"""
     assert optimize_page_mod._parse_param_values("1, 2.5, x") == [1, 2.5, "x"]
+    assert optimize_page_mod._parse_param_values("True, false") == [True, False]
     assert optimize_page_mod._parse_param_values("") == []
+
+
+def test_build_spec_keeps_list_param_as_base_config():
+    """列表型参数（指数池）不进入网格，保持列表类型。"""
+    form = {
+        "param_top_k": "5",
+        "param_index_pool_codes": "000300.SH, 000905.SH",
+        "start_date": "2024-01-01",
+        "end_date": "2025-12-31",
+    }
+    with patch(
+        "quantide.service.discovery.strategy_loader.load_from_cache",
+        return_value={"demo": _fake_strategy()},
+    ):
+        spec = optimize_page_mod._build_spec("demo", form)
+    assert spec.base_config["index_pool_codes"] == ["000300.SH", "000905.SH"]
+    assert "index_pool_codes" not in spec.param_grid
+
+
+def test_build_spec_parses_bool_param():
+    """布尔参数（use_lightgbm）不应变成字符串。"""
+    form = {
+        "param_top_k": "5",
+        "param_use_lightgbm": "False",
+        "start_date": "2024-01-01",
+        "end_date": "2025-12-31",
+    }
+    with patch(
+        "quantide.service.discovery.strategy_loader.load_from_cache",
+        return_value={"demo": _fake_strategy()},
+    ):
+        spec = optimize_page_mod._build_spec("demo", form)
+    assert spec.base_config["use_lightgbm"] is False
 
 
 @pytest.mark.parametrize(

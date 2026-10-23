@@ -43,20 +43,38 @@ def _encode_prefill(payload: dict[str, Any]) -> str:
 
 
 def _parse_param_values(text: str) -> list[Any]:
-    """解析逗号分隔的参数取值。"""
+    """解析逗号分隔的参数取值（数值/布尔/字符串）。"""
     values: list[Any] = []
     for item in str(text or "").split(","):
         item = item.strip()
         if not item:
             continue
+        lowered = item.lower()
+        if lowered in {"true", "false"}:
+            values.append(lowered == "true")
+            continue
         try:
-            if "." in item or "e" in item.lower():
+            if "." in item or "e" in lowered:
                 values.append(float(item))
             else:
                 values.append(int(item))
         except (TypeError, ValueError):
             values.append(item)
     return values
+
+
+def _parse_string_list(text: str) -> list[str]:
+    """解析列表型参数（支持 ``a,b`` 或 ``['a', 'b']``）。"""
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    raw = raw.strip("[]")
+    items = []
+    for item in raw.split(","):
+        cleaned = item.strip().strip("'\"")
+        if cleaned:
+            items.append(cleaned)
+    return items
 
 
 def _build_spec(
@@ -77,8 +95,17 @@ def _build_spec(
     base_config: dict[str, Any] = {}
     for key in strategy_params:
         raw = form.get(f"param_{key}")
+        default_value = default_params.get(key)
+        if isinstance(default_value, (list, tuple)):
+            # 列表型参数（如指数池）不参与网格搜索，保持为列表。
+            base_config[key] = (
+                list(default_value)
+                if raw is None
+                else _parse_string_list(raw) or list(default_value)
+            )
+            continue
         if raw is None:
-            base_config[key] = default_params.get(key)
+            base_config[key] = default_value
             continue
         values = _parse_param_values(raw)
         if not values:
@@ -647,7 +674,11 @@ def optimize_page(req, session, name: str):
                 Span(key, cls="text-sm font-medium text-gray-500 w-48 shrink-0"),
                 Input(
                     name=f"param_{key}",
-                    value=str(value),
+                    value=(
+                        ", ".join(str(v) for v in value)
+                        if isinstance(value, (list, tuple))
+                        else str(value)
+                    ),
                     placeholder="多个取值用逗号分隔，如 45, 90, 120",
                     cls="input input-sm w-full",
                 ),
