@@ -59,6 +59,10 @@ def register_builtin_fetchers(
             TushareDataFetcher(),
             make_default=registry.default_name is None,
         )
+    if not registry.has("akshare"):
+        from quantide.data.fetchers.akshare import AkshareDataFetcher
+
+        registry.register("akshare", AkshareDataFetcher())
     return registry
 
 

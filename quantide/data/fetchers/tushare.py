@@ -23,6 +23,8 @@ def _ensure_tushare_token() -> None:
 class TushareDataFetcher:
     """符合标准端口的数据源适配器."""
 
+    source_name = "tushare"
+
     def fetch_calendar(self, epoch: datetime.date) -> pd.DataFrame:
         return fetch_calendar(epoch)
 
