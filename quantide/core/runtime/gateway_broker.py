@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import polars as pl
 
-from quantide.core.enums import BidType, BrokerKind, OrderSide, OrderStatus
+from quantide.core.enums import BidType, BrokerKind, FrameType, OrderSide, OrderStatus
 from quantide.core.ports import (
     AssetView,
     BrokerPort,
@@ -116,7 +116,7 @@ class GatewayBrokerWrapper(AbstractBroker):
         asset: str,
         count: int,
         end_dt: datetime.datetime | None = None,
-        frame_type: str = "1d",
+        frame_type: FrameType | str = FrameType.DAY,
         include_forming_bar: bool = True,
     ) -> pl.DataFrame:
         """获取 live 策略所需的历史日线数据。
@@ -125,8 +125,9 @@ class GatewayBrokerWrapper(AbstractBroker):
         LiveQuote 已收到今日 tick 时，合并今日 forming bar 在末尾；close/high/low
         反映盘中最新状态。
         """
-        if frame_type != "1d":
+        if frame_type not in (FrameType.DAY, "1d", "day"):
             raise NotImplementedError("GatewayBrokerWrapper currently only supports 1d history")
+        frame_type = FrameType.DAY.value
 
         if not hasattr(daily_bars, "get_bars") and not hasattr(daily_bars, "get_history"):
             return self._empty_history_frame()

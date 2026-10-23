@@ -5,6 +5,7 @@ from typing import Any
 import polars as pl
 from loguru import logger
 
+from quantide.core.enums import FrameType
 from quantide.core.ports import BrokerPort
 from quantide.core.ports.broker import ExecutionResult
 
@@ -45,7 +46,7 @@ class Strategy(ABC):
         asset: str,
         count: int,
         end_dt: datetime.datetime | None = None,
-        frame_type: str = "1d",
+        frame_type: FrameType | str = FrameType.DAY,
         include_forming_bar: bool = True,
     ) -> pl.DataFrame:
         return self.broker.get_history(
