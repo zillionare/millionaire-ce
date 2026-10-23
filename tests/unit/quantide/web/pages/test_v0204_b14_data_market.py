@@ -13,6 +13,7 @@ Target lines:
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -92,35 +93,47 @@ def test_overview_tab_no_last_trade_date_not_stale():
 # ---------------------------------------------------------------------------
 
 
-def _capture_on_progress(start_date="2024-01-01", end_date="2024-06-30"):
-    """Run _run_market_sync and capture the _on_progress callback.
+def _fake_service(ok=True, status="done", error=""):
+    """构造一个 fake DataSyncService。"""
+    from types import SimpleNamespace
 
-    Returns (callback, sync_status_snapshot).
-    """
+    service = MagicMock()
+    service.create_task.return_value = SimpleNamespace(task_id="task-1")
+    service.run.return_value = ok
+    service.get_task.return_value = SimpleNamespace(status=status, error=error)
+    return service
+
+
+def _capture_on_progress(
+    start_date=datetime.date(2024, 1, 1),
+    end_date=datetime.date(2024, 6, 30),
+):
+    """Run _run_market_sync and capture the _on_progress callback."""
     captured = {}
 
     def fake_subscribe(topic, cb):
         captured["cb"] = cb
 
+    service = _fake_service()
     with patch.object(dm_mod, "msg_hub") as mock_hub, \
-         patch.object(dm_mod, "daily_bars"), \
-         patch.object(dm_mod, "asyncio") as mock_aio:
+         patch("quantide.service.data_sync.data_sync_service", service):
         mock_hub.subscribe = MagicMock(side_effect=fake_subscribe)
         mock_hub.unsubscribe = MagicMock()
-        mock_aio.to_thread = AsyncMock(return_value=None)
         asyncio.run(_run_market_sync(start_date, end_date))
-    return captured.get("cb"), dict(_sync_status)
+    return captured.get("cb"), service
 
 
 @pytest.mark.asyncio
 async def test_run_market_sync_success_sets_completed():
     """Successful sync -> progress=100, completed=True."""
+    service = _fake_service()
     with patch.object(dm_mod, "msg_hub") as mock_hub, \
-         patch.object(dm_mod, "daily_bars"):
+         patch("quantide.service.data_sync.data_sync_service", service):
         mock_hub.subscribe = MagicMock()
         mock_hub.unsubscribe = MagicMock()
-        with patch("asyncio.to_thread", new=AsyncMock(return_value=None)):
-            await _run_market_sync("2024-01-01", "2024-06-30")
+        await _run_market_sync(
+            datetime.date(2024, 1, 1), datetime.date(2024, 6, 30)
+        )
     assert _sync_status["completed"] is True
     assert _sync_status["progress"] == 100
     assert _sync_status["is_running"] is False
@@ -130,21 +143,36 @@ async def test_run_market_sync_success_sets_completed():
 async def test_run_market_sync_exception_sets_error():
     """asyncio.to_thread raises -> exception caught, error set."""
     with patch.object(dm_mod, "msg_hub") as mock_hub, \
-         patch.object(dm_mod, "daily_bars"):
+         patch("asyncio.to_thread", new=AsyncMock(side_effect=RuntimeError("sync err"))):
         mock_hub.subscribe = MagicMock()
         mock_hub.unsubscribe = MagicMock()
-        with patch("asyncio.to_thread", new=AsyncMock(side_effect=RuntimeError("sync err"))):
-            await _run_market_sync("2024-01-01", "2024-06-30")
+        await _run_market_sync(
+            datetime.date(2024, 1, 1), datetime.date(2024, 6, 30)
+        )
     assert _sync_status["error"] == "sync err"
     assert _sync_status["is_running"] is False
     assert _sync_status["completed"] is False
 
 
+@pytest.mark.asyncio
+async def test_run_market_sync_failed_task_sets_error():
+    """服务返回失败 -> error 使用任务错误信息。"""
+    service = _fake_service(ok=False, status="failed", error="boom")
+    with patch.object(dm_mod, "msg_hub") as mock_hub, \
+         patch("quantide.service.data_sync.data_sync_service", service):
+        mock_hub.subscribe = MagicMock()
+        mock_hub.unsubscribe = MagicMock()
+        await _run_market_sync(
+            datetime.date(2024, 1, 1), datetime.date(2024, 6, 30)
+        )
+    assert _sync_status["error"] == "boom"
+    assert _sync_status["completed"] is False
+
+
 def test_on_progress_non_dict_payload_returns_early():
-    """Non-dict payload -> early return (line 323)."""
+    """Non-dict payload -> early return."""
     cb, _ = _capture_on_progress()
     assert cb is not None
-    # Non-dict payload -> early return; should not raise.
     cb("not a dict")
     cb(None)
     cb(42)
@@ -158,22 +186,42 @@ def test_on_progress_error_payload_sets_status_error():
 
 
 def test_on_progress_progress_payload_updates_status():
-    """Payload with completed/total -> progress + message updated (lines 328-332)."""
+    """Payload with stage/progress/message -> progress + message updated."""
     cb, _ = _capture_on_progress()
-    cb({"completed": 5, "total": 10, "current_date": "2024-06-15"})
+    cb({"stage": "daily_bars", "progress": 50, "message": "正在同步 daily_bars..."})
     assert _sync_status["progress"] == 50
-    assert "2024-06-15" in _sync_status["message"]
-    assert "5/10" in _sync_status["message"]
+    assert "daily_bars" in _sync_status["message"]
+    assert "正在同步" in _sync_status["message"]
 
 
-def test_on_progress_total_zero_skips_progress_update():
-    """total=0 -> progress not updated (skips lines 330-332)."""
+def test_on_progress_done_payload_marks_completed():
+    """stage=done -> progress=100, completed=True。"""
     cb, _ = _capture_on_progress()
-    # Reset progress to a sentinel so we can detect non-update.
-    _sync_status["progress"] = -999
-    cb({"completed": 0, "total": 0})
-    # progress should be unchanged.
-    assert _sync_status["progress"] == -999
+    _sync_status["completed"] = False
+    cb({"stage": "done", "progress": 100, "completed": True, "message": "同步完成"})
+    assert _sync_status["completed"] is True
+    assert _sync_status["progress"] == 100
+
+
+@pytest.mark.asyncio
+async def test_run_market_sync_creates_task_with_range_and_index_codes():
+    """同步任务应带上日期范围与指数代码。"""
+    service = _fake_service()
+    with patch.object(dm_mod, "msg_hub") as mock_hub, \
+         patch("quantide.service.data_sync.data_sync_service", service):
+        mock_hub.subscribe = MagicMock()
+        mock_hub.unsubscribe = MagicMock()
+        await _run_market_sync(
+            datetime.date(2024, 1, 2),
+            datetime.date(2024, 1, 5),
+            ["000300.SH", "000905.SH"],
+        )
+
+    params = service.create_task.call_args.args[0]
+    assert params.start_date == datetime.date(2024, 1, 2)
+    assert params.end_date == datetime.date(2024, 1, 5)
+    assert params.index_codes == ["000300.SH", "000905.SH"]
+    service.run.assert_called_once_with("task-1")
 
 
 # ---------------------------------------------------------------------------
@@ -237,50 +285,3 @@ async def test_sync_progress_terminates_on_completed_after_initial_yield():
         await asyncio.wait_for(gen.__anext__(), timeout=2.0)
     except (StopAsyncIteration, TimeoutError):
         pass
-
-
-@pytest.mark.asyncio
-async def test_run_market_sync_updates_daily_basic():
-    """日线同步成功后，必须同步 daily_basic 市值数据。"""
-    calls: list[tuple[object, tuple]] = []
-
-    async def _fake_to_thread(fn, *args):
-        calls.append((fn, args))
-        return None
-
-    with patch.object(dm_mod, "msg_hub") as mock_hub, \
-         patch.object(dm_mod, "daily_bars") as mock_bars, \
-         patch.object(dm_mod, "daily_basic") as mock_basic:
-        mock_hub.subscribe = MagicMock()
-        mock_hub.unsubscribe = MagicMock()
-        with patch("asyncio.to_thread", new=_fake_to_thread):
-            await _run_market_sync("2024-01-02", "2024-01-05")
-
-        assert calls[0][0] is mock_bars.fetch_with_daily_progress
-        assert calls[1][0] is mock_basic.update
-        assert calls[1][1] == ("2024-01-02", "2024-01-05")
-
-    assert _sync_status["completed"] is True
-    assert _sync_status["message"] == "同步完成"
-
-
-@pytest.mark.asyncio
-async def test_run_market_sync_keeps_bars_when_daily_basic_fails():
-    """市值数据失败不应回滚已完成的行情同步。"""
-
-    async def _fake_to_thread(fn, *args):
-        if fn is dm_mod.daily_basic.update:
-            raise RuntimeError("mv failed")
-        return None
-
-    with patch.object(dm_mod, "msg_hub") as mock_hub, \
-         patch.object(dm_mod, "daily_bars"), \
-         patch.object(dm_mod, "daily_basic"):
-        mock_hub.subscribe = MagicMock()
-        mock_hub.unsubscribe = MagicMock()
-        with patch("asyncio.to_thread", new=_fake_to_thread):
-            await _run_market_sync("2024-01-02", "2024-01-05")
-
-    assert _sync_status["completed"] is True
-    assert _sync_status["error"] is None
-    assert "市值数据同步失败: mv failed" in _sync_status["message"]

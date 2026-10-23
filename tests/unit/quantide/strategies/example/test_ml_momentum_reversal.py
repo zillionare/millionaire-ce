@@ -480,7 +480,7 @@ async def test_on_bar_buys_top_ranked_candidates_into_open_slots() -> None:
         {"600001.SH": 1, "300001.SZ": 2, "688001.SH": 3},
     )
 
-    await strategy.on_bar(dt.datetime(2024, 6, 3, 10, 0))
+    await strategy.on_bar(dt.datetime(2024, 6, 3, 14, 58))
 
     assert [asset for asset, _amount, _kwargs in broker.buy_calls] == [
         "600001.SH",
@@ -521,7 +521,7 @@ async def test_on_bar_keeps_rank_exit_when_broker_barriers_enabled() -> None:
         {"600001.SH": 99, "600002.SH": 1},
     )
 
-    await strategy.on_bar(dt.datetime(2024, 6, 3, 10, 0))
+    await strategy.on_bar(dt.datetime(2024, 6, 3, 14, 58))
 
     assert [(asset, shares) for asset, shares, _kw in broker.sell_calls] == [
         ("600001.SH", 100)
@@ -1143,3 +1143,12 @@ def test_filter_universe_index_pit_falls_back_when_empty(monkeypatch):
         index_codes=["000300.SH"],
     )
     assert picked == ["000001.SZ", "600000.SH"]
+
+
+async def test_on_bar_skips_decisions_before_auction_in_live_mode() -> None:
+    """实盘 14:57 前不决策（避免盘中提前下单）。"""
+    broker = _FakeBroker(cash=100_000.0)
+    strategy = _make_strategy(broker, {"top_k": 2, "use_lightgbm": False})
+    strategy._rank_for_bar = lambda tm: ([], {"600001.SH": 10.0}, {})
+    await strategy.on_bar(dt.datetime(2024, 6, 3, 10, 0))
+    assert strategy._last_executed_signal_date is None

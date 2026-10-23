@@ -15,7 +15,6 @@ from starlette.responses import StreamingResponse
 from quantide.core.message import msg_hub
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
-from quantide.data.models.daily_basic import daily_basic
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -164,7 +163,7 @@ def _UpdateTab():
     today_str = datetime.date.today().strftime("%Y-%m-%d")
     return Div(
         H3("手动补全行情数据", cls="text-xl font-semibold mb-4"),
-        P("指定日期范围进行数据同步。系统将检查本地缺失数据并尝试从 Tushare 补全。", cls="text-gray-600 mb-6"),
+        P("指定日期范围进行数据同步：交易日历、证券列表、日线、市值、指数日线与 PIT 成分。系统会按月批量补全缺失数据，支持断点续传。", cls="text-gray-600 mb-6"),
         Div(
             Form(
                 Div(
@@ -176,6 +175,17 @@ def _UpdateTab():
                     Div(
                         _Label("结束日期", cls="block text-sm font-medium mb-1"),
                         Input(name="end_date", type="date", value=today_str, cls="input w-full"),
+                        cls="flex-1"
+                    ),
+                    Div(
+                        _Label("指数代码（可空）", cls="block text-sm font-medium mb-1"),
+                        Input(
+                            name="index_codes",
+                            type="text",
+                            value="000300.SH,000905.SH,000852.SH,932000.CSI",
+                            cls="input w-full",
+                            placeholder="逗号分隔",
+                        ),
                         cls="flex-1"
                     ),
                     Div(
@@ -310,7 +320,7 @@ async def do_verify(form: dict):
 
 # ========== SSE 更新逻辑 (复用 init_wizard 模式) ==========
 
-async def _run_market_sync(start_date, end_date):
+async def _run_market_sync(start_date, end_date, index_codes=None):
     global _sync_status
     _sync_status["is_running"] = True
     _sync_status["completed"] = False
@@ -319,38 +329,51 @@ async def _run_market_sync(start_date, end_date):
     _sync_status["message"] = "准备同步..."
 
     try:
+        from quantide.service.data_sync import (
+            SYNC_PROGRESS_TOPIC,
+            SyncParams,
+            data_sync_service,
+        )
+
         def _on_progress(payload):
             if not isinstance(payload, dict):
                 return
             if payload.get("error"):
                 _sync_status["error"] = str(payload["error"])
                 return
+            stage = payload.get("stage", "")
+            message = payload.get("message", "")
+            progress = payload.get("progress")
+            if payload.get("stage") == "done":
+                _sync_status["progress"] = 100
+                _sync_status["message"] = message or "同步完成"
+                _sync_status["completed"] = True
+                return
+            if isinstance(progress, (int, float)):
+                _sync_status["progress"] = int(progress)
+            _sync_status["message"] = f"[{stage}] {message}".strip()
 
-            completed = payload.get("completed", 0)
-            total = payload.get("total", 0)
-            if total > 0:
-                _sync_status["progress"] = int((completed / total) * 100)
-                _sync_status["message"] = f"正在同步 {payload.get('current_date', '')} ({completed}/{total})"
-
-        msg_hub.subscribe("fetch_data_progress", _on_progress)
+        msg_hub.subscribe(SYNC_PROGRESS_TOPIC, _on_progress)
         try:
-            await asyncio.to_thread(daily_bars.fetch_with_daily_progress, start_date, end_date)
-            _sync_status["message"] = "正在同步市值数据..."
-            market_cap_error: Exception | None = None
-            try:
-                await asyncio.to_thread(daily_basic.update, start_date, end_date)
-            except Exception as exc:
-                market_cap_error = exc
-                logger.warning("市值数据同步失败: {}", exc)
-            _sync_status["progress"] = 100
-            _sync_status["message"] = (
-                "同步完成"
-                if market_cap_error is None
-                else f"行情同步完成，市值数据同步失败: {market_cap_error}"
+            task = data_sync_service.create_task(
+                SyncParams(
+                    start_date=start_date,
+                    end_date=end_date,
+                    index_codes=list(index_codes or []),
+                )
             )
-            _sync_status["completed"] = True
+            ok = await asyncio.to_thread(data_sync_service.run, task.task_id)
+            final = data_sync_service.get_task(task.task_id)
+            if ok and final is not None and final.status == "done":
+                _sync_status["progress"] = 100
+                _sync_status["message"] = "同步完成"
+                _sync_status["completed"] = True
+            elif not _sync_status["completed"]:
+                _sync_status["error"] = (
+                    final.error if final is not None and final.error else "同步失败"
+                )
         finally:
-            msg_hub.unsubscribe("fetch_data_progress", _on_progress)
+            msg_hub.unsubscribe(SYNC_PROGRESS_TOPIC, _on_progress)
 
     except Exception as e:
         _sync_status["error"] = str(e)
@@ -369,7 +392,12 @@ async def do_update(req):
     except Exception:
         return Div("日期格式不正确", cls="text-red-500")
 
-    asyncio.create_task(_run_market_sync(s_dt, e_dt))
+    index_codes = [
+        code.strip()
+        for code in str(form.get("index_codes") or "").split(",")
+        if code.strip()
+    ]
+    asyncio.create_task(_run_market_sync(s_dt, e_dt, index_codes))
 
     # 返回进度对话框 (简化版)
     return Div(

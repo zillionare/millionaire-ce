@@ -1007,6 +1007,21 @@ class MLMomentumReversalStrategy(BaseStrategy):
             self._days_since_train += 1
         return self._model is None or self._days_since_train >= self.retrain_days
 
+    def _in_decision_window(self, tm: datetime.datetime) -> bool:
+        """实盘/模拟盘的决策窗口：交易日 14:57 之后（含盘后补算）。
+
+        回测由 runner 决定触发时刻，不做限制。
+        """
+        if getattr(self.broker, "_bt_start", None) is not None:
+            return True
+        try:
+            from quantide.service.execution_clock import execution_clock
+
+            phase = execution_clock.phase(tm)
+        except Exception:
+            return True
+        return phase.name in {"auction", "post_close"}
+
     def _mark_retrained(self) -> None:
         """记录一次重训完成，重置交易日计数。"""
         self._days_since_train = 0
@@ -1590,8 +1605,11 @@ class MLMomentumReversalStrategy(BaseStrategy):
         """Execute daily ML ranking, alpha exits, and portfolio rotation.
 
         实盘/模拟盘每个交易日只决策一次：策略按**信号日**去重，
-        避免运行时高频轮询导致重复下单。
+        避免运行时高频轮询导致重复下单。实盘在 14:57 之后才决策
+        （收盘集合竞价）；若 15:00 后仍在运行则继续算（不回退 T+1）。
         """
+        if not self._in_decision_window(tm):
+            return
         signal_date = self._resolve_signal_date(tm)
         if self._last_executed_signal_date == signal_date:
             return
