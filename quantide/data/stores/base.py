@@ -173,9 +173,9 @@ class ParquetStorage:
                 logger.error(error)
 
     def _dates_file_path(self) -> Path:
-        """索引文件路径"""
+        """索引文件路径（每个分区存储独立，避免同一父目录下互相覆盖）。"""
         if self._partition_by is not None:
-            return self._store_path.parent / "dates.pq"
+            return self._store_path.parent / f"{self._store_path.name}-dates.pq"
         else:
             return self._store_path.parent / f"{self.store_name}-dates.pq"
 

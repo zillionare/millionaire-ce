@@ -93,3 +93,42 @@ def test_minute_read_applies_qfq_and_limits(tmp_path, calendar, monkeypatch):
     assert frame["down_limit"][0] == pytest.approx(4.5)
     # 成交量反向调整：100 * 2.0 / 1.0 = 200
     assert frame["volume"][0] == pytest.approx(200.0)
+
+
+def test_dates_index_is_isolated_between_stores(tmp_path, calendar):
+    """同一父目录下的不同分区存储必须使用各自的日期索引。"""
+    from quantide.data.stores.base import ParquetStorage
+
+    parent = tmp_path / "bars"
+    daily = ParquetStorage(
+        store_name="daily",
+        store_path=parent / "daily",
+        calendar=calendar,
+        partition_by="year",
+    )
+    minute = ParquetStorage(
+        store_name="minute",
+        store_path=parent / "minute30",
+        calendar=calendar,
+        partition_by="year",
+    )
+    daily.append_data(
+        pl.DataFrame(
+            {
+                "date": [datetime.date(2024, 1, 2)],
+                "asset": ["600519.SH"],
+                "close": [10.0],
+            }
+        ).with_columns(pl.col("date").cast(pl.Date))
+    )
+    minute.append_data(
+        pl.DataFrame(
+            {
+                "date": [datetime.datetime(2024, 1, 3, 9, 30)],
+                "asset": ["600519.SH"],
+                "close": [10.0],
+            }
+        ).with_columns(pl.col("date").cast(pl.Datetime("ms")))
+    )
+    assert daily.end == datetime.date(2024, 1, 2)
+    assert minute.end == datetime.date(2024, 1, 3)

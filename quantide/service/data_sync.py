@@ -311,7 +311,7 @@ class DataSyncService:
         df = fetcher.fetch_calendar(params.start_date)
         if df is not None and not df.empty:
             calendar.save(df)
-            calendar.load(calendar.calendar_path)
+            calendar.load(calendar.path)
 
     def _sync_stock_list(self, params: SyncParams) -> None:
         """同步证券主数据。"""

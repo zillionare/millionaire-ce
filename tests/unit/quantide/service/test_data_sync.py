@@ -153,3 +153,46 @@ def test_month_end_snapshots_uses_calendar(asset_dir):
     assert snapshots
     assert all(isinstance(d, datetime.date) for d in snapshots)
     assert len(snapshots) == 3
+
+
+def test_sync_calendar_persists_and_reloads(monkeypatch):
+    """日历阶段必须落盘并重载（回归：曾误用不存在的 calendar_path）。"""
+    import pandas as pd
+
+    saved: dict[str, object] = {}
+
+    class _FakeCalendar:
+        @property
+        def path(self):
+            return "/tmp/fake_calendar.parquet"
+
+        def save(self, frame):
+            saved["saved"] = frame
+
+        def load(self, path):
+            saved["loaded"] = path
+
+    class _FakeFetcher:
+        def fetch_calendar(self, epoch):
+            return pd.DataFrame(
+                {"date": [datetime.date(2024, 1, 2)], "is_open": [1]}
+            )
+
+    monkeypatch.setattr(
+        "quantide.data.models.calendar.calendar", _FakeCalendar()
+    )
+    monkeypatch.setattr(
+        "quantide.data.fetchers.registry.get_data_fetcher",
+        lambda: _FakeFetcher(),
+    )
+
+    service = DataSyncService()
+    service._sync_calendar(
+        SyncParams(
+            start_date=datetime.date(2024, 1, 1),
+            end_date=datetime.date(2024, 1, 31),
+        )
+    )
+
+    assert "saved" in saved
+    assert saved["loaded"] == "/tmp/fake_calendar.parquet"
