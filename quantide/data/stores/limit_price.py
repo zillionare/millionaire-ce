@@ -33,6 +33,7 @@ class LimitPriceStore(ParquetStorage):
             None,
             error_handler=None,
             partition_levels=partition_levels,
+            date_as_date=True,
         )
 
     def get_limits(

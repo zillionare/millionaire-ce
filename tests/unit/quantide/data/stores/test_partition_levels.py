@@ -191,3 +191,54 @@ def test_single_level_partition_still_works(calendar, tmp_path):
         start=datetime.date(2024, 1, 1), end=datetime.date(2024, 12, 31)
     )
     assert out.height == 1
+
+
+def test_append_casts_datetime_date_to_date(tmp_path):
+    """不同 fetcher 产出的 datetime 日期应统一写成 pl.Date。"""
+    store = ParquetStorage(
+        store_name="MixedDate",
+        store_path=tmp_path / "mixed",
+        calendar=Calendar(),
+        partition_levels=("year", "month"),
+        date_as_date=True,
+    )
+    frame = pl.DataFrame(
+        {
+            "date": [datetime.datetime(2024, 1, 2, 10, 30)],
+            "asset": ["600000.SH"],
+            "close": [10.0],
+        }
+    )
+    store.append_data(frame)
+
+    files = list((tmp_path / "mixed").rglob("*.parquet"))
+    assert files
+    assert pl.read_parquet_schema(files[0])["date"] == pl.Date
+
+
+def test_normalize_partition_schema_rewrites_datetime_files(tmp_path):
+    """已有 Datetime 分区文件应被归一化为 Date。"""
+    store = ParquetStorage(
+        store_name="LegacyDate",
+        store_path=tmp_path / "legacy",
+        calendar=Calendar(),
+        partition_levels=("year", "month"),
+        date_as_date=True,
+    )
+    partition = tmp_path / "legacy" / "partition_key_year=2024" / "partition_key_month=01"
+    partition.mkdir(parents=True)
+    legacy = pl.DataFrame(
+        {
+            "date": [datetime.datetime(2024, 1, 2)],
+            "asset": ["600000.SH"],
+            "close": [10.0],
+        }
+    )
+    legacy.write_parquet(partition / "part-0.parquet")
+
+    assert store.normalize_partition_schema(dry_run=True) == 1
+    assert store.normalize_partition_schema() == 1
+    assert (
+        pl.read_parquet_schema(partition / "part-0.parquet")["date"] == pl.Date
+    )
+    assert store.normalize_partition_schema() == 0

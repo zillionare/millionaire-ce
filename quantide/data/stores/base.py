@@ -61,6 +61,7 @@ class ParquetStorage:
         partition_by: Literal["year", "month", "day"] | None = None,
         partition_levels: tuple[Literal["year", "month", "day"], ...] | None = None,
         id_cols: list[str] | None = None,
+        date_as_date: bool = False,
     ):
         """初始化ParquetStorage
 
@@ -76,9 +77,13 @@ class ParquetStorage:
                 读取时只扫描命中的分区文件，避免数据量增长后读放大。
             id_cols: 去重主键列，默认 ``["date", "asset"]``；成分类数据可改为
                 ``["date", "index_code", "con_code"]``。
+            date_as_date: 写入时把 ``date`` 统一为 ``pl.Date``（默认保留原始类型）。
+                日线/成分等跨 fetcher 混写的数据应设为 True，避免 Date/Datetime
+                schema 冲突。
         """
         self.store_name = store_name
         self._id_cols = list(id_cols) if id_cols else ["date", "asset"]
+        self._date_as_date = date_as_date
         self._store_path = Path(store_path).expanduser()
 
         if partition_by is not None and self._store_path.suffix == ".parquet":
@@ -474,6 +479,37 @@ class ParquetStorage:
                     write_df = write_df.drop(level)
             write_df.write_parquet(output_file, compression=self._compression)
 
+    def normalize_partition_schema(self, dry_run: bool = False) -> int:
+        """把分区文件中类型不一致的 ``date`` 列统一为 pl.Date。
+
+        历史数据可能由不同 fetcher 写入（``Date`` vs ``Datetime``），
+        混用会导致读取时 concat 失败。此方法只重写需要修正的文件。
+
+        Args:
+            dry_run: 只统计不写盘。
+
+        Returns:
+            int: 修正的分区文件数量。
+        """
+        if self._partition_by is None or not self._store_path.exists():
+            return 0
+        fixed = 0
+        for path in sorted(self._store_path.rglob("*.parquet")):
+            try:
+                schema = pl.read_parquet_schema(path)
+            except Exception:  # pragma: no cover - 损坏文件跳过
+                continue
+            if "date" not in schema or schema["date"] == pl.Date:
+                continue
+            fixed += 1
+            if dry_run:
+                continue
+            frame = pl.read_parquet(path).with_columns(
+                pl.col("date").cast(pl.Date)
+            )
+            frame.write_parquet(path, compression=self._compression)
+        return fixed
+
     def repartition_to_levels(
         self, levels: tuple[str, ...], dry_run: bool = False
     ) -> int:
@@ -864,6 +900,10 @@ class ParquetStorage:
             lf = df
         else:
             raise TypeError("Unsupported data type for append_data")
+        # 日期列统一为 pl.Date：不同 fetcher 可能产出 datetime64，
+        # 与既有分区（Date）合并时会触发 schema 冲突。
+        if self._date_as_date and "date" in lf.collect_schema().names():
+            lf = lf.with_columns(pl.col("date").cast(pl.Date))
         if self._partition_by is None:
             # 非分区模式
             self._save_single(lf)

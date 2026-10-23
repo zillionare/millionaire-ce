@@ -56,9 +56,13 @@ class DailyBars(ParquetStorage):
             fetch_data_func=self._fetch_bars_ext,
             error_handler=None,
             partition_levels=("year", "month") if is_dir else None,
+            date_as_date=True,
         )
         if is_dir:
             self._migrate_legacy_partitions()
+            fixed = self.normalize_partition_schema()
+            if fixed:
+                logger.info("日线日期列已归一化为 Date：{} 个分区文件", fixed)
         self._initialized = True
 
     def _migrate_legacy_partitions(self) -> None:

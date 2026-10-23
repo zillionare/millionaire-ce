@@ -331,18 +331,19 @@ class DataSyncService:
 
     def _sync_daily_basic(self, params: SyncParams) -> None:
         """同步市值/换手（按月批量）。"""
-        from quantide.data.fetchers.registry import get_data_fetcher
+        from quantide.core.enums import FrameType
+        from quantide.data.models.calendar import calendar
         from quantide.data.models.daily_basic import daily_basic
 
-        fetcher = get_data_fetcher()
         for chunk_start, chunk_end in self._month_ranges(
             params.start_date, params.end_date
         ):
             if self._cancel.is_set():
                 return
-            frame, _errors = fetcher.fetch_daily_basic([chunk_start, chunk_end])
-            if frame is not None and len(frame):
-                daily_basic.append_data(frame)
+            dates = list(calendar.get_frames(chunk_start, chunk_end, FrameType.DAY))
+            if not dates:
+                continue
+            daily_basic.update(dates=dates)
 
     def _sync_index_bars(self, params: SyncParams) -> None:
         """同步指数日线。"""

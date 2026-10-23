@@ -52,6 +52,7 @@ class IndexWeightStore(ParquetStorage):
             error_handler=None,
             partition_levels=partition_levels,
             id_cols=["date", "index_code", "con_code"],
+            date_as_date=True,
         )
 
     def constituents(
