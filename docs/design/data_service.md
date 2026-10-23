@@ -491,6 +491,7 @@ A 股收盘集合竞价：**14:57-15:00**（3 分钟）→ 15:00 以集合竞价
 | P0 | Tushare `fetch_index_bars` / `fetch_index_weights`（逐期绕过 7000 行上限） | ✅ |
 | P0 | `Date`/`Datetime` 日期列归一化（`date_as_date` + `normalize_partition_schema`） | ✅ |
 | P1 | `DataSyncService`（六阶段、持久化、断点续传、互斥、取消、按月批量） | ✅ |
+| P1 | 行情管理页「手动补全」接入统一同步服务（可选指数代码、进度流） | ✅ |
 | P1 | `MarketDataHub` 发布/订阅 + `AksharePublisher`（50 支示例）+ `PytdxPublisher`（内部全市场） | ✅ |
 | P1 | `ExecutionClock` + Paper 集合竞价下单（竞价价×(1+ε)）+ 策略按日去重 | ✅ |
 | P2 | 回测 `fill_timing="auction_close"`（14:57 决策、收盘/竞价价成交） | ✅ |
