@@ -7,7 +7,7 @@
 ======== ================================================== ==========================
 日线     Tushare（复权因子/涨跌停/ST/指数成分 PIT 一并提供）  腾讯（日线兜底）
 指数日线 Tushare                                            腾讯
-30 分钟  腾讯（近期增量）/ BaoStock（历史一次性回补）           —
+30 分钟  BaoStock（历史 + 每日回补，唯一历史来源）            —
 实时行情 腾讯（``qt.gtimg.cn``，含当日涨跌停）                —
 ======== ================================================== ==========================
 
@@ -39,7 +39,7 @@ DEFAULT_STAGES: dict[str, list[str]] = {
     "daily_basic": ["tushare"],
     "index_bars": ["tushare", "tencent"],
     "index_weights": ["tushare"],
-    "minute_bars": ["tencent", "baostock"],
+    "minute_bars": ["baostock"],
     "quote_snapshot": ["tencent"],
 }
 
@@ -88,9 +88,8 @@ class BaostockMinuteAdapter:
         else:
             frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
         frame = frame.dropna(subset=["date"]).sort_values("date")
-        # BaoStock 的时间是 bar 收盘时刻（如 30 分钟线 10:00 表示 09:30-10:00），
-        # 统一改为 bar 起点，避免与腾讯（起点口径）重复。
-        frame["date"] = frame["date"] - pd.Timedelta(minutes=int(period))
+        # BaoStock 的时间已经是 bar 收盘时刻（如 10:00 表示 09:30-10:00），
+        # 与项目 Calendar 一致，直接保留。
         for col in ("volume", "amount"):
             if col not in frame.columns:
                 frame[col] = 0.0

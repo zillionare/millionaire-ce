@@ -4,8 +4,8 @@
 字段：date, asset, open, high, low, close, volume, amount
 不包含复权因子、涨跌停、ST 等辅助字段；读取时需单独关联。
 
-集合竞价/实时行情只写内存，不落盘；历史回补由 baostock 负责，
-日常增量由腾讯 K 线 m30 负责。
+时间索引为 **bar 收盘时刻**（10:00 表示 09:30-10:00），与项目 Calendar
+一致。集合竞价/实时行情只写内存，不落盘；历史与每日回补均由 BaoStock 负责。
 """
 
 import datetime
@@ -69,7 +69,11 @@ class MinuteBarsStore(ParquetStorage):
         if start is not None:
             lf = lf.filter(pl.col("date") >= _as_datetime_bound(start))
         if end is not None:
-            lf = lf.filter(pl.col("date") <= _as_datetime_bound(end))
+            if isinstance(end, datetime.datetime):
+                end_bound = end
+            else:
+                end_bound = datetime.datetime.combine(end, datetime.time.max)
+            lf = lf.filter(pl.col("date") <= pl.lit(end_bound))
 
         if assets is not None:
             lf = lf.filter(pl.col("asset").is_in(assets))
@@ -90,6 +94,23 @@ class MinuteBarsStore(ParquetStorage):
         该方法已从主体移除，请使用 DataSyncService 统一调度。
         """
         raise RuntimeError("指数抓取功能已从 quantide 主体移除。")
+
+    def last_dates(self) -> dict[str, datetime.date]:
+        """每只标的已入库的最后日期（用于按标的增量回补）。"""
+        lazy = self._scan_store(keep_partition_col=False)
+        if lazy is None:
+            return {}
+        df = (
+            lazy.with_columns(pl.col("date").cast(pl.Date))
+            .group_by("asset")
+            .agg(pl.col("date").max().alias("last"))
+            .collect()
+        )
+        return {
+            str(asset): last
+            for asset, last in zip(df["asset"].to_list(), df["last"].to_list(), strict=True)
+            if last is not None
+        }
 
     def rec_counts_per_date(
         self, start: datetime.date | None = None, end: datetime.date | None = None

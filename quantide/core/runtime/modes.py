@@ -110,6 +110,9 @@ class RuntimeBootstrap:
         """
         runtime = get_settings()
         market_data_hub.start()
+        from quantide.service.minute_bar_aggregator import minute_bar_aggregator
+
+        minute_bar_aggregator.ensure_started()
         adapters.register("market_data", "market_data_hub", market_data_hub)
         if runtime.livequote_mode == "gateway" or runtime.gateway_enabled:
             live_quote.start()

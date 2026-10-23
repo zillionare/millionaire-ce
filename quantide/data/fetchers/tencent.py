@@ -322,6 +322,10 @@ class TencentDataFetcher:
             "datetime64[ms]"
         )
         frame = frame.dropna(subset=["date"])
+        # 腾讯 K 线返回 bar 起点，统一加一个周期，改为收盘时刻（项目口径）。
+        frame["date"] = (
+            frame["date"] + pd.Timedelta(minutes=int(period))
+        ).astype("datetime64[ms]")
         if start_date is not None:
             frame = frame[frame["date"].dt.date >= start_date]
         if end_date is not None:

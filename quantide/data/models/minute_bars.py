@@ -3,8 +3,9 @@
 存储层只保存原始 OHLCV；本模块负责在读取时关联**日线复权因子、ST、涨跌停**，
 使回测/策略可以直接拿到可用的复权分钟线。
 
-时间约定：`date` 是 **bar 起点**（如 09:30 表示 09:30-10:00），
-不同数据源（腾讯/baostock）在写入前统一到该口径。
+时间约定：`date` 是 **bar 收盘时刻**（与项目 ``Calendar`` 一致，如 10:00
+表示 09:30-10:00）。不同数据源在写入前统一到该口径；腾讯 K 线原始为起点，
+需加一个周期。
 """
 
 from __future__ import annotations
@@ -169,16 +170,23 @@ class MinuteBars:
         """读取最近 n 根分钟线。"""
         if end is None:
             end = datetime.datetime.now()
+        end_dt = end if isinstance(end, datetime.datetime) else None
         end_date = end.date() if isinstance(end, datetime.datetime) else end
         # 30 分钟线每个交易日约 8 根；多取几天缓冲假期与停牌。
         lookback_days = max(2, (int(n) + 7) // 8 + 5)
         start_date = calendar.shift(end_date, -lookback_days, FrameType.DAY)
         frame = self.get_bars_in_range(
-            start_date, end_date, assets=assets, adjust=adjust, eager_mode=True
+            start_date,
+            end_dt if end_dt is not None else end_date,
+            assets=assets,
+            adjust=adjust,
+            eager_mode=True,
         )
         assert isinstance(frame, pl.DataFrame)
         if frame.is_empty():
             return frame
+        if end_dt is not None:
+            frame = frame.filter(pl.col("date") <= end_dt)
         frame = (
             frame.sort("date").group_by("asset").tail(int(n)).sort(["date", "asset"])
         )

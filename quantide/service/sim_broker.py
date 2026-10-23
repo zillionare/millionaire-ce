@@ -11,7 +11,14 @@ from typing import Any
 import polars as pl
 from loguru import logger
 
-from quantide.core.enums import BidType, BrokerKind, OrderSide, OrderStatus, Topics
+from quantide.core.enums import (
+    BidType,
+    BrokerKind,
+    FrameType,
+    OrderSide,
+    OrderStatus,
+    Topics,
+)
 from quantide.core.errors import (
     InsufficientCash,
     InsufficientPosition,
@@ -287,10 +294,10 @@ class PaperBroker(AbstractBroker):
         asset: str,
         count: int,
         end_dt: datetime.datetime | None = None,
-        frame_type: str = "1d",
+        frame_type: FrameType | str = FrameType.DAY,
         include_forming_bar: bool = True,
     ) -> pl.DataFrame:
-        """获取 paper 模式策略所需的历史日线数据。
+        """获取 paper 模式策略所需的历史日线/分钟线数据。
 
         Issue #20：默认 ``include_forming_bar=True``，当 ``end_dt`` 落在今日且
         LiveQuote 已收到今日 tick 时，合并今日 forming bar 在末尾；close/high/low

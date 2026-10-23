@@ -19,6 +19,7 @@ from typing import Any
 
 from loguru import logger
 
+from quantide.core.enums import FrameType
 from quantide.core.message import msg_hub
 from quantide.data.models.sync_task import (
     STATUS_CANCELLED,
@@ -368,14 +369,21 @@ class DataSyncService:
         store.append_data(_to_index_bars_frame(frame))
 
     def _sync_minute_bars(self, params: SyncParams) -> None:
-        """同步 30 分钟线：BaoStock 回补历史，腾讯补最近几天。"""
+        """同步 30 分钟线：只使用 BaoStock，按标的补齐缺失区间。
+
+        历史/每日回补都以 BaoStock 为唯一来源（时间口径为 bar 收盘时刻）。
+        当日盘中数据由 ``MinuteBarAggregator`` 内存合成，不落盘；本阶段入库后
+        通知合成器丢弃对应日期。
+        """
         from quantide.data import get_minute_bars_store
-        from quantide.data.fetchers.baostock_minute import BaostockMinuteFetcher
-        from quantide.data.fetchers.multi import (
-            BaostockMinuteAdapter,
-            MultiSourceDataFetcher,
+        from quantide.data.fetchers.baostock_minute import (
+            BaostockMinuteFetcher,
+            BaostockThrottledError,
         )
+        from quantide.data.fetchers.multi import BaostockMinuteAdapter
+        from quantide.data.models.calendar import calendar
         from quantide.data.models.stocks import stock_list
+        from quantide.service.minute_bar_aggregator import minute_bar_aggregator
 
         if not params.include_minute and not params.minute_assets:
             return
@@ -389,76 +397,73 @@ class DataSyncService:
         if period not in {"1", "5", "15", "30", "60"}:
             period = "30"
         store = get_minute_bars_store()
-        total = len(assets)
+        end_date = _minute_history_end(params.end_date)
+        if end_date is None:
+            logger.info("30 分钟线暂无已收盘可回补日期")
+            return
+        base_start = max(params.start_date, MINUTE_HISTORY_START)
+        last_dates = store.last_dates()
 
-        # 1) 历史回补：仅在本地覆盖不足时执行（BaoStock 单连接、按日预算）。
-        need_history = store.end is None or store.end < params.end_date
-        if need_history:
-            baostock = BaostockMinuteFetcher()
-            adapter = BaostockMinuteAdapter(baostock)
-            try:
-                for index, asset in enumerate(assets, start=1):
-                    if self._cancel.is_set():
-                        return
-                    try:
-                        frame, _errors = adapter.fetch_minute_bars(
-                            asset,
-                            params.start_date,
-                            params.end_date,
-                            period=period,
-                            count=100000,
-                        )
-                    except Exception as exc:
-                        logger.warning("BaoStock 30 分钟回补失败 {}: {}", asset, exc)
-                        continue
-                    if frame is not None and not frame.empty:
-                        store.append_data(_to_minute_bars_frame(frame))
-                    if index % 50 == 0 or index == total:
-                        percent = 50 + int(index * 40 / total)
-                        _publish(
-                            {
-                                "task_id": "",
-                                "stage": "minute_bars",
-                                "progress": percent,
-                                "message": f"30 分钟历史回补 {index}/{total}",
-                            }
-                        )
-                        logger.info(
-                            "30 分钟历史回补进度 {}/{}（{}）", index, total, asset
-                        )
-            finally:
-                baostock.close()
+        pending: list[tuple[str, datetime.date]] = []
+        for asset in assets:
+            last = last_dates.get(asset)
+            start = base_start
+            if last is not None and last >= start:
+                start = calendar.shift(last, 1, FrameType.DAY)
+            if start <= end_date:
+                pending.append((asset, start))
+        if not pending:
+            logger.info("30 分钟线已覆盖到 {}，无需回补", end_date)
+            minute_bar_aggregator.clear_between(base_start, end_date)
+            return
 
-        # 2) 增量：腾讯 K 线补最近 3 天（含当日已收盘部分）。
-        recent_start = max(
-            params.start_date, params.end_date - datetime.timedelta(days=3)
-        )
-        multi = MultiSourceDataFetcher(stages={"minute_bars": ["tencent"]})
-        for index, asset in enumerate(assets, start=1):
-            if self._cancel.is_set():
-                return
-            try:
-                frame, _errors = multi.fetch_minute_bars(
-                    asset,
-                    recent_start,
-                    params.end_date,
-                    period=period,
-                    count=64,
-                )
-            except Exception:
-                continue
-            if frame is not None and not frame.empty:
-                store.append_data(_to_minute_bars_frame(frame))
-            if index % 100 == 0 or index == total:
-                percent = 90 + int(index * 10 / total)
-                _publish(
-                    {
-                        "task_id": "",
-                        "stage": "minute_bars",
-                        "progress": min(percent, 100),
-                        "message": f"30 分钟增量更新 {index}/{total}",
-                    }
-                )
+        baostock = BaostockMinuteFetcher()
+        adapter = BaostockMinuteAdapter(baostock)
+        failures = 0
+        try:
+            for index, (asset, start) in enumerate(pending, start=1):
+                if self._cancel.is_set():
+                    return
+                try:
+                    frame, _errors = adapter.fetch_minute_bars(
+                        asset,
+                        start,
+                        end_date,
+                        period=period,
+                        count=100000,
+                    )
+                except BaostockThrottledError:
+                    raise
+                except Exception as exc:
+                    failures += 1
+                    logger.warning("BaoStock 30 分钟回补失败 {}: {}", asset, exc)
+                    continue
+                if frame is not None and not frame.empty:
+                    store.append_data(_to_minute_bars_frame(frame))
+                if index % 50 == 0 or index == len(pending):
+                    percent = 50 + int(index * 50 / len(pending))
+                    _publish(
+                        {
+                            "task_id": "",
+                            "stage": "minute_bars",
+                            "progress": min(percent, 100),
+                            "message": f"30 分钟回补 {index}/{len(pending)}",
+                        }
+                    )
+                    logger.info(
+                        "30 分钟回补进度 {}/{}（{}，从 {}）",
+                        index,
+                        len(pending),
+                        asset,
+                        start,
+                    )
+        finally:
+            baostock.close()
+
+        if failures:
+            logger.warning("30 分钟回补有 {} 只标的失败，保留内存合成数据", failures)
+        else:
+            minute_bar_aggregator.clear_between(base_start, end_date)
 
     def _sync_index_weight(self, params: SyncParams) -> None:
         """同步指数成分（逐期抓取，绕过 7000 行上限）。"""
@@ -476,6 +481,34 @@ class DataSyncService:
         if frame is None or len(frame) == 0:
             return
         store.append_data(frame)
+
+
+#: BaoStock 30 分钟线最早可用日期（更早的请求会被自动截断）。
+MINUTE_HISTORY_START = datetime.date(2020, 1, 2)
+#: BaoStock 当日分钟线入库时间（保守取值，避免收盘后立即请求为空）。
+MINUTE_HISTORY_READY_TIME = datetime.time(17, 30)
+
+
+def _minute_history_end(
+    end_date: datetime.date, now: datetime.datetime | None = None
+) -> datetime.date | None:
+    """返回可回补的最后一个已收盘交易日。
+
+    当日 17:30 之前不入库（BaoStock 尚未更新）；非交易日回退到上一交易日。
+    返回 None 表示没有可回补日期。
+    """
+    from quantide.data.models.calendar import calendar
+
+    now = now or datetime.datetime.now()
+    today = now.date()
+    if end_date < today:
+        return end_date
+    if calendar.is_trade_day(today) and now.time() >= MINUTE_HISTORY_READY_TIME:
+        return today
+    try:
+        return calendar.day_shift(today, -1)
+    except Exception:  # pragma: no cover - 日历未初始化
+        return None
 
 
 def _to_minute_bars_frame(frame: Any) -> Any:

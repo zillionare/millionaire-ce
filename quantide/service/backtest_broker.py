@@ -1326,7 +1326,7 @@ class BacktestBroker(AbstractBroker):
         asset: str,
         count: int,
         end_dt: datetime.datetime | None = None,
-        frame_type: str = "1d",
+        frame_type: FrameType | str = FrameType.DAY,
         skip_suspended: bool = True,
         fill_value: bool = True,
         include_forming_bar: bool = True,
