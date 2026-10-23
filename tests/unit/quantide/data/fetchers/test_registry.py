@@ -11,7 +11,8 @@ def test_registry_registers_tushare_as_default():
 
     assert registry.default_name == "tushare"
     assert isinstance(registry.get(), TushareDataFetcher)
-    assert registry.list_names() == ["tushare"]
+    assert "tushare" in registry.list_names()
+    assert "akshare" in registry.list_names()
 
 
 def test_registry_can_override_default_fetcher():

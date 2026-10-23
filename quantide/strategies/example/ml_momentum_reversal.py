@@ -786,6 +786,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
             self.config.get("index_pool_codes")
             or ["000300.SH", "000905.SH", "000852.SH"]
         )
+        self.live_min_quote_coverage = float(
+            self.config.get("live_min_quote_coverage", 0.98)
+        )
         self.market_cap_trim_pct = min(
             0.5,
             max(0.0, float(self.config.get("market_cap_trim_pct", 0.05))),
@@ -823,6 +826,8 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self._last_train_day: datetime.date | None = None
         #: 已执行决策的信号日（实盘按日去重，避免重复下单）
         self._last_executed_signal_date: datetime.date | None = None
+        #: 实盘行情缺失标志（置 True 时本次 on_bar 不交易，下次重试）
+        self._data_missing: bool = False
         self._cached_norm_panel: pl.DataFrame | None = None
         self._panel_start: datetime.date | None = None
         self._panel_end: datetime.date | None = None
@@ -1029,6 +1034,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
     def _panel_cache_key(self, signal_date: datetime.date) -> tuple[Any, ...]:
         """因子面板的缓存键（必须覆盖所有影响面板内容的要素）。"""
         bt_end = getattr(self.broker, "_bt_end", None)
+        is_live = getattr(self.broker, "_bt_start", None) is None
         return (
             signal_date,
             self.train_window,
@@ -1042,6 +1048,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             tuple(self._held_assets(signal_date)),
             self.custom_assets,
             _bars_fingerprint(),
+            "live" if is_live else "backtest",
         )
 
     def _panel_end_for(self, signal_date: datetime.date) -> datetime.date:
@@ -1053,11 +1060,29 @@ class MLMomentumReversalStrategy(BaseStrategy):
         )
         return max(signal_date, min(rebalance_end, bt_end_date))
 
+    def _load_bars(
+        self,
+        start: datetime.date,
+        end: datetime.date,
+        assets: list[str] | None = None,
+    ) -> pl.DataFrame:
+        """通过 broker 视图取已完成日线；回测走 HistBarView，实盘走 LiveBarView。"""
+        broker = self.broker
+        if hasattr(broker, "get_bars_range"):
+            return broker.get_bars_range(assets, start, end, adjust=None)
+        return daily_bars.get_bars_in_range(
+            start, end, assets=assets, adjust=None, eager_mode=True
+        )
+
     def _ensure_backtest_panel(self, signal_date: datetime.date) -> None:
         """Pre-fetch and compute causal feature panel covering the backtest window.
 
         面板按内容键缓存（模块级），参数优化时同一选股池/因子集的面板可跨组合
         复用，避免每个组合重复抓取与计算因子。
+
+        实盘时，LiveBarView 会把今日 forming bar 拼到面板末尾；训练/标签只用
+        完成 bar（date < signal_date），forming bar 仅参与当日截面打分，避免
+        用盘中价污染前瞻标签。
         """
         if (
             self._cached_norm_panel is not None
@@ -1083,11 +1108,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
             universe_assets: list[str] | None = self.custom_assets
         else:
             # Select liquid universe strictly using history up to signal_date
-            init_bars = daily_bars.get_bars_in_range(
+            init_bars = self._load_bars(
                 calendar.shift(signal_date, -25, FrameType.DAY),
                 signal_date,
-                adjust=None,
-                eager_mode=True,
             )
             assert isinstance(init_bars, pl.DataFrame)
             if init_bars.is_empty():
@@ -1105,6 +1128,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 holdings=self._held_assets(latest_init_dt),
                 index_codes=self.index_pool_codes,
             )
+            self._live_universe_assets = set(universe_assets)
             self.log(
                 f"Universe selected on {latest_init_dt}: "
                 f"{len(universe_assets)} assets, mode={self.universe_mode}"
@@ -1113,13 +1137,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 self._cached_norm_panel = pl.DataFrame()
                 return
 
-        raw_panel = daily_bars.get_bars_in_range(
-            fetch_start,
-            fetch_end,
-            assets=universe_assets,
-            adjust=None,
-            eager_mode=True,
-        )
+        raw_panel = self._load_bars(fetch_start, fetch_end, assets=universe_assets)
         assert isinstance(raw_panel, pl.DataFrame)
         if raw_panel.is_empty():
             self._cached_norm_panel = pl.DataFrame()
@@ -1132,9 +1150,17 @@ class MLMomentumReversalStrategy(BaseStrategy):
         )
         self._panel_start = signal_date
         self._panel_end = fetch_end
-        if len(_PANEL_CACHE) >= _PANEL_CACHE_MAX:
-            _PANEL_CACHE.pop(next(iter(_PANEL_CACHE)))
-        _PANEL_CACHE[panel_key] = self._cached_norm_panel
+        is_live = getattr(self.broker, "_bt_start", None) is None
+        if not is_live:
+            if len(_PANEL_CACHE) >= _PANEL_CACHE_MAX:
+                _PANEL_CACHE.pop(next(iter(_PANEL_CACHE)))
+            _PANEL_CACHE[panel_key] = self._cached_norm_panel
+
+    def _training_slice(self, panel: pl.DataFrame, signal_date: datetime.date) -> pl.DataFrame:
+        """训练用面板：剔除今日 forming bar，避免用盘中价污染前瞻标签。"""
+        if panel.is_empty():
+            return panel
+        return panel.filter(pl.col("date") < signal_date)
 
     def _explain_cache_keys(
         self, signal_date: datetime.date, build_signal: datetime.date | None = None
@@ -1509,8 +1535,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
             norm_df = standardize_features(feat_df, feature_cols)
             target_date: datetime.date = norm_df["date"].max()  # type: ignore[assignment]
             if self._should_retrain(target_date):
+                train_df = norm_df.filter(pl.col("date") < target_date)
                 self._model, self._model_engine = _fit_ml_model(
-                    norm_df,
+                    train_df,
                     train_window=self.train_window,
                     horizon=self.horizon,
                     use_lightgbm=self.use_lightgbm,
@@ -1518,7 +1545,6 @@ class MLMomentumReversalStrategy(BaseStrategy):
                     down_barrier_pct=self.stop_loss_pct,
                     feature_cols=feature_cols,
                 )
-                self._mark_retrained()
             model, engine = self._model, self._model_engine
             if model is None:
                 return [], {}, {}
@@ -1555,9 +1581,42 @@ class MLMomentumReversalStrategy(BaseStrategy):
             return [], {}, {}
 
         target_date = hist_slice["date"].max()  # type: ignore[assignment]
+        is_live = getattr(self.broker, "_bt_start", None) is None
+        if is_live:
+            today = signal_date
+            if target_date != today:
+                self._data_missing = True
+                self.log(
+                    f"实盘行情缺失：今日({today}) 无行情，最新 {target_date}，不交易",
+                    level="WARNING",
+                )
+                return [], {}, {}
+            today_rows = hist_slice.filter(pl.col("date") == today)
+            held = {
+                a
+                for a, p in self.broker.positions.items()
+                if float(getattr(p, "shares", 0) or 0) > 0
+            }
+            present = set(today_rows["asset"].to_list())
+            missing_held = sorted(a for a in held if a not in present)
+            if missing_held:
+                self._data_missing = True
+                self.log(
+                    f"实盘行情缺失：持仓 {missing_held} 今日无行情，不交易",
+                    level="ERROR",
+                )
+                return [], {}, {}
+            coverage = len(present) / max(1, len(self._live_universe_assets or []))
+            if coverage < self.live_min_quote_coverage:
+                self._data_missing = True
+                self.log(
+                    f"实盘行情覆盖不足：{coverage:.1%} < {self.live_min_quote_coverage:.0%}，不交易",
+                    level="ERROR",
+                )
+                return [], {}, {}
         if self._should_retrain(signal_date):
             self._model, self._model_engine = _fit_ml_model(
-                hist_slice,
+                self._training_slice(hist_slice, signal_date),
                 train_window=self.train_window,
                 horizon=self.horizon,
                 use_lightgbm=self.use_lightgbm,
@@ -1608,13 +1667,17 @@ class MLMomentumReversalStrategy(BaseStrategy):
         避免运行时高频轮询导致重复下单。实盘在 14:57 之后才决策
         （收盘集合竞价）；若 15:00 后仍在运行则继续算（不回退 T+1）。
         """
+        self._data_missing = False
         if not self._in_decision_window(tm):
             return
         signal_date = self._resolve_signal_date(tm)
         if self._last_executed_signal_date == signal_date:
             return
-        self._last_executed_signal_date = signal_date
         ranked, price_map, full_ranks = self._rank_for_bar(tm)
+        if self._data_missing:
+            self._data_missing = False
+            return
+        self._last_executed_signal_date = signal_date
 
         current_positions = dict(self.broker.positions)
 

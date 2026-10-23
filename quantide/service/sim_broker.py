@@ -28,6 +28,7 @@ from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.sqlite import db
 from quantide.service.abstract_broker import AbstractBroker
+from quantide.service.bar_views import LiveBarView
 from quantide.service.livequote import live_quote
 from quantide.service.market_data_hub import market_data_hub
 
@@ -85,6 +86,7 @@ class PaperBroker(AbstractBroker):
         self._last_mv_update_time = 0.0
         self._market_data = market_data
         self._auction_epsilon = float(auction_epsilon)
+        self._bar_view = LiveBarView(bars=daily_bars, market_data=market_data, today_func=self._get_today)
         self._stamp_tax = stamp_tax
         self._slippage = slippage
         self._dry_run = dry_run
@@ -304,39 +306,8 @@ class PaperBroker(AbstractBroker):
         """
         if frame_type != "1d":
             raise NotImplementedError("PaperBroker currently only supports 1d history")
-
-        end_date = self._resolve_history_end_date(end_dt)
-        # 当 include_forming_bar=False 且 end_date 落在今日时，强制只看昨日及更早。
-        if (
-            not include_forming_bar
-            and end_date == self._get_today()
-        ):
-            end_date = self._previous_trade_date(end_date)
-            hist = self._get_history_bars(asset, count, end_date, frame_type)
-        else:
-            hist = self._get_history_bars(asset, count, end_date, frame_type)
-
-        forming_applied = False
-        if include_forming_bar and self._should_attach_forming_bar(end_date, end_dt):
-            forming = self._extract_forming_bar(asset, end_date)
-            if forming is not None:
-                hist = self._concat_with_forming(hist, forming, count)
-                forming_applied = True
-            elif end_date == self._get_today():
-                # include_forming_bar=True 但 LiveQuote 还没收到今日 tick — 今日的
-                # 历史 close 还没固定，按"看昨日及更早"回退。
-                hist = self._get_history_bars(
-                    asset, count, self._previous_trade_date(end_date), frame_type
-                )
-
-        if (
-            not forming_applied
-            and "adjust" in hist.columns
-            and not hist.is_empty()
-        ):
-            hist = qfq_adjustment(hist, adj_factor_col="adjust", eager_mode=True)
-
-        return hist
+        # 委托给 LiveBarView：已完成日线来自存储，今日 forming bar 来自行情订阅中心。
+        return self._bar_view.get_history(asset, count, end_dt, frame_type, include_forming_bar)
 
     def _previous_trade_date(self, today: datetime.date) -> datetime.date:
         """返回 today 的前一个交易日（基于 calendar 优先，fallback 自然日 -1）。"""

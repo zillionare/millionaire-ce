@@ -28,6 +28,7 @@ from quantide.data.models import Asset, Order, Portfolio, Position, Trade
 from quantide.data.models.calendar import calendar
 from quantide.data.sqlite import db
 from quantide.service.abstract_broker import AbstractBroker
+from quantide.service.bar_views import HistBarView
 from quantide.service.datafeed import BarsFeedImpl
 from quantide.service.risk_overlay import TripleBarrierOverlay
 
@@ -75,6 +76,7 @@ class BacktestBroker(AbstractBroker):
         )
 
         self._data_feed: BarsFeedImpl = data_feed
+        self._bar_view = HistBarView(data_feed)
         self._stamp_duty = max(0.0, float(stamp_duty))
         self._min_commission = max(0.0, float(min_commission))
         self._transfer_fee = max(0.0, float(transfer_fee))
@@ -1350,20 +1352,19 @@ class BacktestBroker(AbstractBroker):
         _ = skip_suspended
         _ = fill_value
         _ = include_forming_bar
-        if frame_type != "1d":
-            # 目前只支持日线，后续可扩展
-            raise NotImplementedError("BacktestBroker currently only supports 1d history")
+        return self._bar_view.get_history(asset, count, end_dt, frame_type)
 
-        end_date = self.as_date(end_dt) if end_dt else self.as_date(self._clock)
-        if isinstance(end_dt, datetime.datetime) and end_dt.time() <= datetime.time(9, 30):
-            end_date = calendar.day_shift(end_date, -1)
-
-        # 使用数据源获取历史数据
-        return self._data_feed.get_bars(
-            n=count,
-            end=end_date,
-            assets=[asset],
-            adjust="qfq",
+    def get_bars_range(
+        self,
+        assets: list[str] | None,
+        start_dt: datetime.datetime | datetime.date,
+        end_dt: datetime.datetime | datetime.date | None = None,
+        adjust: str | None = None,
+        include_forming_bar: bool = False,
+    ) -> pl.DataFrame:
+        """批量日期区间日线（回测：仅已完成日线）。"""
+        return self._bar_view.get_bars_range(
+            assets, start_dt, end_dt, adjust=adjust, include_forming_bar=include_forming_bar
         )
 
     def _get_close_adjust_factors(

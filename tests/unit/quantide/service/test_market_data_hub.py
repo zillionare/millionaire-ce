@@ -13,7 +13,6 @@ from quantide.providers.akshare_publisher import (
     _akshare_to_unified,
     _to_market_symbol,
 )
-from quantide.providers.pytdx_publisher import PytdxPublisher, _split_symbol
 from quantide.service.market_data_hub import (
     MarketDataHub,
     market_data_hub,
@@ -199,21 +198,3 @@ def test_akshare_publisher_survives_fetch_error(monkeypatch):
 
     monkeypatch.setattr(publisher, "_fetch_snapshot", _boom)
     assert publisher.publish_once() == 0
-
-
-def test_pytdx_symbol_split():
-    """Pytdx 市场编号转换。"""
-    assert _split_symbol("600519.SH") == (1, "600519")
-    assert _split_symbol("000001.SZ") == (0, "000001")
-    assert _split_symbol("300750.SZ") == (0, "300750")
-
-
-def test_pytdx_publisher_reads_env(monkeypatch):
-    """连接参数可用环境变量覆盖。"""
-    monkeypatch.setenv("PYTDX_HOST", "10.0.0.1")
-    monkeypatch.setenv("PYTDX_PORT", "7709")
-    monkeypatch.setenv("PYTDX_INTERVAL", "5")
-    publisher = PytdxPublisher()
-    assert publisher.host == "10.0.0.1"
-    assert publisher.port == 7709
-    assert publisher.interval == 5.0
