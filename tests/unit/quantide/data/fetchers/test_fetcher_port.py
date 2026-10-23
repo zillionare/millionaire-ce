@@ -11,28 +11,37 @@ from quantide.core.ports.data_fetcher import (
     STANDARD_BAR_COLUMNS,
     STANDARD_INDEX_BAR_COLUMNS,
     STANDARD_INDEX_WEIGHT_COLUMNS,
+    STANDARD_MINUTE_BAR_COLUMNS,
     STANDARD_STOCK_LIST_COLUMNS,
 )
-from quantide.data.fetchers.akshare import AkshareDataFetcher
 from quantide.data.fetchers.registry import get_data_fetcher
+from quantide.data.fetchers.tencent import TencentDataFetcher
 from quantide.data.fetchers.tushare import TushareDataFetcher
 
 
 def test_data_fetcher_port_has_explicit_column_contracts():
     """端口契约暴露标准化字段集。"""
-    from quantide.core.ports.data_fetcher import (
-        STANDARD_BAR_COLUMNS,
-        STANDARD_INDEX_WEIGHT_COLUMNS,
-    )
-
     assert "date" in STANDARD_BAR_COLUMNS and "asset" in STANDARD_BAR_COLUMNS
-    assert "date" in STANDARD_INDEX_BAR_COLUMNS and "index_code" in STANDARD_INDEX_BAR_COLUMNS
+    assert (
+        "date" in STANDARD_INDEX_BAR_COLUMNS
+        and "index_code" in STANDARD_INDEX_BAR_COLUMNS
+    )
     assert "con_code" in STANDARD_INDEX_WEIGHT_COLUMNS
     assert STANDARD_STOCK_LIST_COLUMNS[0] == "asset"
+    assert STANDARD_MINUTE_BAR_COLUMNS == [
+        "date",
+        "asset",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+    ]
 
 
 def test_port_protocol_methods_exist():
-    """协议声明全部方法。"""
+    """协议声明全部方法（含分钟线与实时快照）。"""
     expected = [
         "fetch_calendar",
         "fetch_stock_list",
@@ -44,6 +53,8 @@ def test_port_protocol_methods_exist():
         "fetch_daily_basic",
         "fetch_index_bars",
         "fetch_index_weights",
+        "fetch_minute_bars",
+        "fetch_quote_snapshot",
     ]
     for name in expected:
         assert hasattr(DataFetcherPort, name)
@@ -63,43 +74,33 @@ def test_tushare_fetcher_implements_port():
         assert callable(getattr(fetcher, name))
 
 
-def test_akshare_fetcher_registered_and_switchable():
-    """注册表可按名称取到 akshare 适配器；默认仍为 tushare。"""
-    ak = get_data_fetcher("akshare")
-    assert isinstance(ak, AkshareDataFetcher)
-    assert ak.source_name == "akshare"
+def test_tencent_fetcher_registered_and_switchable():
+    """注册表可按名称取到腾讯适配器；默认仍为 tushare。"""
+    tencent = get_data_fetcher("tencent")
+    assert isinstance(tencent, TencentDataFetcher)
+    assert tencent.source_name == "tencent"
 
     default_fetcher = get_data_fetcher()
     assert isinstance(default_fetcher, TushareDataFetcher)
 
 
-def test_akshare_returns_empty_frames_without_network(monkeypatch):
-    """未安装/不可联网时，Akshare 方法返回空标准框架并记录错误。"""
+def test_tencent_unsupported_methods_report_errors():
+    """腾讯不覆盖的能力返回空表 + 明确错误，让聚合器回落到主源。"""
+    fetcher = TencentDataFetcher()
+    day = datetime.date(2024, 1, 2)
 
-    def _none():
-        return None
+    for method in (
+        fetcher.fetch_bars,
+        fetcher.fetch_adjust_factor,
+        fetcher.fetch_limit_price,
+        fetcher.fetch_st_info,
+        fetcher.fetch_daily_basic,
+    ):
+        frame, errors = method(day)
+        assert isinstance(frame, pd.DataFrame)
+        assert frame.empty
+        assert errors
 
-    monkeypatch.setattr(
-        "quantide.data.fetchers.akshare._require_akshare", _none
-    )
-    fetcher = AkshareDataFetcher()
-
-    d = datetime.date(2024, 1, 2)
-
-    df, errs = fetcher.fetch_bars(d)
-    assert isinstance(df, pd.DataFrame)
-    assert df.empty
-    assert list(df.columns) == STANDARD_BAR_COLUMNS
-    assert errs
-
-    df, errs = fetcher.fetch_index_weights(["000300.SH"], [d])
-    assert df.empty
-    assert list(df.columns) == STANDARD_INDEX_WEIGHT_COLUMNS
-
-    df, errs = fetcher.fetch_index_bars(["000300.SH"], d, d)
-    assert df.empty
-    assert errs
-
-    assert fetcher.fetch_stock_list() is None
-    cal = fetcher.fetch_calendar(d)
-    assert cal.empty
+    frame, errors = fetcher.fetch_index_weights(["000300.SH"], [day])
+    assert frame.empty
+    assert errors

@@ -63,6 +63,18 @@ STANDARD_STOCK_LIST_COLUMNS: list[str] = [
     "delist_date",
 ]
 
+#: 标准分钟线字段（``date`` 为 datetime64[ms]，含时分）
+STANDARD_MINUTE_BAR_COLUMNS: list[str] = [
+    "date",
+    "asset",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+]
+
 #: 错误记录格式：[func_name, identifier, message]
 ErrorRecord = list[list]
 
@@ -196,5 +208,41 @@ class DataFetcherPort(Protocol):
 
         Returns:
             列等于 :data:`STANDARD_INDEX_WEIGHT_COLUMNS`。
+        """
+        ...
+
+    # ------------------------------------------------------------------
+    # 分钟线 / 实时快照（分钟线仅用于模拟盘与 30 分钟策略，可不落盘）
+    # ------------------------------------------------------------------
+    def fetch_minute_bars(
+        self,
+        asset: str,
+        start_date: datetime.date | None = None,
+        end_date: datetime.date | None = None,
+        period: str = "30",
+        count: int = 320,
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        """获取分钟线。
+
+        Args:
+            asset: 证券代码（``600519.SH``）。
+            start_date: 起始日；None 表示不限。
+            end_date: 结束日；None 表示不限。
+            period: 周期，``1``/``5``/``15``/``30``/``60``（分钟）。
+            count: 最多返回多少根（数据源单次上限内）。
+
+        Returns:
+            列等于 :data:`STANDARD_MINUTE_BAR_COLUMNS`；无数据返回空 DataFrame。
+        """
+        ...
+
+    def fetch_quote_snapshot(
+        self, symbols: Iterable[str] | str
+    ) -> dict[str, dict]:
+        """获取实时行情快照。
+
+        Returns:
+            ``{symbol: {price, open, high, low, volume, amount,
+            prev_close, up_limit, down_limit, ts}}``；缺失字段为 None。
         """
         ...

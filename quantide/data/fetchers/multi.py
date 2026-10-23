@@ -1,0 +1,334 @@
+"""多数据源聚合器（主源 + 补充源）。
+
+现实中单一数据源无法覆盖全部需求：
+
+======== ================================================== ==========================
+数据     主源                                                补充源
+======== ================================================== ==========================
+日线     Tushare（复权因子/涨跌停/ST/指数成分 PIT 一并提供）  腾讯（日线兜底）
+指数日线 Tushare                                            腾讯
+30 分钟  腾讯（近期增量）/ BaoStock（历史一次性回补）           —
+实时行情 腾讯（``qt.gtimg.cn``，含当日涨跌停）                —
+======== ================================================== ==========================
+
+上层统一通过 :class:`MultiSourceDataFetcher` 取数；每类数据可配置自己的
+fetcher 优先级，首选失败时自动降级到下一个。
+"""
+
+from __future__ import annotations
+
+import datetime
+from collections.abc import Iterable
+from typing import Any
+
+import pandas as pd
+
+from quantide.core.ports.data_fetcher import (
+    STANDARD_MINUTE_BAR_COLUMNS,
+    ErrorRecord,
+)
+
+#: 默认的数据类型 -> fetcher 优先级
+DEFAULT_STAGES: dict[str, list[str]] = {
+    "calendar": ["tushare"],
+    "stock_list": ["tushare"],
+    "daily_bars": ["tushare", "tencent"],
+    "adjust_factor": ["tushare"],
+    "limit_price": ["tushare"],
+    "st_info": ["tushare"],
+    "daily_basic": ["tushare"],
+    "index_bars": ["tushare", "tencent"],
+    "index_weights": ["tushare"],
+    "minute_bars": ["tencent", "baostock"],
+    "quote_snapshot": ["tencent"],
+}
+
+
+class BaostockMinuteAdapter:
+    """把 :class:`BaostockMinuteFetcher` 适配成端口风格的分钟线接口。"""
+
+    source_name = "baostock"
+
+    def __init__(self, fetcher: Any) -> None:
+        self._fetcher = fetcher
+
+    def fetch_minute_bars(
+        self,
+        asset: str,
+        start_date: datetime.date | None = None,
+        end_date: datetime.date | None = None,
+        period: str = "30",
+        count: int = 320,
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        if start_date is None or end_date is None:
+            return (
+                pd.DataFrame(columns=STANDARD_MINUTE_BAR_COLUMNS),
+                [["fetch_minute_bars", asset, "BaoStock 需要 start_date/end_date"]],
+            )
+        try:
+            frame = self._fetcher.fetch_minute_bars(
+                asset, start_date, end_date, frequency=str(period)
+            )
+        except Exception as exc:
+            return (
+                pd.DataFrame(columns=STANDARD_MINUTE_BAR_COLUMNS),
+                [["fetch_minute_bars", asset, str(exc)]],
+            )
+        if frame is None or frame.empty:
+            return pd.DataFrame(columns=STANDARD_MINUTE_BAR_COLUMNS), []
+        frame = frame.copy()
+        if "dt" in frame.columns:
+            frame["date"] = pd.to_datetime(frame["dt"], errors="coerce")
+        elif "date" in frame.columns and "time" in frame.columns:
+            frame["date"] = pd.to_datetime(
+                frame["date"].astype(str) + " " + frame["time"].astype(str),
+                format="%Y-%m-%d %H%M%S%f",
+                errors="coerce",
+            )
+        else:
+            frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+        frame = frame.dropna(subset=["date"]).sort_values("date").tail(int(count))
+        for col in ("volume", "amount"):
+            if col not in frame.columns:
+                frame[col] = 0.0
+        return frame[STANDARD_MINUTE_BAR_COLUMNS].reset_index(drop=True), []
+
+
+class MultiSourceDataFetcher:
+    """按数据类型路由到不同 fetcher，失败自动降级。"""
+
+    source_name = "multi"
+
+    def __init__(
+        self,
+        fetchers: dict[str, Any] | None = None,
+        stages: dict[str, list[str]] | None = None,
+    ) -> None:
+        """初始化。
+
+        Args:
+            fetchers: ``{name: fetcher}``；未提供时从注册表延迟解析。
+            stages: 覆盖默认的 ``DEFAULT_STAGES``。
+        """
+        self._fetchers: dict[str, Any] = dict(fetchers or {})
+        self._stages = {**DEFAULT_STAGES, **(stages or {})}
+
+    # ------------------------------------------------------------------
+    # 内部工具
+    # ------------------------------------------------------------------
+    def _resolve(self, name: str) -> Any | None:
+        if name in self._fetchers:
+            return self._fetchers[name]
+        try:
+            from quantide.data.fetchers.registry import get_data_fetcher
+
+            fetcher = get_data_fetcher(name)
+        except Exception:
+            return None
+        self._fetchers[name] = fetcher
+        return fetcher
+
+    def _fetchers_for(self, stage: str) -> list[tuple[str, Any]]:
+        resolved: list[tuple[str, Any]] = []
+        for name in self._stages.get(stage, []):
+            fetcher = self._resolve(name)
+            if fetcher is not None:
+                resolved.append((name, fetcher))
+        return resolved
+
+    @staticmethod
+    def _has_data(result: Any) -> bool:
+        if result is None:
+            return False
+        if isinstance(result, tuple):
+            frame = result[0]
+            errors = result[1] if len(result) > 1 else []
+            if frame is None:
+                return False
+            if isinstance(frame, pd.DataFrame):
+                return not frame.empty or not errors
+            return True
+        if isinstance(result, pd.DataFrame):
+            return not result.empty
+        return bool(result)
+
+    def _call(
+        self,
+        stage: str,
+        method: str,
+        *args: Any,
+        empty: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        errors: ErrorRecord = []
+        for name, fetcher in self._fetchers_for(stage):
+            func = getattr(fetcher, method, None)
+            if func is None:
+                continue
+            try:
+                result = func(*args, **kwargs)
+            except Exception as exc:
+                errors.append([name, method, str(exc)])
+                continue
+            if self._has_data(result):
+                if isinstance(result, tuple) and len(result) > 1 and errors:
+                    frame = result[0]
+                    return frame, [*errors, *(result[1] or [])]
+                return result
+            if isinstance(result, tuple) and len(result) > 1 and result[1]:
+                errors.extend(result[1])
+        if isinstance(empty, tuple):
+            frame, base_errors = empty
+            return frame, [*errors, *(base_errors or [])]
+        return empty if empty is not None else pd.DataFrame()
+
+    # ------------------------------------------------------------------
+    # 日线与辅助字段
+    # ------------------------------------------------------------------
+    def fetch_calendar(self, epoch: datetime.date) -> pd.DataFrame:
+        return self._call(
+            "calendar",
+            "fetch_calendar",
+            epoch,
+            empty=pd.DataFrame(
+                {
+                    "date": pd.Series(dtype="datetime64[ms]"),
+                    "is_open": pd.Series(dtype="int64"),
+                }
+            ),
+        )
+
+    def fetch_stock_list(self) -> pd.DataFrame | None:
+        return self._call("stock_list", "fetch_stock_list", empty=None)
+
+    def fetch_adjust_factor(
+        self, dates: Iterable[datetime.date] | datetime.date
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        return self._call("adjust_factor", "fetch_adjust_factor", dates)
+
+    def fetch_bars(
+        self, dates: Iterable[datetime.date] | datetime.date
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        return self._call("daily_bars", "fetch_bars", dates)
+
+    def fetch_limit_price(
+        self, dates: Iterable[datetime.date] | datetime.date
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        return self._call("limit_price", "fetch_limit_price", dates)
+
+    def fetch_st_info(
+        self, dates: Iterable[datetime.date] | datetime.date
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        return self._call("st_info", "fetch_st_info", dates)
+
+    def fetch_bars_ext(
+        self,
+        dates: Iterable[datetime.date] | datetime.date,
+        phase_callback: Any = None,
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        return self._call(
+            "daily_bars", "fetch_bars_ext", dates, phase_callback=phase_callback
+        )
+
+    def fetch_daily_basic(
+        self, dates: Iterable[datetime.date] | datetime.date
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        return self._call("daily_basic", "fetch_daily_basic", dates)
+
+    # ------------------------------------------------------------------
+    # 指数
+    # ------------------------------------------------------------------
+    def fetch_index_bars(
+        self,
+        index_codes: Iterable[str] | str,
+        start_date: datetime.date,
+        end_date: datetime.date,
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        return self._call(
+            "index_bars", "fetch_index_bars", index_codes, start_date, end_date
+        )
+
+    def fetch_index_weights(
+        self,
+        index_codes: Iterable[str] | str,
+        snapshot_dates: Iterable[datetime.date],
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        return self._call(
+            "index_weights", "fetch_index_weights", index_codes, snapshot_dates
+        )
+
+    # ------------------------------------------------------------------
+    # 分钟线 / 实时
+    # ------------------------------------------------------------------
+    def fetch_minute_bars(
+        self,
+        asset: str,
+        start_date: datetime.date | None = None,
+        end_date: datetime.date | None = None,
+        period: str = "30",
+        count: int = 320,
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
+        errors: ErrorRecord = []
+        for name, fetcher in self._fetchers_for("minute_bars"):
+            func = getattr(fetcher, "fetch_minute_bars", None)
+            if func is None:
+                continue
+            try:
+                result = func(
+                    asset,
+                    start_date=start_date,
+                    end_date=end_date,
+                    period=str(period),
+                    count=int(count),
+                )
+            except TypeError:
+                try:
+                    result = func(
+                        asset, start_date, end_date, frequency=str(period)
+                    )
+                except Exception as exc:
+                    errors.append([name, "fetch_minute_bars", str(exc)])
+                    continue
+            except Exception as exc:
+                errors.append([name, "fetch_minute_bars", str(exc)])
+                continue
+            if isinstance(result, pd.DataFrame):
+                frame, item_errors = result, []
+            else:
+                frame = result[0]
+                item_errors = result[1] if len(result) > 1 else []
+            if frame is not None and not frame.empty:
+                frame = frame.copy()
+                if "date" not in frame.columns and "dt" in frame.columns:
+                    frame = frame.rename(columns={"dt": "date"})
+                return frame, [*errors, *(item_errors or [])]
+            errors.extend(item_errors or [])
+        return pd.DataFrame(columns=STANDARD_MINUTE_BAR_COLUMNS), errors
+
+    def fetch_quote_snapshot(
+        self, symbols: Iterable[str] | str
+    ) -> dict[str, dict]:
+        for _name, fetcher in self._fetchers_for("quote_snapshot"):
+            func = getattr(fetcher, "fetch_quote_snapshot", None)
+            if func is None:
+                continue
+            try:
+                result = func(symbols)
+            except Exception:
+                continue
+            if result:
+                return result
+        return {}
+
+    # ------------------------------------------------------------------
+    # 便捷构造
+    # ------------------------------------------------------------------
+    @classmethod
+    def with_baostock(
+        cls,
+        baostock_fetcher: Any,
+        stages: dict[str, list[str]] | None = None,
+    ) -> MultiSourceDataFetcher:
+        """构造带 BaoStock 历史分钟线补充的聚合器。"""
+        adapter = BaostockMinuteAdapter(baostock_fetcher)
+        return cls(fetchers={"baostock": adapter}, stages=stages)

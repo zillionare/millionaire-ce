@@ -7,12 +7,8 @@ import time
 
 from quantide.core.enums import Topics
 from quantide.core.message import msg_hub
-from quantide.providers.akshare_publisher import (
-    DEFAULT_SYMBOLS,
-    AksharePublisher,
-    _akshare_to_unified,
-    _to_market_symbol,
-)
+from quantide.data.fetchers.tencent import from_tencent_symbol, to_tencent_symbol
+from quantide.providers.tencent_publisher import TencentPublisher
 from quantide.service.market_data_hub import (
     MarketDataHub,
     market_data_hub,
@@ -137,27 +133,29 @@ def test_global_hub_is_singleton():
     assert isinstance(market_data_hub, MarketDataHub)
 
 
-def test_akshare_publisher_defaults_to_50_symbols():
-    """示例发布者默认 50 支标的。"""
-    assert len(DEFAULT_SYMBOLS) == 50
-    publisher = AksharePublisher()
-    assert len(publisher.symbols) == 50
+def test_tencent_symbol_conversion():
+    """统一代码与腾讯代码互转。"""
+    assert to_tencent_symbol("600519.SH") == "sh600519"
+    assert to_tencent_symbol("000001.SZ") == "sz000001"
+    assert to_tencent_symbol("399006.SZ") == "sz399006"
+    assert from_tencent_symbol("sh600519") == "600519.SH"
+    assert from_tencent_symbol("sz000001") == "000001.SZ"
 
 
-def test_akshare_symbol_conversion():
-    """代码格式转换。"""
-    assert _to_market_symbol("600519") == "600519.SH"
-    assert _to_market_symbol("000001") == "000001.SZ"
-    assert _akshare_to_unified("sh600519") == "600519.SH"
-    assert _akshare_to_unified("sz000001") == "000001.SZ"
+class _FakeTencentFetcher:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+
+    def fetch_quote_snapshot(self, symbols):
+        if isinstance(self.snapshot, Exception):
+            raise self.snapshot
+        return dict(self.snapshot)
 
 
-def test_akshare_publisher_publishes_snapshot(monkeypatch):
-    """发布者把拉到的快照发布到总线。"""
-    publisher = AksharePublisher(["600519.SH"])
-
-    def _fake_fetch():
-        return {
+def test_tencent_publisher_publishes_quotes_and_limits():
+    """发布实时快照，同时发布当日涨跌停。"""
+    fake = _FakeTencentFetcher(
+        {
             "600519.SH": {
                 "price": 1318.49,
                 "open": 1303.21,
@@ -165,36 +163,33 @@ def test_akshare_publisher_publishes_snapshot(monkeypatch):
                 "low": 1296.0,
                 "volume": 42491,
                 "amount": 557622.0,
-                "ts": "2026-10-22T15:00:00",
+                "up_limit": 1434.0,
+                "down_limit": 1174.0,
+                "ts": datetime.datetime(2026, 10, 22, 15, 0),
             }
         }
+    )
+    publisher = TencentPublisher(["600519.SH"], fetcher=fake)
 
-    monkeypatch.setattr(publisher, "_fetch_snapshot", _fake_fetch)
-
-    received: list[dict] = []
-
-    def _on_quotes(payload):
-        received.append(payload)
-
-    msg_hub.subscribe(Topics.QUOTES_ALL.value, _on_quotes)
+    quotes: list[dict] = []
+    limits: list[dict] = []
+    msg_hub.subscribe(Topics.QUOTES_ALL.value, quotes.append)
+    msg_hub.subscribe(Topics.STOCK_LIMIT.value, limits.append)
     try:
-        count = publisher.publish_once()
-        assert count == 1
-        # 消息总线是异步分发，需要等待送达
-        assert _wait_until(lambda: bool(received))
+        assert publisher.publish_once() == 1
+        assert _wait_until(lambda: bool(quotes) and bool(limits))
     finally:
-        msg_hub.unsubscribe(Topics.QUOTES_ALL.value, _on_quotes)
+        msg_hub.unsubscribe(Topics.QUOTES_ALL.value, quotes.append)
+        msg_hub.unsubscribe(Topics.STOCK_LIMIT.value, limits.append)
 
-    assert received
-    assert received[0]["600519.SH"]["price"] == 1318.49
+    assert quotes[0]["600519.SH"]["price"] == 1318.49
+    assert limits[0]["600519.SH"]["up"] == 1434.0
+    assert limits[0]["600519.SH"]["up_limit"] == 1434.0
 
 
-def test_akshare_publisher_survives_fetch_error(monkeypatch):
+def test_tencent_publisher_survives_fetch_error():
     """拉取失败时发布 0 条而不抛异常。"""
-    publisher = AksharePublisher(["600519.SH"])
-
-    def _boom():
-        raise RuntimeError("网络错误")
-
-    monkeypatch.setattr(publisher, "_fetch_snapshot", _boom)
+    publisher = TencentPublisher(
+        ["600519.SH"], fetcher=_FakeTencentFetcher(RuntimeError("网络错误"))
+    )
     assert publisher.publish_once() == 0
