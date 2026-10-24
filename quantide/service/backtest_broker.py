@@ -1224,13 +1224,14 @@ class BacktestBroker(AbstractBroker):
     def _remove_for_bid(
         self, bars: pl.DataFrame, bid_price: float, up_limit: float
     ) -> pl.DataFrame:
-        """移除涨停和价格高于委买价的 bar
+        """分钟线买入：只要 bar 未“完全封死”在涨停，就允许成交。
 
-        用在按分钟线成交时。
+        - ``low < up_limit`` 表示该 bar 内曾出现低于涨停价的价格；
+        - 成交价仍使用 bar 价格（若收在涨停，即按涨停价成交）；
+        - 全天/整段完全封死（``low >= up_limit``）的 bar 不参与撮合。
         """
-        # 涨停判断：close >= up_limit (容差处理)
         return bars.filter(
-            (pl.col("close") < up_limit)
+            (pl.col("low") < up_limit)
             & (pl.col("close") <= bid_price)
             & (pl.col("volume").is_not_null())
             & (pl.col("volume") > 0)
@@ -1239,9 +1240,13 @@ class BacktestBroker(AbstractBroker):
     def _remove_for_ask(
         self, bars: pl.DataFrame, ask_price: float, down_limit: float
     ) -> pl.DataFrame:
-        """移除跌停和价格低于委卖价的 bar"""
+        """分钟线卖出：只要 bar 未“完全封死”在跌停，就允许成交。
+
+        - ``high > down_limit`` 表示该 bar 内曾出现高于跌停价的价格；
+        - 成交价仍使用 bar 价格（若收在跌停，即按跌停价成交）。
+        """
         return bars.filter(
-            (pl.col("close") > down_limit)
+            (pl.col("high") > down_limit)
             & (pl.col("close") >= ask_price)
             & (pl.col("volume").is_not_null())
             & (pl.col("volume") > 0)

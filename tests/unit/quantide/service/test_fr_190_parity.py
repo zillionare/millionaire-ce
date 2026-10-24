@@ -13,11 +13,14 @@ Live 模式下, 时间/价格/数量规则由交易所/柜台强制保证 (本�
 
 from __future__ import annotations
 
+import datetime
+
 import pytest
 
 from quantide.core.errors import (
     InsufficientCash,
     NonMultipleOfLotSize,
+    PriceOutOfLimit,
 )
 from quantide.data.sqlite import db
 from quantide.service.sim_broker import PaperBroker
@@ -31,11 +34,11 @@ def paper_broker() -> PaperBroker:
 
 @pytest.mark.asyncio
 async def test_fr_190_pre_order_validation_price_limit(paper_broker):
-    """AC-FR-190: paper 不对涨跌停拒单，超限价格钳制到边界 (FR-140 修订)."""
+    """AC-FR-190: paper broker 在下单前做预校验 — 限价单价格超限拒绝 (FR-140)."""
     paper_broker._cash = 1_000_000.0
     paper_broker._limits["000001.SZ"] = {"down": 9.0, "up": 11.0}
-    await paper_broker.buy("000001.SZ", 100, price=20.0)
-    assert paper_broker._active_orders["000001.SZ"][-1].price == 11.0
+    with pytest.raises(PriceOutOfLimit):
+        await paper_broker.buy("000001.SZ", 100, price=20.0)
 
 
 @pytest.mark.asyncio

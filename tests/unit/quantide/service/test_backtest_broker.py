@@ -1352,3 +1352,61 @@ def test_sell_minute_missing_down_limit_rejected(minute_broker, data_feed):
     )
     with pytest.raises(LimitPrice):
         asyncio.run(minute_broker.sell("000001.SZ", 100, 10.0, dt))
+
+
+def test_buy_minute_fills_at_up_limit_when_not_fully_locked(minute_broker, data_feed):
+    """30 分钟 bar 内曾跌破涨停价：允许成交，成交价=涨停价。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [dt], "tm": [dt], "price": [11.0],
+        "open": [11.0], "close": [11.0], "high": [11.0], "low": [10.5],
+        "volume": [10], "up_limit": [11.0], "down_limit": [9.0],
+    })
+    res = asyncio.run(minute_broker.buy("000001.SZ", 100, 0, dt))
+    assert len(res.trades) == 1
+    assert res.trades[0].price == pytest.approx(11.0)
+
+
+def test_buy_minute_rejects_when_fully_locked_at_up_limit(minute_broker, data_feed):
+    """30 分钟 bar 全程封死涨停：不允许成交。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [dt], "tm": [dt], "price": [11.0],
+        "open": [11.0], "close": [11.0], "high": [11.0], "low": [11.0],
+        "volume": [10], "up_limit": [11.0], "down_limit": [9.0],
+    })
+    with pytest.raises(NoDataForMatch):
+        asyncio.run(minute_broker.buy("000001.SZ", 100, 0, dt))
+
+
+def test_sell_minute_fills_at_down_limit_when_not_fully_locked(minute_broker, data_feed):
+    """30 分钟 bar 内曾突破跌停价：允许成交，成交价=跌停价。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [dt], "tm": [dt], "price": [9.0],
+        "open": [9.0], "close": [9.0], "high": [9.5], "low": [9.0],
+        "volume": [10], "up_limit": [11.0], "down_limit": [9.0],
+    })
+    minute_broker._positions["000001.SZ"] = Position(
+        portfolio_id="test_bt_min", dt=datetime.date(2024, 1, 1), asset="000001.SZ",
+        shares=1000, price=10.0, avail=1000, mv=10000, profit=0
+    )
+    res = asyncio.run(minute_broker.sell("000001.SZ", 100, 0, dt))
+    assert len(res.trades) == 1
+    assert res.trades[0].price == pytest.approx(9.0)
+
+
+def test_sell_minute_rejects_when_fully_locked_at_down_limit(minute_broker, data_feed):
+    """30 分钟 bar 全程封死跌停：不允许成交。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [dt], "tm": [dt], "price": [9.0],
+        "open": [9.0], "close": [9.0], "high": [9.0], "low": [9.0],
+        "volume": [10], "up_limit": [11.0], "down_limit": [9.0],
+    })
+    minute_broker._positions["000001.SZ"] = Position(
+        portfolio_id="test_bt_min", dt=datetime.date(2024, 1, 1), asset="000001.SZ",
+        shares=1000, price=10.0, avail=1000, mv=10000, profit=0
+    )
+    with pytest.raises(NoDataForMatch):
+        asyncio.run(minute_broker.sell("000001.SZ", 100, 0, dt))

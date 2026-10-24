@@ -144,10 +144,12 @@ def test_init_backtest_raises_dup_when_assets_exist(broker, data_feed):
 
 def test_match_bid_minute_raises_when_bars_empty_after_remove(minute_broker, data_feed):
     """Line 559: all bars filtered by _remove_for_bid -> NoDataForMatch."""
-    # Set up minute bars where close >= up_limit (all filtered out).
+    # Set up minute bars fully locked at up_limit (all filtered out).
     data_feed.match_data = pl.DataFrame({
         "date": [datetime.date(2024, 1, 2)],
         "open": [11.0],
+        "high": [11.0],
+        "low": [11.0],
         "close": [11.0],
         "up_limit": [11.0],
         "down_limit": [9.0],
@@ -165,6 +167,8 @@ def test_match_bid_minute_raises_when_filled_zero(minute_broker, data_feed):
     data_feed.match_data = pl.DataFrame({
         "date": [datetime.date(2024, 1, 2)],
         "open": [10.0],
+        "high": [10.5],
+        "low": [9.5],
         "close": [10.0],
         "up_limit": [11.0],
         "down_limit": [9.0],
@@ -236,6 +240,8 @@ def test_match_ask_minute_raises_when_bars_empty_after_remove(minute_broker, dat
     data_feed.match_data = pl.DataFrame({
         "date": [datetime.date(2024, 1, 2)],
         "open": [10.0],
+        "high": [10.5],
+        "low": [9.5],
         "close": [10.0],
         "up_limit": [11.0],
         "down_limit": [9.0],
@@ -246,10 +252,12 @@ def test_match_ask_minute_raises_when_bars_empty_after_remove(minute_broker, dat
     dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
     asyncio.run(minute_broker.buy("000001.SZ", 1000, 0, dt))
 
-    # Now set up minute bars where close <= down_limit (all filtered by _remove_for_ask).
+    # Now set up minute bars fully locked at down_limit.
     data_feed.match_data = pl.DataFrame({
         "date": [datetime.date(2024, 1, 3)],
         "open": [9.0],
+        "high": [9.0],
+        "low": [9.0],
         "close": [9.0],
         "up_limit": [11.0],
         "down_limit": [9.0],
@@ -267,6 +275,8 @@ def test_match_ask_minute_raises_when_filled_zero(minute_broker, data_feed):
     data_feed.match_data = pl.DataFrame({
         "date": [datetime.date(2024, 1, 2)],
         "open": [10.0],
+        "high": [10.5],
+        "low": [9.5],
         "close": [10.0],
         "up_limit": [11.0],
         "down_limit": [9.0],
@@ -281,6 +291,8 @@ def test_match_ask_minute_raises_when_filled_zero(minute_broker, data_feed):
     data_feed.match_data = pl.DataFrame({
         "date": [datetime.date(2024, 1, 3)],
         "open": [10.0],
+        "high": [10.5],
+        "low": [9.5],
         "close": [10.0],
         "up_limit": [11.0],
         "down_limit": [9.0],
