@@ -31,6 +31,8 @@ class QuoteSnapshot:
     volume: float | None = None
     amount: float | None = None
     ts: datetime.datetime | None = None
+    #: 交易所调整后的昨收价（除权除息日与上一交易日实际收盘不同）
+    prev_close: float | None = None
 
 
 @dataclass

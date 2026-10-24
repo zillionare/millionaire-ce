@@ -249,3 +249,216 @@ def test_paper_broker_delegates_minute_history(monkeypatch):
         assert frame["close"][0] == 10.5
     finally:
         broker.close()
+
+
+class _FakeDailyClose:
+    """上一交易日原始日线（用于除权日识别）。"""
+
+    def __init__(self, close: float) -> None:
+        self._close = close
+
+    def get_bars(self, n, end=None, assets=None, adjust=None):
+        return pl.DataFrame(
+            {
+                "date": [datetime.date(2024, 1, 2)],
+                "asset": ["600519.SH"],
+                "open": [self._close],
+                "high": [self._close],
+                "low": [self._close],
+                "close": [self._close],
+                "volume": [1000.0],
+                "amount": [100000.0],
+                "adjust": [2.0],
+                "is_st": [False],
+                "up_limit": [110.0],
+                "down_limit": [90.0],
+            }
+        ).with_columns(pl.col("date").cast(pl.Date))
+
+
+class _ExRightMarketData:
+    def __init__(self, prev_close: float | None) -> None:
+        self._prev_close = prev_close
+
+    def snapshot(self, symbols):
+        return {
+            "600519.SH": {
+                "price": 95.5,
+                "open": 95.2,
+                "high": 96.0,
+                "low": 95.0,
+                "volume": 200.0,
+                "amount": 2000.0,
+                "prev_close": self._prev_close,
+                "ts": datetime.datetime(2024, 1, 3, 10, 5),
+            }
+        }
+
+    def get_limits(self, asset):
+        return 100.0, 90.0
+
+
+class _StaticMinuteModel:
+    def __init__(self, frame: pl.DataFrame) -> None:
+        self._frame = frame
+
+    def get_bars(self, n, end=None, assets=None, adjust="qfq"):
+        frame = self._frame
+        if isinstance(end, datetime.datetime):
+            frame = frame.filter(pl.col("date") <= end)
+        return frame
+
+
+def _history_jan2() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "date": [datetime.datetime(2024, 1, 2, 15, 0)],
+            "asset": ["600519.SH"],
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.0],
+            "volume": [100.0],
+            "amount": [10000.0],
+            "adjust": [2.0],
+            "is_st": [False],
+            "up_limit": [110.0],
+            "down_limit": [90.0],
+        }
+    ).with_columns(pl.col("date").cast(pl.Datetime("ms")))
+
+
+def _forming_jan3() -> _FakeAggregator:
+    return _FakeAggregator(
+        forming={
+            "date": datetime.datetime(2024, 1, 3, 10, 30),
+            "asset": "600519.SH",
+            "open": 95.2,
+            "high": 96.0,
+            "low": 95.0,
+            "close": 95.5,
+            "volume": 20.0,
+            "amount": 2000.0,
+        }
+    )
+
+
+def test_live_minute_rebases_history_on_ex_right_day(monkeypatch):
+    """除权日把 qfq 历史换算到今日基准，今日 forming 保持原始价。"""
+    monkeypatch.setattr(
+        "quantide.data.models.minute_bars.minute_bars",
+        _StaticMinuteModel(_history_jan2()),
+    )
+    view = LiveBarView(
+        bars=_FakeDailyClose(100.0),
+        market_data=_ExRightMarketData(95.0),
+        today_func=lambda: datetime.date(2024, 1, 3),
+        minute_aggregator=_forming_jan3(),
+    )
+    frame = view.get_history(
+        "600519.SH",
+        5,
+        datetime.datetime(2024, 1, 3, 10, 5),
+        FrameType.MIN30,
+        include_forming_bar=True,
+    ).sort("date")
+    history = frame.filter(pl.col("date").dt.date() == datetime.date(2024, 1, 2)).row(0, named=True)
+    forming = frame.filter(pl.col("date").dt.date() == datetime.date(2024, 1, 3)).row(0, named=True)
+    assert history["close"] == pytest.approx(95.0)
+    assert history["open"] == pytest.approx(95.0)
+    assert history["up_limit"] == pytest.approx(104.5)
+    assert history["volume"] == pytest.approx(100.0 / 0.95)
+    assert forming["close"] == pytest.approx(95.5)
+    assert forming["volume"] == pytest.approx(20.0)
+
+
+def test_live_minute_no_rebase_on_normal_day(monkeypatch):
+    """非除权日（昨收=昨日收盘）不做任何缩放。"""
+    monkeypatch.setattr(
+        "quantide.data.models.minute_bars.minute_bars",
+        _StaticMinuteModel(_history_jan2()),
+    )
+    view = LiveBarView(
+        bars=_FakeDailyClose(100.0),
+        market_data=_ExRightMarketData(100.0),
+        today_func=lambda: datetime.date(2024, 1, 3),
+        minute_aggregator=_forming_jan3(),
+    )
+    frame = view.get_history(
+        "600519.SH",
+        5,
+        datetime.datetime(2024, 1, 3, 10, 5),
+        FrameType.MIN30,
+    )
+    history = frame.filter(pl.col("date").dt.date() == datetime.date(2024, 1, 2)).row(0, named=True)
+    assert history["close"] == pytest.approx(100.0)
+    assert history["volume"] == pytest.approx(100.0)
+
+
+def test_live_minute_without_prev_close_keeps_old_behavior(monkeypatch):
+    """发布者未提供 prev_close 时退回原逻辑。"""
+    monkeypatch.setattr(
+        "quantide.data.models.minute_bars.minute_bars",
+        _StaticMinuteModel(_history_jan2()),
+    )
+    view = LiveBarView(
+        bars=_FakeDailyClose(100.0),
+        market_data=_ExRightMarketData(None),
+        today_func=lambda: datetime.date(2024, 1, 3),
+        minute_aggregator=_forming_jan3(),
+    )
+    frame = view.get_history(
+        "600519.SH",
+        5,
+        datetime.datetime(2024, 1, 3, 10, 5),
+        FrameType.MIN30,
+    )
+    history = frame.filter(pl.col("date").dt.date() == datetime.date(2024, 1, 2)).row(0, named=True)
+    assert history["close"] == pytest.approx(100.0)
+
+
+def test_live_minute_skips_rebase_when_today_already_stored(monkeypatch):
+    """盘后同步已含今日数据时，qfq 基准已是今日因子，不能重复缩放。"""
+    frame_with_today = pl.concat(
+        [
+            _history_jan2(),
+            pl.DataFrame(
+                {
+                    "date": [datetime.datetime(2024, 1, 3, 10, 0)],
+                    "asset": ["600519.SH"],
+                    "open": [95.5],
+                    "high": [96.0],
+                    "low": [95.0],
+                    "close": [95.5],
+                    "volume": [200.0],
+                    "amount": [2000.0],
+                    "adjust": [1.9],
+                    "is_st": [False],
+                    "up_limit": [104.5],
+                    "down_limit": [85.5],
+                }
+            ).with_columns(pl.col("date").cast(pl.Datetime("ms"))),
+        ],
+        how="vertical_relaxed",
+    )
+    monkeypatch.setattr(
+        "quantide.data.models.minute_bars.minute_bars",
+        _StaticMinuteModel(frame_with_today),
+    )
+    view = LiveBarView(
+        bars=_FakeDailyClose(100.0),
+        market_data=_ExRightMarketData(95.0),
+        today_func=lambda: datetime.date(2024, 1, 3),
+        minute_aggregator=_forming_jan3(),
+    )
+    frame = view.get_history(
+        "600519.SH",
+        5,
+        datetime.datetime(2024, 1, 3, 14, 0),
+        FrameType.MIN30,
+        include_forming_bar=False,
+    ).sort("date")
+    history = frame.filter(pl.col("date").dt.date() == datetime.date(2024, 1, 2)).row(0, named=True)
+    today = frame.filter(pl.col("date").dt.date() == datetime.date(2024, 1, 3)).row(0, named=True)
+    assert history["close"] == pytest.approx(100.0)
+    assert today["close"] == pytest.approx(95.5)

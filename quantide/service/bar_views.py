@@ -233,6 +233,79 @@ class LiveBarView(HistBarView):
 
         return market_data_hub.get_limits(asset)
 
+    def _previous_raw_close(
+        self, asset: str, day: datetime.date
+    ) -> float | None:
+        """上一交易日的原始收盘价（用于识别除权日）。"""
+        from quantide.data.models.calendar import calendar as market_calendar
+
+        try:
+            prev_day = market_calendar.day_shift(day, -1)
+        except Exception:
+            prev_day = day - datetime.timedelta(days=1)
+        try:
+            frame = self._bars.get_bars(
+                n=1, end=prev_day, assets=[asset], adjust=None
+            )
+        except Exception:
+            return None
+        if frame is None or frame.is_empty() or "close" not in frame.columns:
+            return None
+        if "date" in frame.columns:
+            frame = frame.sort("date")
+        value = frame["close"][-1]
+        return float(value) if value else None
+
+    def _today_basis_ratio(self, asset: str, day: datetime.date) -> float:
+        """除权日盘中把历史复权价换算到今日基准的比例。
+
+        交易所当天的昨收价已按除权除息调整，因此
+        ``prev_close / 上一交易日原始收盘`` 就是今日因子相对昨日因子的比例。
+        非除权日两者相等，返回 1.0。
+        """
+        snapshot = self._snapshot_for(asset)
+        if not snapshot:
+            return 1.0
+        prev_close = snapshot.get("prev_close")
+        raw_prev = self._previous_raw_close(asset, day)
+        if not prev_close or not raw_prev:
+            return 1.0
+        ratio = float(prev_close) / float(raw_prev)
+        if ratio <= 0 or abs(ratio - 1.0) <= 0.0002:
+            return 1.0
+        return ratio
+
+    def _rebase_history_to_today(
+        self,
+        frame: pl.DataFrame,
+        asset: str,
+        day: datetime.date,
+    ) -> pl.DataFrame:
+        """把 ``day`` 之前的历史价格/量换算到今日复权基准（仅除权日生效）。"""
+        if frame is None or frame.is_empty() or "date" not in frame.columns:
+            return frame
+        ratio = self._today_basis_ratio(asset, day)
+        if ratio == 1.0:
+            return frame
+        mask = (pl.col("date").dt.date() < day) & (pl.col("asset") == asset)
+        exprs = []
+        for col in ("open", "high", "low", "close", "up_limit", "down_limit"):
+            if col in frame.columns:
+                exprs.append(
+                    pl.when(mask)
+                    .then(pl.col(col) * ratio)
+                    .otherwise(pl.col(col))
+                    .alias(col)
+                )
+        if "volume" in frame.columns:
+            exprs.append(
+                pl.when(mask)
+                .then(pl.col("volume") / ratio)
+                .otherwise(pl.col("volume"))
+                .alias("volume")
+            )
+        return frame.with_columns(exprs) if exprs else frame
+
     def _today(self) -> datetime.date:
         if self._today_func is not None:
             return self._today_func()
@@ -291,6 +364,7 @@ class LiveBarView(HistBarView):
             "close": price,
             "volume": snapshot.get("volume") or 0,
             "amount": snapshot.get("amount") or 0,
+            "prev_close": snapshot.get("prev_close"),
         }
 
     def _forming_rows(self, assets: list[str], today: datetime.date) -> pl.DataFrame:
@@ -441,6 +515,15 @@ class LiveBarView(HistBarView):
         completed = super().get_minute_history(
             asset, count, end_dt, frame_type=ft, include_forming_bar=False
         )
+        if (
+            end_dt.date() == self._today()
+            and completed is not None
+            and not completed.is_empty()
+            and completed["date"].max().date() < end_dt.date()
+        ):
+            # 历史只到上一交易日：qfq 基准是昨日因子，需换算到今日基准。
+            # 若存储已含今日数据（盘后同步）则基准已是今日因子，不能重复缩放。
+            completed = self._rebase_history_to_today(completed, asset, end_dt.date())
         completed = self._merge_aggregated_minute(completed, asset, end_dt)
         if include_forming_bar and end_dt.time() > datetime.time(9, 30):
             completed = self._append_forming_minute(completed, asset, end_dt)

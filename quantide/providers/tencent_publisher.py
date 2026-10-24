@@ -107,6 +107,7 @@ class TencentPublisher:
                 "low": quote.get("low"),
                 "volume": quote.get("volume"),
                 "amount": quote.get("amount"),
+                "prev_close": quote.get("prev_close"),
                 "ts": quote.get("ts") or now,
             }
             up = quote.get("up_limit")

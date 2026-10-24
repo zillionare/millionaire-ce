@@ -44,6 +44,7 @@ def test_parse_snapshot_builds_quote_snapshot():
     assert snapshot.symbol == "600519.SH"
     assert snapshot.price == 1318.49
     assert snapshot.high == 1322.0
+    assert snapshot.prev_close is None
     assert snapshot.ts == datetime.datetime(2026, 10, 22, 15, 0)
 
 
@@ -158,6 +159,7 @@ def test_tencent_publisher_publishes_quotes_and_limits():
         {
             "600519.SH": {
                 "price": 1318.49,
+                "prev_close": 1300.0,
                 "open": 1303.21,
                 "high": 1322.0,
                 "low": 1296.0,
@@ -183,6 +185,7 @@ def test_tencent_publisher_publishes_quotes_and_limits():
         msg_hub.unsubscribe(Topics.STOCK_LIMIT.value, limits.append)
 
     assert quotes[0]["600519.SH"]["price"] == 1318.49
+    assert quotes[0]["600519.SH"]["prev_close"] == 1300.0
     assert limits[0]["600519.SH"]["up"] == 1434.0
     assert limits[0]["600519.SH"]["up_limit"] == 1434.0
 
@@ -193,3 +196,13 @@ def test_tencent_publisher_survives_fetch_error():
         ["600519.SH"], fetcher=_FakeTencentFetcher(RuntimeError("网络错误"))
     )
     assert publisher.publish_once() == 0
+
+
+def test_parse_snapshot_includes_prev_close():
+    """除权日昨收价随快照进入订阅中心。"""
+    snapshot = parse_snapshot(
+        "600519.SH",
+        {"price": 95.5, "prev_close": 95.0, "ts": "2024-01-03T10:00:00"},
+    )
+    assert snapshot is not None
+    assert snapshot.prev_close == 95.0

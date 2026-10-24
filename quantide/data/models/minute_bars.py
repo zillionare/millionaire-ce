@@ -126,7 +126,11 @@ class MinuteBars:
                 pl.lit(0.0).alias("down_limit"),
             )
 
+        # 缺少当日日线辅助字段时（如分钟库比日线多一天），复权因子向前/
+        # 向后填充，避免 qfq 基准被 fill_null(1.0) 错置成 1.0。
         merged = merged.with_columns(
+            pl.col("adjust").forward_fill().backward_fill().over("asset"),
+        ).with_columns(
             pl.col("adjust").fill_null(1.0).cast(pl.Float64),
             pl.col("is_st").fill_null(False).cast(pl.Boolean),
             pl.col("up_limit").fill_null(0.0).cast(pl.Float64),
