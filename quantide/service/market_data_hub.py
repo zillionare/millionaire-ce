@@ -48,6 +48,7 @@ snapshot = market_data_hub.snapshot(["600519.SH"])
 ``amount``      累计成交额（千元，与 Tushare/日线存储一致）
 ``ts``          行情时间戳（ISO 字符串或 datetime）
 ``prev_close``  交易所调整后的昨收价（除权除息日用于盘中复权对齐）
+``name``        证券名称（可选；名称含 ``ST`` 时作为 ST 状态备份）
 ``up_limit``/``down_limit``  可选；涨跌停价缺失时回落到本地日线数据
 """
 
@@ -72,6 +73,7 @@ FIELD_VOLUME = "volume"
 FIELD_AMOUNT = "amount"
 FIELD_TS = "ts"
 FIELD_PREV_CLOSE = "prev_close"
+FIELD_NAME = "name"
 FIELD_UP_LIMIT = "up_limit"
 FIELD_DOWN_LIMIT = "down_limit"
 
@@ -100,6 +102,7 @@ def parse_snapshot(symbol: str, payload: dict[str, Any]) -> QuoteSnapshot | None
         amount=_to_float(payload.get(FIELD_AMOUNT)),
         ts=ts,
         prev_close=_to_float(payload.get(FIELD_PREV_CLOSE)),
+        name=payload.get(FIELD_NAME),
     )
 
 
@@ -268,6 +271,13 @@ class MarketDataHub:
         """返回标的的涨跌停价（未推送时返回 (0, 0)）。"""
         with self._lock:
             return self._limits.get(str(symbol), (0.0, 0.0))
+
+    def is_st(self, symbol: str) -> bool:
+        """按发布者提供的证券名称识别 ST（Tushare 数据缺失时的备份）。"""
+        with self._lock:
+            snapshot = self._snapshots.get(str(symbol))
+        name = (snapshot.name if snapshot else None) or ""
+        return "ST" in name.upper()
 
     def prev_close(self, symbol: str) -> float:
         """返回标的的交易所调整后昨收价（缺失返回 0）。"""

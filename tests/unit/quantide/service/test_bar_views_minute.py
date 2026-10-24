@@ -462,3 +462,15 @@ def test_live_minute_skips_rebase_when_today_already_stored(monkeypatch):
     today = frame.filter(pl.col("date").dt.date() == datetime.date(2024, 1, 3)).row(0, named=True)
     assert history["close"] == pytest.approx(100.0)
     assert today["close"] == pytest.approx(95.5)
+
+
+def test_live_limits_falls_back_to_limit_store(monkeypatch):
+    """Hub 无当日限价时，LiveBarView 回落 LimitPriceStore。"""
+
+    class _Store:
+        def get_limits(self, asset, dt):
+            return 9.0, 11.0
+
+    monkeypatch.setattr("quantide.data.get_limit_price_store", lambda: _Store())
+    view = LiveBarView(today_func=lambda: datetime.date(2024, 1, 3))
+    assert view._limits("600519.SH") == (9.0, 11.0)

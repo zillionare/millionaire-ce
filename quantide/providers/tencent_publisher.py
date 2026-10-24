@@ -101,6 +101,7 @@ class TencentPublisher:
             if price is None or price <= 0:
                 continue
             payload[symbol] = {
+                "name": quote.get("name"),
                 "price": price,
                 "open": quote.get("open"),
                 "high": quote.get("high"),

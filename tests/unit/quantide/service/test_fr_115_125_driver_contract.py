@@ -98,6 +98,8 @@ def test_fr_115_get_bars_signature_supports_frame_type():
 
 
 def test_fr_115_get_bars_default_frame_type_is_1d():
-    """AC-FR-115: get_bars 默认 frame_type='1d' (日线, 可回测)."""
+    """AC-FR-115: get_bars 默认 FrameType.DAY (日线, 可回测)."""
+    from quantide.core.enums import FrameType
+
     sig = inspect.signature(BaseStrategy.get_bars)
-    assert sig.parameters["frame_type"].default == "1d"
+    assert sig.parameters["frame_type"].default is FrameType.DAY

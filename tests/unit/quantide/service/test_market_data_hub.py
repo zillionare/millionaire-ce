@@ -45,6 +45,7 @@ def test_parse_snapshot_builds_quote_snapshot():
     assert snapshot.price == 1318.49
     assert snapshot.high == 1322.0
     assert snapshot.prev_close is None
+    assert snapshot.name is None
     assert snapshot.ts == datetime.datetime(2026, 10, 22, 15, 0)
 
 
@@ -158,6 +159,7 @@ def test_tencent_publisher_publishes_quotes_and_limits():
     fake = _FakeTencentFetcher(
         {
             "600519.SH": {
+                "name": "贵州茅台",
                 "price": 1318.49,
                 "prev_close": 1300.0,
                 "open": 1303.21,
@@ -186,6 +188,7 @@ def test_tencent_publisher_publishes_quotes_and_limits():
 
     assert quotes[0]["600519.SH"]["price"] == 1318.49
     assert quotes[0]["600519.SH"]["prev_close"] == 1300.0
+    assert quotes[0]["600519.SH"]["name"] == "贵州茅台"
     assert limits[0]["600519.SH"]["up"] == 1434.0
     assert limits[0]["600519.SH"]["up_limit"] == 1434.0
 
@@ -206,3 +209,31 @@ def test_parse_snapshot_includes_prev_close():
     )
     assert snapshot is not None
     assert snapshot.prev_close == 95.0
+
+
+def test_parse_snapshot_includes_name():
+    """发布者名称进入快照（ST 备份识别）。"""
+    snapshot = parse_snapshot(
+        "600519.SH", {"price": 10.0, "name": "*ST测试", "ts": "2024-01-03T10:00:00"}
+    )
+    assert snapshot is not None
+    assert snapshot.name == "*ST测试"
+
+
+def test_hub_is_st_backup_from_provider_name():
+    """Tushare 缺失时按发布者名称识别 ST。"""
+    hub = MarketDataHub()
+    hub.start()
+    try:
+        msg_hub.publish(
+            Topics.QUOTES_ALL.value,
+            {
+                "600519.SH": {"price": 10.0, "name": "贵州茅台"},
+                "000001.SZ": {"price": 10.0, "name": "*ST发展"},
+            },
+        )
+        assert _wait_until(lambda: len(hub.snapshot(["600519.SH", "000001.SZ"])) == 2)
+        assert hub.is_st("000001.SZ") is True
+        assert hub.is_st("600519.SH") is False
+    finally:
+        hub.stop()

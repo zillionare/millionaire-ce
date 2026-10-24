@@ -23,7 +23,6 @@ from quantide.core.errors import (
     InsufficientCash,
     InsufficientPosition,
     NonMultipleOfLotSize,
-    PriceOutOfLimit,
     TradingHaltedError,
 )
 from quantide.core.message import msg_hub
@@ -272,11 +271,23 @@ class PaperBroker(AbstractBroker):
         hub_limits = market_data_hub.get_limits(asset)
         if hub_limits != (0.0, 0.0):
             return hub_limits
+        stored_limits = self._limits_from_limit_store(asset)
+        if stored_limits != (0.0, 0.0):
+            return stored_limits
         if self._market_data is None:
             quote_limits = live_quote.get_price_limits(asset)
             if quote_limits != (0.0, 0.0):
                 return quote_limits
         return self._limits_from_local_data(asset)
+
+    def _limits_from_limit_store(self, asset: str) -> tuple[float, float]:
+        """从当日 LimitPriceStore（Tushare 早晨发布）读取涨跌停价。"""
+        try:
+            from quantide.data import get_limit_price_store
+
+            return get_limit_price_store().get_limits(asset, self._get_today())
+        except Exception:  # pragma: no cover - 数据层未就绪
+            return 0.0, 0.0
 
     def _limits_from_local_data(self, asset: str) -> tuple[float, float]:
         """从本地日线数据读取涨跌停价。"""
@@ -812,17 +823,6 @@ class PaperBroker(AbstractBroker):
         if last_price <= 0:
             return 0.0, None
 
-        # 检查涨跌停
-        # 使用 live_quote 获取最新的涨跌停数据，而不是依赖 quote 中的字段
-        down_limit, up_limit = self._get_price_limits(order.asset)
-
-        # 严格规则：涨停不买，跌停不卖
-        # 注意：如果是新股等无涨跌停限制的情况（limit=0），则允许交易
-        if order.side == OrderSide.BUY and up_limit > 0 and last_price >= up_limit:
-            return 0.0, None
-        if order.side == OrderSide.SELL and down_limit > 0 and last_price <= down_limit:
-            return 0.0, None
-
         # 价格判断
         if order.bid_type == BidType.FIXED:
             if order.side == OrderSide.BUY and order.price < last_price:
@@ -980,8 +980,16 @@ class PaperBroker(AbstractBroker):
         if price != 0:
             down_limit, up_limit = self._get_price_limits(asset)
             if up_limit > 0 and down_limit > 0:
-                if price > up_limit or price < down_limit:
-                    raise PriceOutOfLimit(asset, price, down_limit, up_limit)
+                clamped = min(max(price, down_limit), up_limit)
+                if clamped != price:
+                    logger.info(
+                        "买入价 {} 超出涨跌停 [{}, {}]，按 {} 下单",
+                        price,
+                        down_limit,
+                        up_limit,
+                        clamped,
+                    )
+                    price = clamped
 
         if self._is_halted(asset):
             raise TradingHaltedError(asset)
@@ -1070,8 +1078,16 @@ class PaperBroker(AbstractBroker):
         if price != 0:
             down_limit, up_limit = self._get_price_limits(asset)
             if up_limit > 0 and down_limit > 0:
-                if price > up_limit or price < down_limit:
-                    raise PriceOutOfLimit(asset, price, down_limit, up_limit)
+                clamped = min(max(price, down_limit), up_limit)
+                if clamped != price:
+                    logger.info(
+                        "卖出价 {} 超出涨跌停 [{}, {}]，按 {} 下单",
+                        price,
+                        down_limit,
+                        up_limit,
+                        clamped,
+                    )
+                    price = clamped
 
         # 2. 创建订单
         order = Order(

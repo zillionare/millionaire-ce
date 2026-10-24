@@ -1298,3 +1298,57 @@ def test_sell_at_auction_uses_close(broker, data_feed):
     })
     res = asyncio.run(broker.sell("000001.SZ", 100, 0, dt_auction))
     assert res.trades[0].price == 10.8
+
+
+def test_buy_day_missing_up_limit_rejected(broker, data_feed):
+    """回测撮合：缺少涨停价时拒绝成交并告警。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "close": [10.5], "up_limit": [0.0], "down_limit": [9.0]
+    })
+    with pytest.raises(LimitPrice):
+        asyncio.run(broker.buy("000001.SZ", 100, 0, dt))
+
+
+def test_sell_day_missing_down_limit_rejected(broker, data_feed):
+    """回测撮合：缺少跌停价时拒绝成交并告警。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [datetime.date(2024, 1, 2)],
+        "open": [10.0], "close": [10.5], "up_limit": [11.0], "down_limit": [0.0]
+    })
+    broker._positions["000001.SZ"] = Position(
+        portfolio_id="test_bt", dt=datetime.date(2024, 1, 1), asset="000001.SZ",
+        shares=1000, price=10.0, avail=1000, mv=10000, profit=0
+    )
+    with pytest.raises(LimitPrice):
+        asyncio.run(broker.sell("000001.SZ", 100, 10.0, dt))
+
+
+def test_buy_minute_missing_up_limit_rejected(minute_broker, data_feed):
+    """分钟撮合：缺少涨停价时拒绝成交。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [dt], "tm": [dt], "price": [10.1],
+        "open": [10.0], "close": [10.1], "high": [10.2], "low": [10.0],
+        "volume": [10], "up_limit": [0.0], "down_limit": [9.0],
+    })
+    with pytest.raises(LimitPrice):
+        asyncio.run(minute_broker.buy("000001.SZ", 100, 0, dt))
+
+
+def test_sell_minute_missing_down_limit_rejected(minute_broker, data_feed):
+    """分钟撮合：缺少跌停价时拒绝成交。"""
+    dt = make_dt(datetime.date(2024, 1, 2), 9, 30)
+    data_feed.match_data = pl.DataFrame({
+        "date": [dt], "tm": [dt], "price": [9.9],
+        "open": [10.0], "close": [9.9], "high": [10.0], "low": [9.8],
+        "volume": [10], "up_limit": [11.0], "down_limit": [0.0],
+    })
+    minute_broker._positions["000001.SZ"] = Position(
+        portfolio_id="test_bt_min", dt=datetime.date(2024, 1, 1), asset="000001.SZ",
+        shares=1000, price=10.0, avail=1000, mv=10000, profit=0
+    )
+    with pytest.raises(LimitPrice):
+        asyncio.run(minute_broker.sell("000001.SZ", 100, 10.0, dt))

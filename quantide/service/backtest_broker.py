@@ -668,8 +668,17 @@ class BacktestBroker(AbstractBroker):
         market_open = datetime.time(9, 30)
         match_price = row["open"] if order.tm.time() <= market_open else row["close"]
 
+        # 缺少涨停价数据：无法判断能否成交，保守拒绝并告警
+        if up_limit <= 0:
+            self._log(
+                "WARNING",
+                f"资产 {order.asset} 在 {row['date']} 缺少涨停价数据，拒绝成交",
+                dt=order.tm,
+            )
+            raise LimitPrice(order.asset, match_price)
+
         # 成交时间点已涨停，不允许成交
-        if up_limit > 0 and match_price >= up_limit:
+        if match_price >= up_limit:
             self._log(
                 "WARNING",
                 f"资产 {order.asset} 在 {row['date']} 处于涨停，无法成交",
@@ -717,6 +726,13 @@ class BacktestBroker(AbstractBroker):
         # feed 保证返回的 bars 一定有数据，否则返回 None
         row = bars.row(0, named=True)
         up_limit = row.get("up_limit", 0.0)
+        if up_limit <= 0:
+            self._log(
+                "WARNING",
+                f"资产 {order.asset} 缺少涨停价数据，拒绝成交",
+                dt=order.tm,
+            )
+            raise LimitPrice(order.asset, float(row.get("close", 0.0) or 0.0))
 
         # 提取当天收盘价，计算市值时使用
         close = bars.row(-1, named=True)["close"]
@@ -767,7 +783,14 @@ class BacktestBroker(AbstractBroker):
         volume = float(row.get("volume", 0.0) or 0.0)
         if volume <= 0:
             raise TradingHaltedError(asset)
-        if down_limit > 0 and price <= down_limit:
+        if down_limit <= 0:
+            self._log(
+                "WARNING",
+                f"资产 {asset} 缺少跌停价数据，拒绝成交",
+                dt=order_time,
+            )
+            raise LimitPrice(asset, price)
+        if price <= down_limit:
             raise LimitPrice(asset, price)
 
         import json
@@ -1097,7 +1120,15 @@ class BacktestBroker(AbstractBroker):
         market_open = datetime.time(9, 30)
         match_price = row["open"] if order.tm.time() <= market_open else row["close"]
 
-        if down_limit > 0 and match_price <= down_limit:
+        if down_limit <= 0:
+            self._log(
+                "WARNING",
+                f"资产 {order.asset} 在 {row['date']} 缺少跌停价数据，拒绝成交",
+                dt=order.tm,
+            )
+            raise LimitPrice(order.asset, match_price)
+
+        if match_price <= down_limit:
             self._log(
                 "WARNING",
                 f"资产 {order.asset} 在 {row['date']} 处于跌停，无法成交",
@@ -1124,6 +1155,13 @@ class BacktestBroker(AbstractBroker):
         # feed 保证返回的 bars 一定有数据，否则返回 None
         row = bars.row(0, named=True)
         down_limit = row.get("down_limit", 0.0)
+        if down_limit <= 0:
+            self._log(
+                "WARNING",
+                f"资产 {order.asset} 缺少跌停价数据，拒绝成交",
+                dt=order.tm,
+            )
+            raise LimitPrice(order.asset, float(row.get("close", 0.0) or 0.0))
 
         # 提取当天收盘价，计算市值时使用
         close = bars.row(-1, named=True)["close"]

@@ -69,6 +69,7 @@ def test_fetch_quote_snapshot_parses_price_limits_and_units():
 
     assert "600519.SH" in snapshot
     quote = snapshot["600519.SH"]
+    assert quote["name"] == "贵州茅台"
     assert quote["price"] == 10.0
     assert quote["prev_close"] == 9.9
     assert quote["open"] == 9.95

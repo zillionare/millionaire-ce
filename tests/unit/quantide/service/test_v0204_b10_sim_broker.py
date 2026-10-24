@@ -34,6 +34,8 @@ def _make_broker() -> PaperBroker:
     broker._active_orders = {}
     broker._market_data = None
     broker._slippage = 0.0
+    broker._commission = 0.0003
+    broker._stamp_tax = 0.001
     broker._limits = {}
     broker._clock = None
     return broker
@@ -102,8 +104,8 @@ def test_try_match_returns_zero_when_last_price_le_zero():
     assert trade is None
 
 
-def test_try_match_returns_zero_when_buy_at_up_limit():
-    """[AC-NFR1101-01] Buy at up_limit returns (0.0, None) (line 787)."""
+def test_try_match_fills_buy_at_up_limit():
+    """[AC-NFR1101-01] Paper 允许在涨停价买入（不再拦截）。"""
     broker = _make_broker()
     broker._limits = {"A": {"down": 9.0, "up": 11.0}}
     order = MagicMock()
@@ -115,12 +117,12 @@ def test_try_match_returns_zero_when_buy_at_up_limit():
     order.filled = 0
     quote = {"lastPrice": 11.0}  # at up_limit
     matched, trade = broker._try_match(order, quote, available_shares_limit=100)
-    assert matched == 0.0
-    assert trade is None
+    assert matched == 100.0
+    assert trade is not None
 
 
-def test_try_match_returns_zero_when_sell_at_down_limit():
-    """[AC-NFR1101-01] Sell at down_limit returns (0.0, None) (line 789)."""
+def test_try_match_fills_sell_at_down_limit():
+    """[AC-NFR1101-01] Paper 允许在跌停价卖出（不再拦截）。"""
     broker = _make_broker()
     broker._limits = {"A": {"down": 9.0, "up": 11.0}}
     order = MagicMock()
@@ -132,8 +134,8 @@ def test_try_match_returns_zero_when_sell_at_down_limit():
     order.filled = 0
     quote = {"lastPrice": 9.0}  # at down_limit
     matched, trade = broker._try_match(order, quote, available_shares_limit=100)
-    assert matched == 0.0
-    assert trade is None
+    assert matched == 100.0
+    assert trade is not None
 
 
 def test_try_match_returns_zero_when_fixed_buy_price_below_last():

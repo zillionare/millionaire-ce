@@ -33,6 +33,8 @@ class QuoteSnapshot:
     ts: datetime.datetime | None = None
     #: 交易所调整后的昨收价（除权除息日与上一交易日实际收盘不同）
     prev_close: float | None = None
+    #: 证券名称（发布者提供时用于 ST 备份识别）
+    name: str | None = None
 
 
 @dataclass

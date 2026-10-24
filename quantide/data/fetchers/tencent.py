@@ -208,6 +208,7 @@ class TencentDataFetcher:
         return (
             from_tencent_symbol(symbol[2:]),
             {
+                "name": fields[1].strip() if len(fields) > 1 else None,
                 "price": price,
                 "prev_close": _to_float(fields[4]),
                 "open": _to_float(fields[5]),

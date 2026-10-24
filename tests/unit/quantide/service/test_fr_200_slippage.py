@@ -21,10 +21,8 @@ import datetime
 import pytest
 
 from quantide.core.domain import QuoteSnapshot
-from quantide.core.enums import OrderSide
 from quantide.data.sqlite import db
 from quantide.service.sim_broker import PaperBroker
-
 
 AC_TEST_DATE = datetime.datetime(2024, 6, 3, 9, 30, 0)
 AC_ASSET = "000001.SZ"
@@ -119,17 +117,15 @@ async def test_fr_200_sell_slippage_decreases_price():
 
 @pytest.mark.asyncio
 async def test_fr_200_slippage_does_not_affect_limit_order_price_check():
-    """AC-FR-200: slippage 不影响 order_price 与 last_price 的限价单比较 (L889 price check 在 slippage 之前)."""
-    from quantide.core.errors import PriceOutOfLimit
-
+    """AC-FR-200: paper 超限价格钳制到涨跌停边界，slippage 不改变下单价."""
     db.init(":memory:")
     md = _DummyMarketData()
     broker = PaperBroker(
         portfolio_id="paper-fr200d", principal=1_000_000, market_data=md, slippage=0.1  # type: ignore[arg-type]
     )
     broker._limits[AC_ASSET] = {"down": 9.0, "up": 11.0}
-    with pytest.raises(PriceOutOfLimit):
-        await broker.buy(AC_ASSET, 100, price=20.0)
+    await broker.buy(AC_ASSET, 100, price=20.0)
+    assert broker._active_orders[AC_ASSET][-1].price == 11.0
 
 
 @pytest.mark.asyncio

@@ -221,17 +221,39 @@ class LiveBarView(HistBarView):
 
         return minute_bar_aggregator
 
+    def _is_st(self, asset: str) -> bool:
+        """ST 备份识别：Tushare 缺失时用发布者提供的名称。"""
+        try:
+            from quantide.service.market_data_hub import market_data_hub
+
+            return market_data_hub.is_st(asset)
+        except Exception:  # pragma: no cover - 数据层未就绪
+            return False
+
     def _limits(self, asset: str) -> tuple[float, float]:
-        """今日涨跌停价：优先行情端口，其次订阅中心。"""
+        """今日涨跌停价：行情端口/订阅中心优先，其次 Tushare 早晨落盘。"""
         market_data = self._market_data
         if market_data is not None and hasattr(market_data, "get_limits"):
             try:
-                return market_data.get_limits(asset)
+                limits = market_data.get_limits(asset)
+                if limits != (0.0, 0.0):
+                    return limits
             except Exception:  # pragma: no cover - 行情端口异常时回落
                 pass
         from quantide.service.market_data_hub import market_data_hub
 
-        return market_data_hub.get_limits(asset)
+        limits = market_data_hub.get_limits(asset)
+        if limits != (0.0, 0.0):
+            return limits
+        try:
+            from quantide.data import get_limit_price_store
+
+            stored = get_limit_price_store().get_limits(asset, self._today())
+        except Exception:  # pragma: no cover - 数据层未就绪
+            stored = (0.0, 0.0)
+        if stored != (0.0, 0.0):
+            return stored
+        return 0.0, 0.0
 
     def _previous_raw_close(
         self, asset: str, day: datetime.date
@@ -429,6 +451,12 @@ class LiveBarView(HistBarView):
             completed = completed.filter(pl.col("date") < today)
             return completed
         forming = forming.with_columns(pl.col("date").cast(pl.Date))
+        if "prev_close" in forming.columns:
+            forming = forming.drop("prev_close")
+        missing = [col for col in completed.columns if col not in forming.columns]
+        if missing:
+            forming = forming.with_columns([pl.lit(None).alias(col) for col in missing])
+        forming = forming.select(completed.columns)
         merged = pl.concat([completed, forming], how="vertical_relaxed")
         completed = merged.unique(subset=["date", "asset"], keep="last").sort(["date", "asset"])
         return completed
@@ -454,10 +482,11 @@ class LiveBarView(HistBarView):
         if not rows:
             return completed
         up_limit, down_limit = self._limits(asset)
+        is_st = self._is_st(asset)
         today = pl.DataFrame(rows).with_columns(
             pl.col("date").cast(pl.Datetime("ms")),
             pl.lit(1.0).alias("adjust"),
-            pl.lit(False).alias("is_st"),
+            pl.lit(is_st).alias("is_st"),
             pl.lit(up_limit).alias("up_limit"),
             pl.lit(down_limit).alias("down_limit"),
         )
@@ -484,7 +513,7 @@ class LiveBarView(HistBarView):
         row = {
             **row,
             "adjust": 1.0,
-            "is_st": False,
+            "is_st": self._is_st(asset),
             "up_limit": up_limit,
             "down_limit": down_limit,
         }
