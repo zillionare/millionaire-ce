@@ -838,7 +838,11 @@ class PaperBroker(AbstractBroker):
         if self._in_auction(last_price):
             auction_limit = self._auction_limit_price(last_price)
             if order.side == OrderSide.BUY and order.price > 0:
-                if order.price < auction_limit - 1e-9:
+                # Paper/实盘不限制涨停买入：竞价价已在涨停价时，
+                # 允许以涨停价（而非涨停价×1.001）参与撮合。
+                _, up_limit = self._get_price_limits(order.asset)
+                at_up_limit = up_limit > 0 and last_price >= up_limit - 1e-9
+                if not at_up_limit and order.price < auction_limit - 1e-9:
                     return 0.0, None
             match_price = last_price
             if self._slippage > 0:

@@ -416,3 +416,20 @@ async def test_paper_broker_auction_rejects_limit_below_epsilon(paper_broker, mo
     )
     result = await buy_task
     assert len(result.trades or []) == 0
+
+
+@pytest.mark.asyncio
+async def test_paper_broker_auction_allows_buy_at_up_limit(paper_broker, monkeypatch):
+    """Paper 不限制涨停买入：竞价价=涨停价时仍可成交。"""
+    from quantide.service.execution_clock import ExecutionClock
+
+    monkeypatch.setattr(ExecutionClock, "in_auction", lambda self, now: True)
+    asset = "000001.SZ"
+    buy_task = asyncio.create_task(
+        paper_broker.buy(asset, 100, price=11.1, timeout=1.0)
+    )
+    await asyncio.sleep(0)
+    await publish_market(paper_broker, asset, 11.0, volume=1, up_limit=11.0, down_limit=9.0)
+    result = await buy_task
+    assert len(result.trades or []) == 1
+    assert result.trades[0].price == pytest.approx(11.0)
