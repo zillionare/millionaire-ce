@@ -47,7 +47,7 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
                         aria_expanded="false",
                         onclick=f"toggleHeaderMenu(event, '{menu_id}')",
                         cls=(
-                            "inline-flex h-16 items-center border-0 bg-transparent px-4 "
+                            "m-0 inline-flex h-16 items-center border-0 bg-transparent px-4 "
                             "text-sm font-medium shadow-none "
                             + (active_cls if is_active else inactive_cls)
                         ),
