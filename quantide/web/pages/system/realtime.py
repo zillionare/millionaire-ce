@@ -256,20 +256,25 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
                     autocomplete="off",
                     placeholder="输入代码或名称过滤，例如 600519 / 茅台",
                     cls=(
-                        "w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm "
-                        "outline-none focus:border-[#e41815] focus:ring-2 focus:ring-[#e41815]/10"
+                        "h-9 w-full max-w-xs rounded-lg border border-gray-200 bg-white "
+                        "px-3 text-sm outline-none focus:border-[#e41815] "
+                        "focus:ring-2 focus:ring-[#e41815]/10"
                     ),
                 ),
                 Button(
                     "筛选",
                     type="submit",
-                    cls="rounded-lg bg-[#e41815] px-4 py-2 text-sm font-medium text-white hover:bg-[#c91412]",
+                    cls=(
+                        "inline-flex h-9 items-center justify-center rounded-lg border "
+                        "border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 "
+                        "transition hover:bg-gray-50 hover:text-gray-900"
+                    ),
                 ),
                 hx_get="/system/realtime/panel",
                 hx_target="#realtime-panel",
                 hx_swap="innerHTML",
                 id="realtime-filter",
-                cls="flex gap-2",
+                cls="flex items-center gap-2",
             ),
             Div(*_data_health(now), cls="flex flex-wrap items-center gap-2"),
             cls="mt-4 flex flex-wrap items-center justify-between gap-3",
