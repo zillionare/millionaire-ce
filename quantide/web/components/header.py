@@ -66,7 +66,7 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
                         cls="absolute left-0 top-full z-50 mt-1 hidden min-w-[160px] rounded-lg border border-gray-100 bg-white shadow-lg",
                     ),
                     data_header_menu_wrap="true",
-                    cls="relative inline-block",
+                    cls="relative inline-flex",
                 )
             )
             continue
