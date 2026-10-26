@@ -157,3 +157,17 @@ def test_render_no_registry():
     out = _render_no_registry(fake_session)
     text = str(out)
     assert isinstance(text, str)
+
+
+def test_paper_components_use_paper_endpoints():
+    """Paper 页面的刷新/下单必须走 /trade/paper，而不是 /trade/live。"""
+    from fasthtml.common import to_xml
+
+    from quantide.web.pages.paper import PositionInfo, TradePanel
+
+    positions_html = to_xml(PositionInfo([], "p1"))
+    order_html = to_xml(TradePanel("p1"))
+    assert "/trade/paper/p1/positions" in positions_html
+    assert "/trade/paper/p1/order" in order_html
+    assert "/trade/live/p1/positions" not in positions_html
+    assert "/trade/live/p1/order" not in order_html
