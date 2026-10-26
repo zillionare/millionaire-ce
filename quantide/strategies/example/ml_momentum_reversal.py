@@ -1126,10 +1126,11 @@ class MLMomentumReversalStrategy(BaseStrategy):
             universe_assets: list[str] | None = self.custom_assets
         else:
             # Select liquid universe strictly using history up to signal_date
+            # 实盘：用今日 forming bar 的价格/成交量/ST 参与选池；
+            # 市值用最近已结算的 PIT 值向前填充（今日市值尚未结算）。
             init_bars = self._load_bars(
                 calendar.shift(signal_date, -25, FrameType.DAY),
                 signal_date,
-                include_forming_bar=False,
             )
             assert isinstance(init_bars, pl.DataFrame)
             if init_bars.is_empty():
@@ -1138,6 +1139,15 @@ class MLMomentumReversalStrategy(BaseStrategy):
             init_bars = init_bars.with_columns(pl.col("date").cast(pl.Date))
             latest_init_dt: datetime.date = init_bars["date"].max()  # type: ignore[assignment]
             init_bars = daily_basic.attach(init_bars)
+            if "total_mv" in init_bars.columns:
+                fill_cols = [
+                    col
+                    for col in ("total_mv", "circ_mv")
+                    if col in init_bars.columns
+                ]
+                init_bars = init_bars.sort(["asset", "date"]).with_columns(
+                    [pl.col(col).forward_fill().over("asset") for col in fill_cols]
+                )
             universe_assets = _filter_universe(
                 init_bars,
                 latest_init_dt,
