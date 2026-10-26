@@ -267,7 +267,7 @@ def _css() -> str:
     .page__subtitle {{ font-size: 13px; color: var(--fg-subtle); margin-top: var(--space-1); }}
 
     /* ---------------- 其他 ---------------- */
-    .hidden {{ display: none !important; }}
+    .hidden {{ display: none; }}
     .truncate {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .stat-grid {{ display: grid; gap: 1px; background: var(--border); border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); }}
     .stat {{ background: var(--bg); padding: var(--space-4); }}
