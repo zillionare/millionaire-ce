@@ -92,4 +92,5 @@ def test_header_dropdown_padding_matches_regular_nav_items():
     assert "px-2" not in html.replace("px-2 ", "")
     assert html.count("chevron-down") == 1
     assert " ▾" not in html
-    assert "list-none" in html
+    assert "<details" not in html
+    assert "data-header-menu-button" in html

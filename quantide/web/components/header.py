@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fasthtml.common import A, Button, Details, Div, Header, Nav, Script, Span, Summary
+from fasthtml.common import A, Button, Div, Header, Nav, Script, Span
 from monsterui.all import UkIcon
 
 
@@ -19,7 +19,7 @@ def _normalize_nav_item(item: tuple[str, str] | dict[str, Any]) -> dict[str, Any
 def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], active_title: str) -> list[Any]:
     """构建顶部导航链接。"""
     nav_links: list[Any] = []
-    for raw_item in nav_items or []:
+    for index, raw_item in enumerate(nav_items or []):
         item = _normalize_nav_item(raw_item)
         title = str(item.get("title", ""))
         url = str(item.get("url", "#"))
@@ -34,39 +34,39 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
         display_text = str(label_override) if label_override else title
 
         if children:
+            menu_id = f"header-menu-{index}"
             nav_links.append(
                 Div(
-                    Details(
-                        Summary(
-                            Span(display_text, cls="inline-flex items-center text-sm font-medium"),
-                            UkIcon(
-                                "chevron-down",
-                                cls=(
-                                    "w-4 h-4 ml-1 transition-transform duration-200 "
-                                    "group-open:-rotate-180"
-                                ),
-                            ),
-                            cls=(
-                                "inline-flex h-16 items-center px-4 text-sm font-medium "
-                                "list-none [&::-webkit-details-marker]:hidden "
-                                "[&::marker]:hidden "
-                                + (active_cls if is_active else inactive_cls)
-                            ),
+                    Button(
+                        Span(display_text, cls="inline-flex items-center text-sm font-medium"),
+                        UkIcon("chevron-down", cls="w-4 h-4 ml-1"),
+                        type="button",
+                        id=f"{menu_id}-button",
+                        data_header_menu_button="true",
+                        aria_haspopup="menu",
+                        aria_expanded="false",
+                        onclick=f"toggleHeaderMenu(event, '{menu_id}')",
+                        cls=(
+                            "inline-flex h-16 items-center border-0 bg-transparent px-4 "
+                            "text-sm font-medium shadow-none "
+                            + (active_cls if is_active else inactive_cls)
                         ),
-                        Div(
-                            *[
-                                A(
-                                    str(c.get("title", "")),
-                                    href=str(c.get("url", "#")),
-                                    cls="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50",
-                                )
-                                for c in children
-                            ],
-                            cls="absolute z-50 mt-1 min-w-[160px] rounded-lg border border-gray-100 bg-white shadow-lg",
-                        ),
-                        cls="relative inline-block group",
                     ),
-                    cls="inline-flex items-center",
+                    Div(
+                        *[
+                            A(
+                                str(c.get("title", "")),
+                                href=str(c.get("url", "#")),
+                                cls="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50",
+                            )
+                            for c in children
+                        ],
+                        id=menu_id,
+                        data_header_menu="true",
+                        cls="absolute left-0 top-full z-50 mt-1 hidden min-w-[160px] rounded-lg border border-gray-100 bg-white shadow-lg",
+                    ),
+                    data_header_menu_wrap="true",
+                    cls="relative inline-block",
                 )
             )
             continue
@@ -277,6 +277,10 @@ def _header_script() -> Script:
         "function toggleAlertCenter(event){if(event){event.preventDefault();event.stopPropagation();}const popover=document.getElementById('alert-center-popover');if(!popover){return;}setUserMenu(false);setAlertCenter(popover.classList.contains('hidden'));}"
         "document.addEventListener('click',function(event){const menu=document.getElementById('user-menu');if(menu&&!menu.contains(event.target)){setUserMenu(false);}const alertCenter=document.getElementById('alert-center');if(alertCenter&&!alertCenter.contains(event.target)){setAlertCenter(false);}});"
         "document.addEventListener('keydown',function(event){if(event.key==='Escape'){setUserMenu(false);setAlertCenter(false);}});"
+        "function closeHeaderMenus(){document.querySelectorAll('[data-header-menu]').forEach(function(menu){menu.classList.add('hidden');});document.querySelectorAll('[data-header-menu-button]').forEach(function(button){button.setAttribute('aria-expanded','false');});}"
+        "function toggleHeaderMenu(event,id){if(event){event.preventDefault();event.stopPropagation();}const menu=document.getElementById(id);if(!menu){return;}const opening=menu.classList.contains('hidden');closeHeaderMenus();if(opening){menu.classList.remove('hidden');const button=document.getElementById(id+'-button');if(button){button.setAttribute('aria-expanded','true');}}}"
+        "document.addEventListener('click',function(event){document.querySelectorAll('[data-header-menu-wrap]').forEach(function(wrap){if(!wrap.contains(event.target)){const menu=wrap.querySelector('[data-header-menu]');const button=wrap.querySelector('[data-header-menu-button]');if(menu){menu.classList.add('hidden');}if(button){button.setAttribute('aria-expanded','false');}}});});"
+        "document.addEventListener('keydown',function(event){if(event.key==='Escape'){closeHeaderMenus();}});"
         "function showGlobalResetPasswordModal(event){if(event){event.preventDefault(); event.stopPropagation();} setUserMenu(false); htmx.ajax('GET', '/auth/modal/reset-password', {target: '#global-reset-password-modal-container'});}"
         "function showGatewayRequiredModal(event){if(event){event.preventDefault(); event.stopPropagation();} const modal=document.getElementById('gateway-required-modal'); if(!modal){return;} modal.classList.remove('hidden'); modal.classList.add('flex');}"
         "function closeGatewayRequiredModal(){const modal=document.getElementById('gateway-required-modal'); if(!modal){return;} modal.classList.remove('flex'); modal.classList.add('hidden');}"

@@ -93,7 +93,7 @@ def sidebar_component(
                         cls=s_cls
                     ),
                     Div(*child_items, cls="pl-9 pr-3 py-1 space-y-1"),
-                    cls="group",
+                    cls="group m-0",
                     open=is_open
                 )
             )
