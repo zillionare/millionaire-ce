@@ -304,15 +304,19 @@ class DataSyncService:
         return ranges
 
     def _sync_calendar(self, params: SyncParams) -> None:
-        """同步交易日历。"""
-        from quantide.data.fetchers.registry import get_data_fetcher
+        """同步交易日历。
+
+        必须从配置的 epoch（默认 2005）拉取完整日历再一次性保存；
+        如果按本次同步的 ``start_date`` 拉取并覆盖，会把历史日历截断，
+        导致 ``day_shift`` 在回测起始日附近算出错误的上一交易日。
+        """
+        _ = params
         from quantide.data.models.calendar import calendar
 
-        fetcher = get_data_fetcher()
-        df = fetcher.fetch_calendar(params.start_date)
-        if df is not None and not df.empty:
-            calendar.save(df)
-            calendar.load(calendar.path)
+        try:
+            calendar.update()
+        except Exception as exc:
+            logger.warning("交易日历更新失败: {}", exc)
 
     def _sync_stock_list(self, params: SyncParams) -> None:
         """同步证券主数据。"""

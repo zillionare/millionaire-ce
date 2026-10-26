@@ -858,8 +858,9 @@ def test_update(tmp_path):
         tf.load(path)
         assert tf.epoch == dates1[0]
 
-        # 这将更新到01/05日
+        # 这将更新到01/05日；必须从完整 epoch 拉取，而不是当前数据首日
         tf.update()
+        assert fake_fetcher.fetch_calendar.call_args.args[0] <= dates1[0]
         assert tf.end == dates2[-1]
         assert tf.is_trade_day(dates2[0])
         assert not tf.is_trade_day(dates2[2])

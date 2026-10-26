@@ -92,6 +92,11 @@ class BacktestBroker(AbstractBroker):
 
         # 回测时钟，初始化为 bt_start 的前一个交易日 (Day 0)
         prev = calendar.day_shift(bt_start, -1)
+        if prev >= bt_start:
+            raise ValueError(
+                f"交易日历异常：{bt_start} 的上一交易日为 {prev}，"
+                "请先完整同步交易日历（系统维护 → 数据维护 → 交易日历）"
+            )
         self._clock: datetime.datetime = calendar.replace_time(prev, 15)
 
         # 初始化回测数据记录

@@ -16,6 +16,13 @@ from loguru import logger
 from numpy import ndarray
 
 from quantide.config.settings import get_epoch, get_timezone
+
+#: 日历至少从该日期开始拉取，保证 ``day_shift`` 在配置 epoch 附近可用。
+_CALENDAR_FETCH_START = datetime.date(2005, 1, 1)
+
+
+def _calendar_fetch_start() -> datetime.date:
+    return min(get_epoch(), _CALENDAR_FETCH_START)
 from quantide.core.enums import FrameType
 from quantide.core.singleton import singleton
 from quantide.data.fetchers.registry import get_data_fetcher
@@ -136,7 +143,7 @@ class Calendar:
         except Exception as e:
             logger.warning("Calendar 读取日历数据失败，重新从服务器获取")
             logger.exception(e)
-            df = get_data_fetcher().fetch_calendar(get_epoch())
+            df = get_data_fetcher().fetch_calendar(_calendar_fetch_start())
             self._data = pa.Table.from_pandas(df)
             self.save(df)
 
@@ -147,8 +154,12 @@ class Calendar:
         return self
 
     def update(self) -> None:
-        """更新日历数据并重建帧"""
-        df = get_data_fetcher().fetch_calendar(self.epoch)
+        """更新日历数据并重建帧。
+
+        从固定/配置 epoch 的较早者拉取完整日历，不能从当前数据的第一天开始：
+        否则一次局部同步会把历史日历截断，回测起始日的前一交易日将不存在。
+        """
+        df = get_data_fetcher().fetch_calendar(_calendar_fetch_start())
         self._data = pa.Table.from_pandas(df)
         self.save(df)
         self.day_frames, self.week_frames, self.month_frames = self._build_frames_arrow(
