@@ -213,8 +213,12 @@ class PaperBroker(AbstractBroker):
             for asset, limits in data.items():
                 if isinstance(limits, dict):
                     self._limits[asset] = {
-                        "up": float(limits.get("up", 0) or 0),
-                        "down": float(limits.get("down", 0) or 0),
+                        "up": float(
+                            limits.get("up", limits.get("up_limit", 0)) or 0
+                        ),
+                        "down": float(
+                            limits.get("down", limits.get("down_limit", 0)) or 0
+                        ),
                     }
 
     def get_prices(self, assets: list[str]) -> dict[str, float]:
@@ -677,7 +681,9 @@ class PaperBroker(AbstractBroker):
         """行情更新回调，执行撮合逻辑。
 
         本方法将在 MessageHub 线程中运行。更新持仓市值，并尝试撮合待处理订单。
+        兼容发布者的 ``price`` 与网关的 ``lastPrice`` 两种键名。
         """
+        data = self._normalize_quotes(data)
         try:
             with self._lock:
                 if self._closed:
@@ -698,6 +704,31 @@ class PaperBroker(AbstractBroker):
                     self._persist_updates(traded_assets)
         except Exception as e:
             logger.exception(e)
+
+    @staticmethod
+    def _normalize_quotes(data: dict) -> dict:
+        """把不同来源的快照统一成 ``lastPrice`` 键。"""
+        if not data:
+            return {}
+        normalized: dict[str, dict] = {}
+        for asset, raw in data.items():
+            if not isinstance(raw, dict):
+                continue
+            price = raw.get("lastPrice")
+            if price is None:
+                price = raw.get("price")
+            if price is None:
+                continue
+            try:
+                value = float(price)
+            except (TypeError, ValueError):
+                continue
+            if value <= 0:
+                continue
+            item = dict(raw)
+            item["lastPrice"] = value
+            normalized[str(asset)] = item
+        return normalized
 
     def _update_positions_market_value(self, data: dict):
         """更新内存中的持仓市值 (仅用于内存计算，不触发写库)。

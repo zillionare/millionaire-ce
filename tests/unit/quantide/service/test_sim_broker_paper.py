@@ -412,3 +412,29 @@ async def test_paper_broker_auction_rejects_limit_below_epsilon(paper_broker, mo
     )
     result = await buy_task
     assert len(result.trades or []) == 0
+
+
+def test_normalize_quote_accepts_price_key(paper_broker):
+    """发布者使用 price 键时，Paper 撮合仍能识别。"""
+    normalized = PaperBroker._normalize_quotes(
+        {"600519.SH": {"price": 10.0, "volume": 500}}
+    )
+    assert normalized["600519.SH"]["lastPrice"] == 10.0
+    assert normalized["600519.SH"]["volume"] == 500
+
+
+@pytest.mark.asyncio
+async def test_paper_fills_from_publisher_price_payload(paper_broker):
+    """腾讯发布者使用 price 键时，Paper 能正常成交。"""
+    asset = "600519.SH"
+    paper_broker._on_limit_update(
+        {asset: {"up_limit": 11.0, "down_limit": 9.0}}
+    )
+    task = asyncio.create_task(paper_broker.buy(asset, 100, price=0, timeout=1.0))
+    await asyncio.sleep(0)
+    paper_broker._on_quote_update(
+        {asset: {"price": 10.0, "volume": 5000.0, "amount": 50000.0}}
+    )
+    result = await task
+    assert len(result.trades or []) == 1
+    assert result.trades[0].price == pytest.approx(10.0)

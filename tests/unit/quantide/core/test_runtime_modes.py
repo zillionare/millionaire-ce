@@ -90,3 +90,32 @@ def test_runtime_bootstrap_paper_uses_live_quote_market_data(monkeypatch):
     assert handle is not None
     assert handle.portfolio_id == "paper-account"
     assert handle.portfolio_name == "paper-account"
+
+
+def test_embedded_tencent_publisher_starts_when_enabled(monkeypatch):
+    """QUANTIDE_QUOTE_PUBLISHER=tencent 时在服务进程内启动发布者。"""
+    from quantide.core.runtime.adapter_registry import AdapterRegistry
+
+    started: dict = {}
+
+    class _FakePublisher:
+        def __init__(self, symbols=None, interval=3.0):
+            started["symbols"] = symbols
+            started["interval"] = interval
+
+        def start(self):
+            started["started"] = True
+
+    monkeypatch.setenv("QUANTIDE_QUOTE_PUBLISHER", "tencent")
+    monkeypatch.setenv("QUANTIDE_QUOTE_SYMBOLS", "600519.SH,000001.SZ")
+    monkeypatch.setenv("QUANTIDE_QUOTE_INTERVAL", "2")
+    monkeypatch.setattr(
+        "quantide.providers.tencent_publisher.TencentPublisher", _FakePublisher
+    )
+    monkeypatch.setattr(runtime_modes, "_quote_publisher", None)
+
+    bootstrap = runtime_modes.RuntimeBootstrap(mode="paper")
+    bootstrap._start_embedded_publisher(AdapterRegistry())
+    assert started["started"] is True
+    assert started["symbols"] == ["600519.SH", "000001.SZ"]
+    assert started["interval"] == 2.0

@@ -1,5 +1,7 @@
 """运行时模式装配."""
 
+import os
+import threading
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -20,6 +22,9 @@ from quantide.service.registry import BrokerRegistry
 from quantide.service.sim_broker import PaperBroker
 
 RuntimeMode = Literal["live", "paper", "backtest"]
+
+_quote_publisher_lock = threading.Lock()
+_quote_publisher: Any = None
 
 
 @dataclass
@@ -115,12 +120,45 @@ class RuntimeBootstrap:
 
         minute_bar_aggregator.ensure_started()
         limit_price_refresher.start()
+        self._start_embedded_publisher(adapters)
         adapters.register("market_data", "market_data_hub", market_data_hub)
         if runtime.livequote_mode == "gateway" or runtime.gateway_enabled:
             live_quote.start()
             adapters.register("market_data", "live_quote", live_quote)
             return live_quote
         return market_data_hub
+
+    def _start_embedded_publisher(self, adapters: AdapterRegistry) -> None:
+        """按环境变量启动内置行情发布者（可选，默认关闭）。
+
+        ``QUANTIDE_QUOTE_PUBLISHER=tencent`` 时启动腾讯发布者；可用
+        ``QUANTIDE_QUOTE_SYMBOLS=600519.SH,000001.SZ`` 限制标的，
+        ``QUANTIDE_QUOTE_INTERVAL`` 控制间隔（秒）。
+        """
+        global _quote_publisher
+        name = os.environ.get("QUANTIDE_QUOTE_PUBLISHER", "").strip().lower()
+        if name not in {"tencent", "tencent_publisher"}:
+            return
+        with _quote_publisher_lock:
+            if _quote_publisher is not None:
+                publisher = _quote_publisher
+            else:
+                from quantide.providers.tencent_publisher import TencentPublisher
+
+                raw_symbols = os.environ.get("QUANTIDE_QUOTE_SYMBOLS", "")
+                symbols = [
+                    part.strip() for part in raw_symbols.split(",") if part.strip()
+                ] or None
+                try:
+                    interval = float(
+                        os.environ.get("QUANTIDE_QUOTE_INTERVAL", "3") or 3
+                    )
+                except ValueError:
+                    interval = 3.0
+                publisher = TencentPublisher(symbols, interval=interval)
+                publisher.start()
+                _quote_publisher = publisher
+        adapters.register("quote_publisher", "tencent", publisher)
 
     def _register_broker_adapters(
         self, registry: BrokerRegistry, adapters: AdapterRegistry

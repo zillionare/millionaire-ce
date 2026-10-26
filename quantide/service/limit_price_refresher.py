@@ -78,6 +78,8 @@ class LimitPriceRefresher:
                 minute=0,
                 id=_JOB_0900,
                 replace_existing=True,
+                coalesce=True,
+                misfire_grace_time=None,
                 name="limit_price.refresh.0900",
             )
             scheduler.add_job(
@@ -87,6 +89,8 @@ class LimitPriceRefresher:
                 minute=20,
                 id=_JOB_0920,
                 replace_existing=True,
+                coalesce=True,
+                misfire_grace_time=None,
                 name="limit_price.refresh.0920",
             )
             self._scheduled = True

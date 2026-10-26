@@ -237,3 +237,15 @@ def test_hub_is_st_backup_from_provider_name():
         assert hub.is_st("600519.SH") is False
     finally:
         hub.stop()
+
+
+def test_hub_accepts_up_down_limit_keys():
+    """兼容 up/down 与 up_limit/down_limit 两套键名。"""
+    hub = MarketDataHub()
+    hub.start()
+    try:
+        msg_hub.publish(Topics.STOCK_LIMIT.value, {"600519.SH": {"up": 11.0, "down": 9.0}})
+        assert _wait_until(lambda: hub.get_limits("600519.SH") != (0.0, 0.0))
+        assert hub.get_limits("600519.SH") == (9.0, 11.0)
+    finally:
+        hub.stop()

@@ -698,3 +698,19 @@ Tushare 每个交易日早晨发布当日 `stk_limit`。运行时由
 
 用户自建行情发布者只需在快照中额外提供 `prev_close`、`name`、`up_limit`、
 `down_limit`，即可获得与官方腾讯发布者相同的双链路能力。
+
+### 14.4 内置腾讯发布者（可选，默认关闭）
+
+公开版默认不自动拉取实时行情，用户可自行接入发布者。若希望开箱即用，
+可设置环境变量后重启服务，由服务进程内启动腾讯发布者：
+
+```bash
+export QUANTIDE_QUOTE_PUBLISHER=tencent
+export QUANTIDE_QUOTE_SYMBOLS=600519.SH,000001.SZ   # 可选，缺省为全市场
+export QUANTIDE_QUOTE_INTERVAL=3                    # 秒
+```
+
+注意：`msg_hub` 是进程内消息总线，因此发布者必须运行在**服务进程内**；
+单独执行 `python -m quantide.providers.tencent_publisher` 不会把行情送给
+正在运行的服务。定时任务使用 `misfire_grace_time=None`，机器休眠后唤醒
+仍会补跑 09:00/09:20 的当日限价刷新。

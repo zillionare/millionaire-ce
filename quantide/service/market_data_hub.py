@@ -220,8 +220,8 @@ class MarketDataHub:
                 if not isinstance(raw, dict):
                     continue
                 self._limits[str(symbol)] = (
-                    float(raw.get("down_limit") or 0.0),
-                    float(raw.get("up_limit") or 0.0),
+                    float(raw.get("down_limit", raw.get("down", 0)) or 0.0),
+                    float(raw.get("up_limit", raw.get("up", 0)) or 0.0),
                 )
 
     def _push_events(self, snapshots: dict[str, QuoteSnapshot]) -> None:

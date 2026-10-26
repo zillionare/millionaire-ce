@@ -109,3 +109,23 @@ def test_0920_retry_only_when_needed(calendar, monkeypatch):
     refresher._last_success = datetime.date(2024, 1, 2)
     refresher._refresh_if_needed()
     assert fetcher.calls == [datetime.date(2024, 1, 3)]
+
+
+def test_start_registers_misfire_tolerant_jobs(calendar, monkeypatch):
+    """定时任务允许休眠后补跑（misfire_grace_time=None）。"""
+    import quantide.service.limit_price_refresher as module
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        module.scheduler, "add_job", lambda *a, **k: calls.append(k)
+    )
+    fetcher = _FakeFetcher(pd.DataFrame())
+    store = _FakeStore()
+    refresher = _refresher(calendar, fetcher, store)
+    monkeypatch.setattr(
+        "quantide.service.limit_price_refresher.msg_hub.publish", lambda *a, **k: None
+    )
+    refresher.start()
+    assert len(calls) == 2
+    assert all(call.get("misfire_grace_time") is None for call in calls)
+    assert all(call.get("coalesce") is True for call in calls)
