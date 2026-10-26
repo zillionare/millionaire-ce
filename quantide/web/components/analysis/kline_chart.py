@@ -221,7 +221,7 @@ class KlineChart:
             is_active = freq == current_freq
             btn_cls = (
                 "px-3 py-1 text-sm rounded "
-                + ("bg-blue-600 text-white" if is_active else "bg-gray-200 text-gray-700 hover:bg-gray-300")
+                + ("bg-[#e41815] text-white" if is_active else "bg-gray-200 text-gray-700 hover:bg-gray-300")
             )
             js_chart_id = chart_id.replace("-", "_")
             buttons.append(

@@ -78,8 +78,8 @@ def create_login_form(error=None, action="/auth/login", redirect_to="/"):
                 border: 1px solid rgba(131, 108, 76, 0.12);
             }
             .qt-login-brand {
-                background: linear-gradient(180deg, #c90505 0%, #dc0909 100%);
-                color: white;
+                background: #fafafa;
+                color: #171717;
                 padding: 30px 24px 24px;
                 display: flex;
                 flex-direction: column;
@@ -201,9 +201,9 @@ def create_login_form(error=None, action="/auth/login", redirect_to="/"):
                 accent-color: #c90505;
             }
             .qt-login-error {
-                background: rgba(201, 5, 5, 0.08);
-                color: #9d1111;
-                border-left: 4px solid #c90505;
+                background: #fff3f2;
+                color: #e41815;
+                border-left: 4px solid #e41815;
                 padding: 8px 10px;
                 font-size: 12px;
             }
@@ -211,22 +211,22 @@ def create_login_form(error=None, action="/auth/login", redirect_to="/"):
                 margin-top: 10px;
                 height: 42px;
                 border: none;
-                background: linear-gradient(180deg, #cd0505 0%, #b90303 100%);
-                color: #fff6ef;
+                background: #e41815;
+                color: #ffffff;
                 font-size: 18px;
                 letter-spacing: 0.3em;
                 text-indent: 0.3em;
                 cursor: pointer;
                 border-radius: 4px;
-                box-shadow: 0 2px 5px rgba(201, 5, 5, 0.25);
+                box-shadow: 0 2px 5px rgba(0,0,0,0.08);
                 transition: box-shadow 0.2s ease, transform 0.1s ease;
             }
             .qt-login-button:hover {
-                box-shadow: 0 6px 16px rgba(201, 5, 5, 0.35);
+                box-shadow: 0 6px 16px rgba(0,0,0,0.12);
             }
             .qt-login-button:active {
                 transform: translateY(1px);
-                box-shadow: 0 2px 8px rgba(201, 5, 5, 0.25);
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             }
             .qt-emblem-yinyang {
                 position: absolute;
@@ -239,8 +239,8 @@ def create_login_form(error=None, action="/auth/login", redirect_to="/"):
                 z-index: 3;
                 overflow: hidden;
                 background:
-                    linear-gradient(90deg, #121212 0 50%, #c90505 50% 100%);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+                    linear-gradient(90deg, #262626 0 50%, #e41815 50% 100%);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
             }
             .qt-emblem-yinyang::before,
             .qt-emblem-yinyang::after {
@@ -708,7 +708,7 @@ def create_profile_form(user, success=None, error=None, action="/auth/profile"):
 
 
 def InfoRow(label, value):
-    """Helper for info display in profile"""
+    """Render info display in profile"""
     return DivFullySpaced(
         Span(label, cls="font-medium"), Span(str(value), cls="text-muted-foreground")
     )

@@ -93,10 +93,18 @@ class BacktestBroker(AbstractBroker):
         # 回测时钟，初始化为 bt_start 的前一个交易日 (Day 0)
         prev = calendar.day_shift(bt_start, -1)
         if prev >= bt_start:
-            raise ValueError(
-                f"交易日历异常：{bt_start} 的上一交易日为 {prev}，"
-                "请先完整同步交易日历（系统维护 → 数据维护 → 交易日历）"
+            # 只有当日历确实包含 bt_start 之前的日期却算不出上一交易日时，
+            # 才判定为日历损坏；最小测试日历（第一天没有更早日期）允许回退。
+            frames = getattr(calendar, "day_frames", None)
+            has_earlier = bool(
+                frames is not None and len(frames) and frames[0] < bt_start
             )
+            if has_earlier:
+                raise ValueError(
+                    f"交易日历异常：{bt_start} 的上一交易日为 {prev}，"
+                    "请先完整同步交易日历（系统维护 → 数据维护 → 交易日历）"
+                )
+            prev = bt_start - datetime.timedelta(days=1)
         self._clock: datetime.datetime = calendar.replace_time(prev, 15)
 
         # 初始化回测数据记录

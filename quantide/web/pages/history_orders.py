@@ -42,7 +42,7 @@ def DateRangePicker(start_date: str = "", end_date: str = ""):
             cls="flex items-center ml-4",
         ),
         Button("查询", type="submit",
-               cls="ml-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"),
+               cls="ml-4 px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]"),
         cls="flex items-center mb-6",
     )
 
@@ -53,10 +53,10 @@ def OrdersTable(orders: list[dict]):
         return Div(P("暂无委托数据", cls="text-gray-500 text-center py-8"), cls="bg-white rounded-lg shadow")
 
     status_colors = {
-        "已报": "text-blue-600",
+        "已报": "text-gray-600",
         "已成": "text-green-600",
         "已撤": "text-gray-500",
-        "部成": "text-orange-600",
+        "部成": "text-gray-600",
         "废单": "text-red-600",
     }
 

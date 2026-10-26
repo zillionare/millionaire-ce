@@ -136,7 +136,7 @@ def _build_status_badge(status: str) -> Span:
     if status == "ok":
         return Span("✅ 完整", cls="text-green-600 font-medium")
     elif status == "empty":
-        return Span("⚠️ 空数据", cls="text-yellow-600 font-medium")
+        return Span("⚠️ 空数据", cls="text-gray-500 font-medium")
     elif status == "error":
         return Span("❌ 错误", cls="text-red-600 font-medium")
     return Span("⚪ 未知", cls="text-gray-500 font-medium")

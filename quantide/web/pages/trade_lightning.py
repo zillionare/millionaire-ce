@@ -204,7 +204,7 @@ def _reference_price_panel() -> Any:
                 ),
                 type="button",
                 cls=(
-                    "reference-price-btn bg-[#f9fafb] dark:bg-gray-700 rounded-md py-1.5 px-1 "
+                    "reference-price-btn bg-gray-50 rounded-md py-1.5 px-1 "
                     "text-center flex flex-col items-center justify-center gap-1 flex-1 min-w-0 "
                     "disabled:opacity-40 disabled:cursor-not-allowed"
                 ),
@@ -470,7 +470,7 @@ def render_trade_lightning_panel(
                 ),
                 cls="flex gap-1 text-[80%]",
             ),
-            cls="flex items-center justify-between bg-[#e0e0e0] dark:bg-gray-600 px-4 py-2.5 rounded-t-lg",
+            cls="flex items-center justify-between bg-gray-100 px-4 py-2.5 rounded-t-lg",
         ),
         Div(
             *([_empty_lightning_state()] if not entries else [_lightning_row(portfolio_id, entry) for entry in entries]),
@@ -528,9 +528,9 @@ def _dialog_modal(title: str, body: Any, *, modal_id: str) -> Any:
                             ),
                             style="background:none;border:none;box-shadow:none;",
                         ),
-                        cls="grid grid-cols-[auto_1fr_auto] items-center gap-4 bg-[#d00000] px-5 py-4",
+                        cls="grid grid-cols-[auto_1fr_auto] items-center gap-4 bg-[#e41815] px-5 py-4",
                     ),
-                    Div(body, cls="bg-[#f7f7f7]"),
+                    Div(body, cls="bg-gray-50"),
                     cls=(
                         "inline-block w-full max-w-[640px] overflow-hidden rounded-xl bg-white "
                         "text-left align-middle shadow-2xl"
@@ -550,7 +550,7 @@ def _modal_field_row(label: str, control: Any) -> Any:
         Div(
             label,
             cls=(
-                "flex items-center justify-start bg-[#d9d9d9] px-4 text-left text-[15px] "
+                "flex items-center justify-start bg-gray-200 px-4 text-left text-[15px] "
                 "font-medium text-gray-800"
             ),
         ),
@@ -706,7 +706,7 @@ def _upsert_modal(
         hx_target="#trade-lightning-modal-container",
         cls="min-h-[404px]",
     )
-    body = Div(form, cls="bg-[#f7f7f7]")
+    body = Div(form, cls="bg-gray-50")
     return _dialog_modal(title, body, modal_id=modal_id)
 
 
@@ -784,7 +784,7 @@ def _delete_modal(portfolio_id: str, entry: TradeLightningEntry) -> Any:
             ),
             cls="flex justify-center px-8 py-8",
         ),
-        cls="bg-[#f7f7f7]",
+        cls="bg-gray-50",
     )
     return _dialog_modal("删除闪电买入单", body, modal_id="trade-lightning-delete-modal")
 
@@ -813,7 +813,7 @@ def _clear_modal(portfolio_id: str) -> Any:
             ),
             cls="flex justify-center px-8 py-8",
         ),
-        cls="bg-[#f7f7f7]",
+        cls="bg-gray-50",
     )
     return _dialog_modal("清空闪电买入单", body, modal_id="trade-lightning-clear-modal")
 

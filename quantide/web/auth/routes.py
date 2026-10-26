@@ -85,7 +85,7 @@ class AuthRoutes:
                             CardBody(
                                 H2(
                                     str(user_counts.get("admin", 0)),
-                                    cls="text-3xl font-bold text-purple-600",
+                                    cls="text-3xl font-bold text-gray-600",
                                 ),
                                 P("Admin accounts", cls="text-muted-foreground"),
                             ),
@@ -95,7 +95,7 @@ class AuthRoutes:
                             CardBody(
                                 H2(
                                     str(user_counts.get("manager", 0)),
-                                    cls="text-3xl font-bold text-blue-600",
+                                    cls="text-3xl font-bold text-[#e41815]",
                                 ),
                                 P("Manager accounts", cls="text-muted-foreground"),
                             ),

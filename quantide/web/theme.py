@@ -3,14 +3,28 @@
 统一管理应用的主题颜色和样式。
 """
 
-from fasthtml.common import *
+from __future__ import annotations
+
+from fasthtml.common import Script, Style
 from monsterui.all import Theme
 
-# 主色调
-PRIMARY_COLOR = "#e41815"
-SECONDARY_COLOR = "#f3f4f6"
-TEXT_COLOR = "#2c3030"
-BORDER_COLOR = "#d1d5db"
+from quantide.web.design_system import (
+    BRAND,
+    BRAND_DARK,
+    BRAND_LIGHT,
+    GRAY_100,
+    GRAY_200,
+    GRAY_900,
+    DesignSystem,
+)
+
+#: 兼容旧代码从 theme 直接导入
+PRIMARY_COLOR = BRAND
+PRIMARY_DARK = BRAND_DARK
+PRIMARY_LIGHT = BRAND_LIGHT
+SECONDARY_COLOR = GRAY_100
+TEXT_COLOR = GRAY_900
+BORDER_COLOR = GRAY_200
 
 
 class AppTheme:
@@ -19,51 +33,36 @@ class AppTheme:
     @staticmethod
     def headers():
         """获取主题 headers（CSS 和脚本）"""
-        # 使用 monsterui 的 Theme 获取基础 headers（包含 Tailwind, FrankenUI, DaisyUI）
-        base_headers = Theme.red.headers()
+        # 使用 monsterui 默认主题（黑白灰），禁用 Theme.red 的红色渐变背景
+        base_headers = Theme.neutral.headers()
 
-        # 添加自定义主题 CSS
-        custom_css = Style(f"""
-            :root {{
-                --p: 1 83% 49%;
-                --pf: 1 83% 42%;
-                --pc: 0 0% 100%; /* primary content */
-            }}
-            body {{
-                background-color: #f5f5f5;
-                color: {TEXT_COLOR};
-            }}
-            .btn-primary {{
-                background-color: {PRIMARY_COLOR} !important;
-                border-color: {PRIMARY_COLOR} !important;
-            }}
-            .text-primary {{
-                color: {PRIMARY_COLOR} !important;
-            }}
-            .bg-primary {{
-                background-color: {PRIMARY_COLOR} !important;
-            }}
-            .border-primary {{
-                border-color: {PRIMARY_COLOR} !important;
-            }}
-            .quantide-surface {{
-                background: #ffffff;
-                border: 1px solid rgba(44, 48, 48, 0.08);
-                box-shadow: 0 18px 45px rgba(44, 48, 48, 0.08);
-            }}
+        # 设计系统全局样式（黑白灰 + 品牌红强调）
+        design_css = DesignSystem.css()
+
+        # 项目级覆盖（兼容既有类名）
+        override_css = Style("""
+            /* 品牌色覆盖（兼容旧代码中的 --p 变量） */
+            :root {
+                --p: 0.6 0.19 34;      /* DaisyUI primary: 红 */
+                --pf: 0.6 0.19 30;     /* primary focus */
+                --pc: 0 0% 100%;       /* primary content */
+            }
+
+            /* 全局面包屑 / 侧边栏微调 */
+            .q-breadcrumb { font-size: 14px; }
+            #layout-sidebar a { color: var(--fg); }
+            #layout-sidebar a:hover { color: var(--brand); }
+
             /* <details> 原生箭头统一隐藏，避免与自定义 chevron 重复 */
-            summary {{
-                list-style: none;
-            }}
-            summary::-webkit-details-marker {{
-                display: none;
-            }}
-            summary::marker {{
-                content: "";
-            }}
+            summary { list-style: none; }
+            summary::-webkit-details-marker { display: none; }
+            summary::marker { content: ""; }
         """)
 
-        # 添加 HTMX
+        # HTMX
         htmx_script = Script(src="https://unpkg.com/htmx.org@1.9.12")
 
-        return list(base_headers) + [custom_css, htmx_script]
+        return list(base_headers) + [design_css, override_css, htmx_script]
+
+
+__all__ = ["AppTheme"]

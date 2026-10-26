@@ -149,7 +149,7 @@ def _VerifyTab():
             cls="p-6 bg-white border rounded-lg shadow-sm mb-6"
         ),
         Div(id="verify-spinner", cls="htmx-indicator mb-4", children=[
-            Div(cls="flex items-center text-blue-600", children=[
+            Div(cls="flex items-center text-[#e41815]", children=[
                 UkIcon("loader", cls="animate-spin mr-2"),
                 "正在校验数据，请稍候..."
             ])

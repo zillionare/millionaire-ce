@@ -39,9 +39,9 @@ _POLL = "every 3s [document.visibilityState === 'visible']"
 def _breadcrumb() -> Div:
     return Div(
         Nav(
-            A("首页", href="/", cls="hover:text-blue-600"),
+            A("首页", href="/", cls="hover:text-[#e41815]"),
             Span(">", cls="text-gray-400"),
-            A("系统维护", href="/system/", cls="hover:text-blue-600"),
+            A("系统维护", href="/system/", cls="hover:text-[#e41815]"),
             Span(">", cls="text-gray-400"),
             Span("实时行情", cls="text-gray-900 font-medium"),
             cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",
@@ -62,9 +62,9 @@ def _is_session(now: datetime.datetime) -> bool:
 def _status_card(label: str, value: str, hint: str = "", tone: str = "gray") -> Div:
     tone_cls = {
         "green": "text-green-600",
-        "amber": "text-amber-600",
+        "amber": "text-gray-600",
         "red": "text-red-600",
-        "blue": "text-blue-600",
+        "blue": "text-[#e41815]",
         "gray": "text-gray-900",
     }.get(tone, "text-gray-900")
     return Div(
@@ -195,7 +195,7 @@ def _data_health(now: datetime.datetime) -> list[Any]:
         tone = (
             "bg-green-50 text-green-700"
             if coverage >= 0.9
-            else ("bg-amber-50 text-amber-700" if coverage >= 0.5 else "bg-red-50 text-red-600")
+            else ("bg-gray-100 text-gray-700" if coverage >= 0.5 else "bg-red-50 text-red-600")
         )
         items.append(
             Span(
@@ -209,7 +209,7 @@ def _data_health(now: datetime.datetime) -> list[Any]:
         A(
             "查看风险事件 →",
             href="/system/risk-events/",
-            cls="text-xs font-medium text-blue-600 hover:text-blue-700",
+            cls="text-xs font-medium text-[#e41815] hover:text-[#c91412]",
         )
     )
     return items

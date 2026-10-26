@@ -32,7 +32,7 @@ class StockList:
             is_selected = stock.get("symbol") == self.selected_symbol
             row_cls = (
                 "grid grid-cols-3 gap-2 px-3 py-2 cursor-pointer text-sm "
-                + ("bg-blue-50" if is_selected else "hover:bg-gray-50")
+                + ("bg-[#fff3f2]" if is_selected else "hover:bg-gray-50")
             )
 
             rows.append(
@@ -42,7 +42,7 @@ class StockList:
                     Div(
                         Button(
                             "查看",
-                            cls="text-blue-600 hover:text-blue-800 text-xs",
+                            cls="text-[#e41815] hover:text-[#c91412] text-xs",
                             onclick=f"viewStock('{stock.get('symbol')}')",
                         ),
                         cls="text-right",
@@ -70,7 +70,7 @@ class StockList:
             Div(
                 Button(
                     "+ 添加",
-                    cls="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700",
+                    cls="px-3 py-1 bg-[#e41815] text-white rounded text-sm hover:bg-[#c91412]",
                     onclick="showAddStockModal()",
                 ),
                 Button(

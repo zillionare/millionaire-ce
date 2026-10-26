@@ -1442,13 +1442,13 @@ def TodayOrdersTable(orders: list[Order]):
             # ``OrderStatus`` 成员才会命中，否则一律显示 "未知"。
             status_map = {
                 OrderStatus.UNREPORTED: ("未报", "text-gray-500"),
-                OrderStatus.WAIT_REPORTING: ("待报", "text-yellow-600"),
-                OrderStatus.REPORTED: ("已报", "text-yellow-600"),
+                OrderStatus.WAIT_REPORTING: ("待报", "text-gray-600"),
+                OrderStatus.REPORTED: ("已报", "text-gray-600"),
                 OrderStatus.REPORTED_CANCEL: ("已报待撤", "text-gray-500"),
                 OrderStatus.PARTSUCC_CANCEL: ("部成待撤", "text-gray-500"),
                 OrderStatus.PART_CANCEL: ("部成已撤", "text-gray-500"),
                 OrderStatus.CANCELED: ("已撤", "text-gray-500"),
-                OrderStatus.PART_SUCC: ("部分成交", "text-blue-600"),
+                OrderStatus.PART_SUCC: ("部分成交", "text-[#e41815]"),
                 OrderStatus.SUCCEEDED: ("已成交", "text-green-600"),
                 OrderStatus.JUNK: ("已拒绝", "text-red-600"),
             }
@@ -1607,7 +1607,7 @@ def NoAccountView():
     """无账号视图"""
     return Div(
         Div(
-            UkIcon("alert-circle", size=48, cls="text-yellow-500 mb-4"),
+            UkIcon("alert-circle", size=48, cls="text-gray-400 mb-4"),
             H2("暂无交易账号", cls="text-2xl font-bold text-gray-900 mb-4"),
             P("您还没有配置任何交易账号。请先创建或配置账号。", cls="text-gray-600 mb-6"),
             Div(
@@ -1643,7 +1643,7 @@ def SelectAccountView(accounts: list[dict]):
                 Div(
                     Span(
                         "实盘" if account["is_live"] else "仿真",
-                        cls=f"px-2 py-1 text-xs font-medium rounded-full {'bg-red-100 text-red-700' if account['is_live'] else 'bg-blue-100 text-blue-700'}"
+                        cls=f"px-2 py-1 text-xs font-medium rounded-full {'bg-red-100 text-red-700' if account['is_live'] else 'bg-gray-100 text-gray-700'}"
                     ),
                     Span(
                         "在线" if account["status"] else "离线",
@@ -1791,7 +1791,7 @@ def trade_main_page(request):
             # 账号信息
             Div(
                 Div(
-                    Span("★", cls="text-yellow-500 mr-1"),
+                    Span("★", cls="text-[#e41815] mr-1"),
                     Span(f"当前账号: {active_account['name']}", cls="font-medium"),
                     Span(f"({active_account['label']})", cls="ml-2 text-sm text-gray-500"),
                     cls="flex items-center mb-4 px-6",

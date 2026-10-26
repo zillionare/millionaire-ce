@@ -139,7 +139,7 @@ def _SchemaTab(req):
         rows = []
         for col in columns:
             rows.append(Tr(
-                Td(col.name, cls="font-mono text-blue-600 font-medium"),
+                Td(col.name, cls="font-mono text-gray-800 font-medium"),
                 Td(col.type, cls="text-gray-500"),
                 Td("是" if col.is_pk else "否", cls="text-gray-400"),
             ))

@@ -193,7 +193,7 @@ def _build_connection_status(config: dict[str, Any], test_result: dict[str, Any]
                 "请在初始化向导中配置网关地址。",
                 cls="text-sm text-gray-500 mt-1",
             ),
-            cls="p-6 bg-yellow-50 rounded-lg border border-yellow-200",
+            cls="p-6 bg-gray-50 rounded-lg border border-gray-200",
         )
 
     if test_result:
@@ -231,7 +231,7 @@ def _build_flash(message: str, tone: str) -> Div:
     color_map = {
         "success": ("bg-green-50", "border-green-200", "text-green-700"),
         "error": ("bg-red-50", "border-red-200", "text-red-700"),
-        "info": ("bg-blue-50", "border-blue-200", "text-blue-700"),
+        "info": ("bg-gray-50", "border-gray-200", "text-gray-700"),
     }
     bg, border, text = color_map.get(tone, color_map["info"])
     return Div(message, cls=f"mb-4 rounded-lg border px-4 py-3 text-sm {bg} {border} {text}")
@@ -254,7 +254,7 @@ def _build_dev_stub_notice(config: dict[str, Any]) -> Div | None:
 
     return Div(
         Div(
-            UkIcon("info", size=16, cls="text-blue-500 mr-2"),
+            UkIcon("info", size=16, cls="text-gray-500 mr-2"),
             H3("开发 Stub 运行时", cls="text-lg font-semibold text-gray-900"),
             cls="mb-3 flex items-center",
         ),
@@ -268,7 +268,7 @@ def _build_dev_stub_notice(config: dict[str, Any]) -> Div | None:
             "连接测试针对的是当前表单地址；保存配置不会热更新已启动进程，如需切换运行时配置请重启应用。",
             cls="mt-2 text-sm text-gray-600",
         ),
-        cls="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-4",
+        cls="mb-6 rounded-lg border border-gray-200 bg-gray-50 px-4 py-4",
     )
 
 
@@ -414,12 +414,12 @@ def _render_page(
             ),
             Div(_build_config_form(config), cls="mb-6"),
             Div(
-                UkIcon("info", size=16, cls="text-yellow-500 mr-2"),
+                UkIcon("info", size=16, cls="text-gray-500 mr-2"),
                 Span(
                     "保存后会持久化到应用配置；若运行时已启动，重新连接相关能力可能需要重新加载应用。",
                     cls="text-sm text-gray-500",
                 ),
-                cls="flex items-center p-4 bg-yellow-50 rounded-lg",
+                cls="flex items-center p-4 bg-gray-50 rounded-lg",
             ),
         ]
     )

@@ -4,6 +4,8 @@ from fasthtml.common import *
 from fasthtml.svg import Path as SvgPath
 from monsterui.all import *
 
+from quantide.web.design_system import BRAND, GRAY_500, GRAY_900
+
 
 def sidebar_component(
     menu_items: list[dict] | None = None,
@@ -20,8 +22,8 @@ def sidebar_component(
     """
     items = []
 
-    base_text_cls = "text-[#2c3030]"
-    hover_cls = "hover:bg-[#fcfcfc]"
+    base_text_cls = "text-gray-600"
+    hover_cls = "hover:bg-gray-50"
     active_cls = "text-[#e41815] font-medium"
 
     for item in menu_items or []:
@@ -36,7 +38,6 @@ def sidebar_component(
         icon_name = item.get("icon", "folder" if has_children else "file")
 
         if icon_path:
-            # 使用自定义 SVG path
             icon_cmp = Svg(
                 SvgPath(d=icon_path, stroke="currentColor", fill="none", stroke_width="2", stroke_linecap="round", stroke_linejoin="round"),
                 cls="w-5 h-5"
@@ -50,7 +51,7 @@ def sidebar_component(
                 child_active = child.get("active", False)
                 c_cls = "block px-3 py-2 rounded-lg text-sm transition-colors "
                 if child_active:
-                    c_cls += f"bg-[#fcfcfc] {active_cls}"
+                    c_cls += f"bg-gray-50 {active_cls}"
                 else:
                     c_cls += f"{base_text_cls} {hover_cls}"
 
@@ -100,7 +101,7 @@ def sidebar_component(
         else:
             a_cls = "w-full flex items-center px-3 py-2 rounded-lg transition-colors "
             if item_active:
-                a_cls += f"bg-[#fcfcfc] {active_cls}"
+                a_cls += f"bg-gray-50 {active_cls}"
             else:
                 a_cls += f"{base_text_cls} {hover_cls}"
 
@@ -133,6 +134,6 @@ def sidebar_component(
         aside_attrs["hx_swap_oob"] = "true"
 
     return Aside(
-        Nav(Div(*items, cls="p-4 space-y-1"), **nav_attrs),
+        Nav(*items, cls="p-4 space-y-1", **nav_attrs),
         **aside_attrs,
     )

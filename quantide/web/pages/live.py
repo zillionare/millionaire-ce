@@ -60,10 +60,7 @@ def GatewayConnectionStatus(connected: bool = False):
 
 
 def AssetSummary(asset_overview: dict | None = None, **kwargs):
-    metric_cls = "flex flex-col items-center justify-center p-4 text-blue-600"
-    val_cls = "text-xl font-bold"
-    label_cls = "text-xs opacity-80"
-
+    """资产概览：白底卡片 + 分隔线，红=盈利，绿=亏损。"""
     asset_overview = asset_overview or {}
 
     total = asset_overview.get("total")
@@ -80,35 +77,27 @@ def AssetSummary(asset_overview: dict | None = None, **kwargs):
     pnl_text = f"{pnl:,.2f}" if pnl is not None else "0.00"
     pnl_pct_text = f"{pnl_pct * 100:.2f}%" if pnl_pct is not None else "0.00%"
 
+    pnl_cls = "text-red-500" if (pnl or 0) > 0 else ("text-green-600" if (pnl or 0) < 0 else "text-gray-900")
+
+    def _stat(label, value, cls="text-gray-900"):
+        return Div(
+            P(label, cls="text-xs text-gray-500"),
+            P(value, cls=f"mt-1 text-xl font-semibold tabular-nums {cls}"),
+            cls="bg-white px-4 py-4",
+        )
+
     return Div(
         Div(
-            Div(P(total_text, cls=val_cls), P("总资产", cls=label_cls), cls=metric_cls),
-            Div(P(cash_text, cls=val_cls), P("可用金额", cls=label_cls), cls=metric_cls),
-            Div(
-                P(frozen_cash_text, cls=val_cls),
-                P("冻结金额", cls=label_cls),
-                cls=metric_cls,
-            ),
-            Div(
-                P(market_value_text, cls=val_cls),
-                P("总市值", cls=label_cls),
-                cls=metric_cls,
-            ),
-            Div(
-                P(pnl_text, cls="text-xl font-bold text-yellow-600"),
-                P("盈亏", cls=label_cls),
-                cls=metric_cls,
-            ),
-            Div(
-                P(pnl_pct_text, cls="text-xl font-bold text-yellow-600"),
-                P("盈亏比例", cls=label_cls),
-                cls=metric_cls,
-            ),
-            cls="flex justify-around items-center h-24",
+            _stat("总资产", total_text),
+            _stat("可用金额", cash_text),
+            _stat("冻结金额", frozen_cash_text),
+            _stat("总市值", market_value_text),
+            _stat("盈亏", pnl_text, pnl_cls),
+            _stat("盈亏比例", pnl_pct_text, pnl_cls),
+            cls="grid grid-cols-2 gap-px bg-gray-100 md:grid-cols-3 xl:grid-cols-6",
         ),
-        style="background: linear-gradient(90deg, #1976d2 0%, #42a5f5 100%); border-radius: 12px;",
-        cls="shadow-lg mb-6",
         id="asset-summary",
+        cls="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm",
         **kwargs,
     )
 
@@ -162,14 +151,18 @@ def PositionInfo(positions: list[Position] | None = None, portfolio_id: str = ""
     return Div(
         Div(
             Div(
-                UkIcon("briefcase", cls="mr-2 text-blue-600"),
-                H3("持仓信息", cls="text-lg font-bold mb-0"),
+                UkIcon("briefcase", cls="mr-2 text-[#e41815]"),
+                H3("持仓信息", cls="text-lg font-semibold mb-0"),
                 cls="flex items-center",
             ),
             Button(
                 UkIcon("refresh-cw", size=16),
                 " 刷新",
-                cls="uk-button-primary uk-button-small flex items-center gap-1",
+                cls=(
+                    "inline-flex items-center gap-1 rounded-lg border border-gray-200 "
+                    "bg-white px-3 py-1.5 text-xs font-medium text-gray-600 "
+                    "hover:border-[#e41815] hover:text-[#e41815]"
+                ),
                 hx_get=f"/trade/live/{portfolio_id}/positions",
                 hx_target="#position-info",
                 hx_swap="outerHTML",
@@ -187,35 +180,43 @@ def PositionInfo(positions: list[Position] | None = None, portfolio_id: str = ""
 
 
 def TradePanel(portfolio_id: str):
-    input_cls = "uk-input uk-form-small rounded-md mb-4 mt-1"
-    label_cls = "text-xs text-blue-100 block"
-    ratio_btn_cls = "uk-button uk-button-default uk-button-small text-white text-[10px] px-2 min-w-[36px] border-white/30 hover:bg-white/20"
+    """实盘下单面板：白底、红色买入、绿色卖出。"""
+    input_cls = (
+        "mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm "
+        "text-gray-900 outline-none transition focus:border-[#e41815] "
+        "focus:ring-2 focus:ring-[#e41815]/10"
+    )
+    label_cls = "block text-xs font-medium text-gray-500"
+    ratio_btn_cls = (
+        "rounded-md border border-gray-200 px-2 py-1 text-[11px] text-gray-600 "
+        "transition hover:border-[#e41815] hover:text-[#e41815]"
+    )
 
     return Div(
         Form(
             Div(
-                Ul(
-                    Li(
-                        A(
-                            UkIcon("plus-circle", size=14),
-                            " 买入",
-                            href="#",
-                            cls="flex items-center text-xs",
-                            onclick="document.getElementById('side').value='BUY'; this.closest('ul').querySelectorAll('li').forEach(li => li.classList.remove('uk-active')); this.parentElement.classList.add('uk-active');",
+                Div(
+                    Button(
+                        UkIcon("plus-circle", size=14),
+                        "买入",
+                        type="button",
+                        onclick="document.getElementById('side').value='BUY'; this.closest('div').querySelectorAll('button').forEach(b=>b.classList.remove('active')); this.classList.add('active');",
+                        cls=(
+                            "flex-1 rounded-md px-3 py-2 text-sm font-medium transition "
+                            "bg-[#e41815] text-white"
                         ),
-                        cls="uk-active",
                     ),
-                    Li(
-                        A(
-                            UkIcon("minus-circle", size=14),
-                            " 卖出",
-                            href="#",
-                            cls="flex items-center text-xs",
-                            onclick="document.getElementById('side').value='SELL'; this.closest('ul').querySelectorAll('li').forEach(li => li.classList.remove('uk-active')); this.parentElement.classList.add('uk-active');",
-                        )
+                    Button(
+                        UkIcon("minus-circle", size=14),
+                        "卖出",
+                        type="button",
+                        onclick="document.getElementById('side').value='SELL'; this.closest('div').querySelectorAll('button').forEach(b=>b.classList.remove('active')); this.classList.add('active');",
+                        cls=(
+                            "flex-1 rounded-md px-3 py-2 text-sm font-medium transition "
+                            "bg-green-600 text-white"
+                        ),
                     ),
-                    cls="uk-tab uk-child-width-expand mb-4 bg-white/10 rounded-lg p-0.5",
-                    style="border-bottom: none;",
+                    cls="grid grid-cols-2 gap-2 mb-4",
                 )
             ),
             Input(type="hidden", id="side", name="side", value="BUY"),
@@ -227,7 +228,7 @@ def TradePanel(portfolio_id: str):
                     cls=input_cls,
                     required=True,
                 ),
-                _Label("买入价格", cls=label_cls),
+                _Label("委托价格", cls=label_cls),
                 Input(
                     name="price",
                     type="number",
@@ -252,15 +253,18 @@ def TradePanel(portfolio_id: str):
                     UkIcon("shopping-cart", size=16),
                     " 下单",
                     type="submit",
-                    cls="uk-button-default w-full bg-white text-blue-700 font-bold border-none hover:bg-gray-100",
+                    cls=(
+                        "inline-flex w-full items-center justify-center gap-2 rounded-lg "
+                        "bg-[#e41815] px-4 py-2.5 text-sm font-semibold text-white "
+                        "transition hover:bg-[#c91412]"
+                    ),
                 ),
             ),
             hx_post=f"/trade/live/{portfolio_id}/order",
             hx_target="#position-info",
             hx_swap="outerHTML",
         ),
-        cls="p-6 rounded-xl shadow-xl h-full",
-        style="background: linear-gradient(135deg, #1976d2 0%, #42a5f5 100%);",
+        cls="p-6 rounded-xl border border-gray-100 bg-white shadow-sm h-full",
     )
 
 
@@ -338,9 +342,9 @@ def CreatePortfolioModal():
             H3("Gateway 接入说明", cls="text-lg font-bold mb-4"),
             Div(
                 Div(
-                    UkIcon("alert-triangle", cls="text-yellow-600 mr-2"),
+                    UkIcon("alert-triangle", cls="text-gray-600 mr-2"),
                     P("主体工程的实盘路径已收敛到 qmt-gateway。这里不再创建本地 QMT 账户。", cls="text-sm text-gray-600"),
-                    cls="flex items-start mb-4 p-3 bg-yellow-50 rounded-lg",
+                    cls="flex items-start mb-4 p-3 bg-gray-50 rounded-lg",
                 ),
             ),
             Div(
@@ -425,7 +429,7 @@ def show_create_modal():
 
 @rt("/create", methods=["POST"])
 async def create_portfolio(req):
-    return Div("主体工程已移除本地QMT账户创建，请通过 gateway 进行实盘接入。", cls="text-amber-600 p-4")
+    return Div("主体工程已移除本地QMT账户创建，请通过 gateway 进行实盘接入。", cls="text-gray-500 p-4")
 
 
 @rt("/{portfolio_id}")

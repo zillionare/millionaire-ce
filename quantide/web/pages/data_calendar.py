@@ -175,7 +175,7 @@ def _UpdateTab():
             cls="mb-4"
         ),
         Div(id="update-spinner", cls="htmx-indicator mb-4", children=[
-            Div(cls="flex items-center text-blue-600", children=[
+            Div(cls="flex items-center text-[#e41815]", children=[
                 UkIcon("loader", cls="animate-spin mr-2"),
                 "正在更新，请稍候..."
             ])

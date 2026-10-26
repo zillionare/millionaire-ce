@@ -34,12 +34,12 @@ def _user(name="alice", email="a@x.com", role="user", active=True):
 
 def test_get_role_color_admin(admin):
     """[AC-FR1501-04] test_get_role_color_admin."""
-    assert "purple" in admin._get_role_color("admin")
+    assert "gray" in admin._get_role_color("admin")
 
 
 def test_get_role_color_manager(admin):
     """[AC-FR1501-04] test_get_role_color_manager."""
-    assert "blue" in admin._get_role_color("manager")
+    assert "#e41815" in admin._get_role_color("manager")
 
 
 def test_get_role_color_user(admin):

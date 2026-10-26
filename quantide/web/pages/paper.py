@@ -59,7 +59,7 @@ def paper_list(req, session):
             return Div(
                 H2("未找到该仿真账户", cls="text-lg font-bold"),
                 P(f"账户 ID: {requested}", cls="text-sm text-gray-600"),
-                A("返回仿真列表", href="/trade/paper/", cls="text-blue-600"),
+                A("返回仿真列表", href="/trade/paper/", cls="text-[#e41815]"),
                 cls="p-6",
             )
         return _render_paper_account(layout, broker)
@@ -381,8 +381,8 @@ def _render_paper_account(layout: MainLayout, broker: Any) -> Any:
                         Span(
                             "仿真账户",
                             cls=(
-                                "ml-3 inline-flex items-center rounded-full bg-blue-50 "
-                                "px-2.5 py-0.5 text-xs font-medium text-blue-600"
+                                "ml-3 inline-flex items-center rounded-full bg-[#fff3f2] "
+                                "px-2.5 py-0.5 text-xs font-medium text-[#e41815]"
                             ),
                         ),
                         cls="flex flex-wrap items-center",

@@ -155,8 +155,8 @@ def _strategy_dialog_modal(
                 Div(
                     Div(
                         Div(
-                            H3(title, cls="text-lg font-medium leading-6 text-gray-900"),
-                            cls="px-6 py-4 border-b border-gray-200 shrink-0",
+                            H3(title, cls="text-lg font-medium leading-6 text-white"),
+                            cls="px-6 py-4 bg-[#e41815] shrink-0 rounded-t-lg",
                         ),
                         Div(body, cls="px-6 py-5 overflow-y-auto"),
                         Div(footer, cls="px-6 py-4 border-t border-gray-100 shrink-0"),
@@ -682,12 +682,12 @@ def _build_trade_pair_table(
             return A(
                 label + arrow,
                 href=_query(sort=field, dir=next_dir, page=1),
-                cls="cursor-pointer select-none hover:text-blue-600",
+                cls="cursor-pointer select-none hover:text-[#e41815]",
             )
         return A(
             label,
             href=_query(sort=field, dir="asc", page=1),
-            cls="cursor-pointer select-none hover:text-blue-600",
+            cls="cursor-pointer select-none hover:text-[#e41815]",
         )
 
     table = Table(
@@ -734,7 +734,7 @@ def _build_trade_pair_table(
                     ),
                     hx_target="#modal-container",
                     title="点击查看该成交对的 K 线与买卖点",
-                    cls="cursor-pointer hover:bg-blue-50 transition-colors",
+                    cls="cursor-pointer hover:bg-gray-50 transition-colors",
                 )
                 for row in rows
             ],
@@ -753,7 +753,7 @@ def _build_trade_pair_table(
         return A(
             label,
             href=_query(**extra),
-            cls="px-2 py-1 text-xs text-blue-600 hover:underline",
+            cls="px-2 py-1 text-xs text-[#e41815] hover:underline",
         )
 
     page_links = []
@@ -966,7 +966,7 @@ def _build_log_panel(
         save_status_cls = "text-xs text-green-600"
     elif meta["save_requested"]:
         save_status_text = "已启用文件保存，日志生成后会写入本地文件"
-        save_status_cls = "text-xs text-amber-600"
+        save_status_cls = "text-xs text-gray-500"
 
     load_button = (
         Button(
@@ -1145,7 +1145,7 @@ def _foldable_cell(text: str, *, limit: int = 90) -> Any:
         fh.Details(
             fh.Summary(
                 text[:limit] + " …",
-                cls="cursor-pointer text-gray-600 hover:text-blue-600",
+                cls="cursor-pointer text-gray-600 hover:text-[#e41815]",
             ),
             Div(
                 text,
@@ -1230,7 +1230,7 @@ def _build_backtest_name_cell(name: str, portfolio_id: str) -> Any:
         A(
             name,
             href=f"/strategy/backtest/{portfolio_id}",
-            cls="text-blue-600 font-medium hover:underline",
+            cls="text-[#e41815] font-medium hover:underline",
         ),
         cls="text-gray-900",
     )
@@ -1283,7 +1283,7 @@ def _build_backtest_action_cell(
         controls.append(
             Span(
                 "仿真中",
-                cls="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600",
+                cls="inline-flex items-center rounded-full bg-[#fff3f2] px-3 py-1 text-xs font-medium text-[#e41815]",
             )
         )
     else:
@@ -1300,7 +1300,7 @@ def _build_backtest_action_cell(
         controls.append(
             Span(
                 "实盘中",
-                cls="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-600",
+                cls="inline-flex items-center rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-600",
             )
         )
     else:
@@ -1355,19 +1355,19 @@ def _build_strategy_rows(strategies: dict) -> list:
             latest_link = latest_row.get("portfolio_id")
 
         latest_cell = (
-            A(latest_date, href=f"/strategy/backtest/{latest_link}", cls="text-blue-600 hover:underline")
+            A(latest_date, href=f"/strategy/backtest/{latest_link}", cls="text-[#e41815] hover:underline")
             if latest_link
             else Span("--", cls="text-gray-400")
         )
 
         action_controls: list[Any] = [
             Button(
-                UkIcon("play", size=16, cls="text-blue-600"),
+                UkIcon("play", size=16, cls="text-[#e41815]"),
                 title="重新运行回测",
                 hx_get=f"/strategy/{name}/backtest/modal",
                 hx_target="#modal-container",
                 hx_indicator="#global-loading",
-                cls="w-8 h-8 flex items-center justify-center bg-transparent border-0 shadow-none p-0 hover:text-blue-800",
+                cls="w-8 h-8 flex items-center justify-center bg-transparent border-0 shadow-none p-0 hover:text-[#c91412]",
                 type="button",
             )
         ]
@@ -1377,9 +1377,9 @@ def _build_strategy_rows(strategies: dict) -> list:
                 title="参数优化：在样本内挑选参数并用样本外检验",
                 href=f"/strategy/{name}/optimize",
                 cls=(
-                    "px-2 py-1 text-xs font-medium text-purple-700 "
-                    "bg-purple-50 hover:bg-purple-100 rounded border "
-                    "border-purple-200"
+                    "px-2 py-1 text-xs font-medium text-gray-700 "
+                    "bg-gray-50 hover:bg-gray-100 rounded border "
+                    "border-gray-200"
                 ),
             )
         )
@@ -1392,9 +1392,9 @@ def _build_strategy_rows(strategies: dict) -> list:
                     hx_target="#modal-container",
                     hx_indicator="#global-loading",
                     cls=(
-                        "px-2 py-1 text-xs font-medium text-emerald-700 "
-                        "bg-emerald-50 hover:bg-emerald-100 rounded border "
-                        "border-emerald-200"
+                        "px-2 py-1 text-xs font-medium text-green-700 "
+                        "bg-green-50 hover:bg-green-100 rounded border "
+                        "border-green-200"
                     ),
                     type="button",
                 )
@@ -1659,9 +1659,9 @@ def index(req, session):
     layout.main_block = lambda: Div(
         Div(
             Nav(
-                A("首页", href="/", cls="hover:text-blue-600"),
+                A("首页", href="/", cls="hover:text-[#e41815]"),
                 Span(">", cls="text-gray-400"),
-                A("策略", href="/strategy", cls="hover:text-blue-600"),
+                A("策略", href="/strategy", cls="hover:text-[#e41815]"),
                 Span(">", cls="text-gray-400"),
                 Span("策略列表", cls="text-gray-900 font-medium"),
                 cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",
@@ -1775,7 +1775,7 @@ def strategy_detail(req, session, name: str):
                         A(
                             "查看报告",
                             href=f"/strategy/backtest/{pid}",
-                            cls="text-blue-600 hover:underline",
+                            cls="text-[#e41815] hover:underline",
                         ),
                     ),
                 )
@@ -1792,8 +1792,8 @@ def strategy_detail(req, session, name: str):
             "运行回测",
             type="button",
             cls=(
-                "px-4 py-2 bg-blue-600 text-white rounded-lg "
-                "hover:bg-blue-700 text-sm font-medium"
+                "px-4 py-2 bg-[#e41815] text-white rounded-lg "
+                "hover:bg-[#c91412] text-sm font-medium"
             ),
             hx_get=f"/strategy/{name}/backtest/modal",
             hx_target="#modal-container",
@@ -1806,8 +1806,8 @@ def strategy_detail(req, session, name: str):
             title="在样本内挑选参数并用样本外区间检验",
             href=f"/strategy/{name}/optimize",
             cls=(
-                "uk-btn px-4 py-2 bg-purple-600 text-white rounded-lg "
-                "hover:bg-purple-700 text-sm font-medium inline-block"
+                "uk-btn px-4 py-2 bg-[#e41815] text-white rounded-lg "
+                "hover:bg-[#c91412] text-sm font-medium inline-block"
             ),
         )
     )
@@ -1817,8 +1817,8 @@ def strategy_detail(req, session, name: str):
                 "一键选股",
                 type="button",
                 cls=(
-                    "px-4 py-2 bg-emerald-600 text-white rounded-lg "
-                    "hover:bg-emerald-700 text-sm font-medium"
+                    "px-4 py-2 bg-green-600 text-white rounded-lg "
+                    "hover:bg-green-700 text-sm font-medium"
                 ),
                 hx_get=f"/strategy/{name}/select/modal",
                 hx_target="#modal-container",
@@ -2528,7 +2528,7 @@ def _render_stock_selection_modal(
                 Td(f"#{rank_val}", cls="px-3 py-2 font-semibold text-gray-700"),
                 Td(
                     Code(asset_code),
-                    cls="px-3 py-2 font-mono text-xs text-blue-700",
+                    cls="px-3 py-2 font-mono text-xs text-[#e41815]",
                 ),
                 Td(asset_name, cls="px-3 py-2 font-medium text-gray-900"),
                 Td(
@@ -2565,15 +2565,15 @@ def _render_stock_selection_modal(
                     Span(
                         pattern_text,
                         cls=(
-                            "px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 "
-                            "border border-amber-200 text-xs"
+                            "px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 "
+                            "border border-gray-200 text-xs"
                         ),
                     ),
                     cls="px-3 py-2",
                 ),
                 Td(
                     score_text,
-                    cls="px-3 py-2 font-mono font-semibold text-indigo-700",
+                    cls="px-3 py-2 font-mono font-semibold text-gray-900",
                 ),
                 Td(reason_text, cls="px-3 py-2 text-xs text-gray-600 max-w-xs"),
                 cls="border-b border-gray-100 hover:bg-gray-50",
@@ -2725,8 +2725,8 @@ def _render_stock_selection_modal(
                         "立即选股",
                         type="button",
                         cls=(
-                            "px-4 py-1.5 bg-emerald-600 text-white rounded-lg "
-                            "hover:bg-emerald-700 text-xs font-medium mt-5 "
+                            "px-4 py-1.5 bg-green-600 text-white rounded-lg "
+                            "hover:bg-green-700 text-xs font-medium mt-5 "
                             "disabled:opacity-50 disabled:cursor-wait"
                         ),
                         hx_post=f"/strategy/{name}/select/run",
@@ -2746,30 +2746,30 @@ def _render_stock_selection_modal(
             Span(
                 cls=(
                     "inline-block h-3.5 w-3.5 animate-spin rounded-full "
-                    "border-2 border-emerald-600 border-t-transparent"
+                    "border-2 border-green-600 border-t-transparent"
                 )
             ),
             Span("正在拉取行情、计算 24 个因子并运行模型，请稍候…"),
             id="select-loading",
-            cls="htmx-indicator items-center gap-2 text-xs text-emerald-700 mb-3",
+            cls="htmx-indicator items-center gap-2 text-xs text-green-700 mb-3",
         ),
         Div(
             Span(
                 f"选股基准日: {resolved_date}",
-                cls="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium",
+                cls="px-2.5 py-1 rounded-full bg-[#fff3f2] text-[#e41815] text-xs font-medium",
             ),
             Span(
                 f"模型引擎: {model_engine}",
-                cls="px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 text-xs font-medium",
+                cls="px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-medium",
             ),
             Span(
                 f"入选个股数: {len(picks)} 只",
-                cls="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium",
+                cls="px-2.5 py-1 rounded-full bg-green-50 text-green-700 text-xs font-medium",
             ),
             Span(
                 f"三重障碍: +{take_profit_pct * 100:.0f}% / "
                 f"-{stop_loss_pct * 100:.0f}% / {horizon}日",
-                cls="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-medium",
+                cls="px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-medium",
             ),
             cls="flex flex-wrap items-center gap-2 mb-3",
         ),
@@ -2777,8 +2777,8 @@ def _render_stock_selection_modal(
             Div(
                 date_notice,
                 cls=(
-                    "mb-3 rounded-lg border border-amber-200 bg-amber-50 "
-                    "px-3 py-2 text-xs text-amber-800"
+                    "mb-3 rounded-lg border border-gray-200 bg-gray-50 "
+                    "px-3 py-2 text-xs text-gray-700"
                 ),
             )
             if date_notice
@@ -3144,12 +3144,12 @@ def _delete_backtest_modal(portfolio_id: str) -> Any:
     if is_running:
         warning_block = P(
             "回测正在运行，无法删除。请先等待回测结束。",
-            cls="text-sm text-amber-600",
+            cls="text-sm text-gray-500",
         )
     elif is_deployed:
         warning_block = P(
             "此回测已投放，删除报告不影响投放运行。",
-            cls="text-sm text-blue-600",
+            cls="text-sm text-[#e41815]",
         )
 
     return _strategy_dialog_modal(
@@ -3384,13 +3384,13 @@ def _build_cheat_on_close_badge(portfolio_id: str):
             Span(f" @ {cheat_tm}", cls="font-mono"),
             cls=(
                 "inline-flex items-center px-3 py-1 rounded-full "
-                "text-xs font-semibold bg-amber-100 text-amber-800 "
-                "border border-amber-300"
+                "text-xs font-semibold bg-gray-100 text-gray-700 "
+                "border border-gray-300"
             ),
         ),
         Span(
             " 撮合价基于 forming bar (实盘有 < 1 tick 偏差)",
-            cls="ml-2 text-xs text-amber-700",
+            cls="ml-2 text-xs text-gray-500",
         ),
         cls="mb-4 flex items-center",
         id="cheat_badge",
@@ -3917,7 +3917,7 @@ def backtest_result(req, session, portfolio_id: str):
                     saveStatus.className = 'text-xs text-green-600';
                 }} else if (meta.save_requested) {{
                     saveStatus.textContent = '已启用文件保存，日志生成后会写入本地文件';
-                    saveStatus.className = 'text-xs text-amber-600';
+                    saveStatus.className = 'text-xs text-gray-500';
                 }} else {{
                     saveStatus.textContent = '本次回测未启用文件保存';
                     saveStatus.className = 'text-xs text-gray-500';
@@ -4198,14 +4198,14 @@ def _strategy_scan_toolbar():
                 cls="flex items-center",
             ),
             Span("扫描策略列表"),
-            cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-2 border-0 shadow-none",
+            cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412] inline-flex items-center gap-2 border-0 shadow-none",
             type="button",
             hx_post="/strategy/scan/run",
             hx_target="#modal-container",
         ),
         Button(
             Span("复制示例策略"),
-            cls="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 inline-flex items-center gap-2 border-0 shadow-none",
+            cls="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 inline-flex items-center gap-2 border-0 shadow-none",
             type="button",
             title="复制内置示例到用户策略目录",
             hx_post="/strategy/scan/copy-examples",
@@ -4274,7 +4274,7 @@ def scan_confirm_modal(req):
                     Button(
                         "确定扫描",
                         type="button",
-                        cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ml-2",
+                        cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412] ml-2",
                         hx_post="/strategy/scan/run",
                         hx_target="#modal-container",
                     ),
@@ -4300,7 +4300,7 @@ def run_scan(req):
                 Div(
                     Div(
                         H3("扫描完成", cls="text-lg font-semibold text-gray-900 mb-4"),
-                        P("未发现任何策略", cls="text-amber-600 font-medium"),
+                        P("未发现任何策略", cls="text-gray-700 font-medium"),
                         Div(
                             P("本次扫描范围：", cls="text-sm text-gray-500 mt-2 mb-2"),
                             _scan_scope_list(scan_dirs),
@@ -4310,7 +4310,7 @@ def run_scan(req):
                             Button(
                                 "关闭",
                                 type="button",
-                                cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+                                cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]",
                                 onclick=STRATEGY_MODAL_CLOSE_JS,
                             ),
                             cls="flex justify-end",
@@ -4338,7 +4338,7 @@ def run_scan(req):
                         Button(
                             "关闭",
                             type="button",
-                            cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+                            cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]",
                             onclick=STRATEGY_MODAL_CLOSE_JS,
                         ),
                         cls="flex justify-end",
@@ -4422,7 +4422,7 @@ def _config_modal_html(
                     Button(
                         "保存",
                         type="button",
-                        cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ml-2",
+                        cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412] ml-2",
                         hx_post="/strategy/scan/config",
                         hx_include="#scan-dir-input",
                         hx_target="#modal-container",
@@ -4459,7 +4459,7 @@ async def save_scan_config(req):
                 Button(
                     "确定",
                     type="button",
-                    cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+                    cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]",
                     onclick="location.reload()"
                 ),
             ),
@@ -4485,7 +4485,7 @@ def _copy_requires_config_modal():
     return Modal(
         ModalTitle("请先设置用户策略目录"),
         ModalBody(
-            P("复制示例策略前，需要先配置用户策略目录。", cls="text-amber-600"),
+            P("复制示例策略前，需要先配置用户策略目录。", cls="text-gray-600"),
             P("点击下方“去设置”后，保存目录，再回来点击“复制示例策略”。", cls="text-sm text-gray-500 mt-2"),
         ),
         ModalFooter(
@@ -4498,7 +4498,7 @@ def _copy_requires_config_modal():
             Button(
                 "去设置",
                 type="button",
-                cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+                cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]",
                 hx_get="/strategy/scan/config-modal",
                 hx_target="#modal-container",
             ),
@@ -4544,7 +4544,7 @@ async def copy_scan_examples(req):
                 Button(
                     "立即扫描",
                     type="button",
-                    cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+                    cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]",
                     hx_post="/strategy/scan/run",
                     hx_target="#modal-container",
                 ),
@@ -4562,7 +4562,7 @@ async def copy_scan_examples(req):
                 Button(
                     "去设置",
                     type="button",
-                    cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+                    cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]",
                     hx_get="/strategy/scan/config-modal",
                     hx_target="#modal-container",
                 ),

@@ -27,7 +27,7 @@ def test_render_shows_stock_fields_and_one_selected_row() -> None:
     assert "平安银行" in html
     assert "600000" in html
     assert "浦发银行" in html
-    assert html.count("bg-blue-50") == 1
+    assert html.count("bg-[#fff3f2]") == 1
 
 
 def test_empty_list_and_toolbar_have_explicit_output() -> None:

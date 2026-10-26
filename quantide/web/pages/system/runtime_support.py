@@ -18,7 +18,7 @@ def _runtime_status_chip(status: str):
     if status == "running":
         cls = "px-2 py-0.5 rounded text-xs bg-green-100 text-green-700"
     elif status == "blocked":
-        cls = "px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700"
+        cls = "px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700"
     elif status == "failed":
         cls = "px-2 py-0.5 rounded text-xs bg-red-100 text-red-700"
     else:
@@ -31,9 +31,9 @@ def _risk_severity_chip(severity: str):
     if severity == "critical":
         cls = "px-2 py-0.5 rounded text-xs bg-red-100 text-red-700"
     elif severity == "warning":
-        cls = "px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700"
+        cls = "px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700"
     else:
-        cls = "px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700"
+        cls = "px-2 py-0.5 rounded text-xs bg-[#fff3f2] text-[#e41815]"
     return Span(severity, cls=cls)
 
 
@@ -51,8 +51,8 @@ def build_risk_event_center_content(limit: int = 8) -> Div:
             ),
             Div(
                 Span(f"账户封控 {summary['blocked_accounts']}", cls="px-2 py-1 rounded bg-red-50 text-red-700 text-xs"),
-                Span(f"策略封控 {summary['blocked_strategies']}", cls="px-2 py-1 rounded bg-amber-50 text-amber-700 text-xs"),
-                Span(f"活动告警 {summary['open_events']}", cls="px-2 py-1 rounded bg-blue-50 text-blue-700 text-xs"),
+                Span(f"策略封控 {summary['blocked_strategies']}", cls="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs"),
+                Span(f"活动告警 {summary['open_events']}", cls="px-2 py-1 rounded bg-[#fff3f2] text-[#e41815] text-xs"),
                 cls="flex items-center gap-2 flex-wrap",
             ),
             cls="p-6 border-b border-gray-200 flex items-center justify-between gap-4",
@@ -184,15 +184,15 @@ def _build_runtime_actions(item: dict[str, Any], action_base_path: str, target_s
     if item.get("can_start"):
         action_items.append(_runtime_action_button("启动", f"{action_base_path}/start", {"runtime_id": item["runtime_id"]}, target_selector, "text-green-600"))
     if item.get("can_block_account"):
-        action_items.append(_runtime_action_button("封锁账户", f"{action_base_path}/block", {"target_kind": "account", "target_id": item["runtime_id"]}, target_selector, "text-amber-700"))
+        action_items.append(_runtime_action_button("封锁账户", f"{action_base_path}/block", {"target_kind": "account", "target_id": item["runtime_id"]}, target_selector, "text-gray-700"))
     if item.get("can_unblock_account"):
-        action_items.append(_runtime_action_button("解除账户封锁", f"{action_base_path}/unblock", {"target_kind": "account", "target_id": item["runtime_id"]}, target_selector, "text-blue-700", "确认解除账户风控封锁吗？"))
+        action_items.append(_runtime_action_button("解除账户封锁", f"{action_base_path}/unblock", {"target_kind": "account", "target_id": item["runtime_id"]}, target_selector, "text-[#e41815]", "确认解除账户风控封锁吗？"))
     if item.get("can_block_strategy"):
-        action_items.append(_runtime_action_button("封锁策略", f"{action_base_path}/block", {"target_kind": "strategy", "target_id": item["runtime_id"]}, target_selector, "text-amber-700"))
+        action_items.append(_runtime_action_button("封锁策略", f"{action_base_path}/block", {"target_kind": "strategy", "target_id": item["runtime_id"]}, target_selector, "text-gray-700"))
     if item.get("can_unblock_strategy"):
-        action_items.append(_runtime_action_button("解除策略封锁", f"{action_base_path}/unblock", {"target_kind": "strategy", "target_id": item["runtime_id"]}, target_selector, "text-blue-700", "确认解除策略风控封锁吗？"))
+        action_items.append(_runtime_action_button("解除策略封锁", f"{action_base_path}/unblock", {"target_kind": "strategy", "target_id": item["runtime_id"]}, target_selector, "text-[#e41815]", "确认解除策略风控封锁吗？"))
     if item.get("blocked_scope") == "account" and item.get("strategy_id"):
-        action_items.append(Span("请在账户行解除封控", cls="text-xs text-amber-700"))
+        action_items.append(Span("请在账户行解除封控", cls="text-xs text-gray-700"))
     return action_items
 
 

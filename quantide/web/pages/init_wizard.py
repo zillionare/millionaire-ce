@@ -783,7 +783,7 @@ def Step4_Gateway(state: dict | None = None):
                         Span("路径前缀", cls="font-medium text-gray-700 mr-2"),
                         Span(str(gateway_prefix or "/"), cls="text-gray-900"),
                     ),
-                    cls="rounded-lg border border-blue-200 bg-blue-50 px-4 py-4",
+                    cls="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4",
                 ),
                 P(
                     "点击下一步后，向导会把这组 stub gateway 配置写入初始化状态，用于当前开发态演示与验收。",
@@ -919,7 +919,7 @@ def Step5_DataSetup(state: dict | None = None):
                         Span("导入内容", cls="font-medium text-gray-700 mr-2"),
                         Span("证券日历、全A证券列表、历史日线样本、复权因子、涨跌停价格、ST 数据", cls="text-gray-900"),
                     ),
-                    cls="rounded-lg border border-blue-200 bg-blue-50 px-4 py-4",
+                    cls="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4",
                 ),
                 P(
                     "点击下一步后，系统会快速导入这组内置样本，并直接进入完成页，不再弹出首次下载对话框。",
@@ -1594,7 +1594,7 @@ async def gateway_test(request: Request):
         return Div(
             Span("ℹ️", cls="mr-2"),
             Span(f"开发 Stub 模式下已自动启用 gateway：{gateway_url or '未初始化'}。"),
-            cls="text-sm text-blue-600 mt-2 flex items-center",
+            cls="text-sm text-[#e41815] mt-2 flex items-center",
         )
     form_data = await request.form()
     form_dict = dict(form_data)

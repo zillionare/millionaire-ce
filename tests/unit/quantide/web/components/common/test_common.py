@@ -36,7 +36,7 @@ def test_header_shows_active_navigation_unread_alert_and_user_menu() -> None:
     )
 
     assert "策略" in html
-    assert "border-primary text-primary" in html
+    assert "text-gray-900 border-b-2 border-primary" in html
     assert ">2<" in html
     assert "风控告警" in html
     assert 'aria-haspopup="menu"' in html

@@ -93,10 +93,7 @@ def AccountTabs():
 
 
 def AssetSummary(asset_overview: dict | None = None, **kwargs):
-    metric_cls = "flex flex-col items-center justify-center p-4 text-red-400"
-    val_cls = "text-xl font-bold"
-    label_cls = "text-xs opacity-80"
-
+    """资产概览：白底卡片 + 分隔线，红=买入/盈利，绿=卖出/亏损。"""
     asset_overview = asset_overview or {}
 
     total = asset_overview.get("total")
@@ -113,39 +110,27 @@ def AssetSummary(asset_overview: dict | None = None, **kwargs):
     pnl_text = f"{pnl:,.2f}" if pnl is not None else "0.00"
     pnl_pct_text = f"{pnl_pct * 100:.2f}%" if pnl_pct is not None else "0.00%"
 
+    pnl_cls = "text-red-500" if (pnl or 0) > 0 else ("text-green-600" if (pnl or 0) < 0 else "text-gray-900")
+
+    def _stat(label, value, cls="text-gray-900"):
+        return Div(
+            P(label, cls="text-xs text-gray-500"),
+            P(value, cls=f"mt-1 text-xl font-semibold tabular-nums {cls}"),
+            cls="bg-white px-4 py-4",
+        )
+
     return Div(
         Div(
-            Div(P(total_text, cls=val_cls), P("总资产", cls=label_cls), cls=metric_cls),
-            Div(
-                P(cash_text, cls=val_cls),
-                P("可用金额", cls=label_cls),
-                cls=metric_cls,
-            ),
-            Div(
-                P(frozen_cash_text, cls=val_cls),
-                P("冻结金额", cls=label_cls),
-                cls=metric_cls,
-            ),
-            Div(
-                P(market_value_text, cls=val_cls),
-                P("总市值", cls=label_cls),
-                cls=metric_cls,
-            ),
-            Div(
-                P(pnl_text, cls="text-xl font-bold text-yellow-300"),
-                P("盈亏", cls=label_cls),
-                cls=metric_cls,
-            ),
-            Div(
-                P(pnl_pct_text, cls="text-xl font-bold text-yellow-300"),
-                P("盈亏比例", cls=label_cls),
-                cls=metric_cls,
-            ),
-            cls="flex justify-around items-center h-24",
+            _stat("总资产", total_text),
+            _stat("可用金额", cash_text),
+            _stat("冻结金额", frozen_cash_text),
+            _stat("总市值", market_value_text),
+            _stat("盈亏", pnl_text, pnl_cls),
+            _stat("盈亏比例", pnl_pct_text, pnl_cls),
+            cls="grid grid-cols-2 gap-px bg-gray-100 md:grid-cols-3 xl:grid-cols-6",
         ),
-        style="background: linear-gradient(90deg, #d32f2f 0%, #ff5252 100%); border-radius: 12px;",
-        cls="shadow-lg mb-6",
         id="asset-summary",
+        cls="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm",
         **kwargs,
     )
 
@@ -202,15 +187,18 @@ def PositionInfo(positions: list[Position] | None = None):
     return Div(
         Div(
             Div(
-                UkIcon("briefcase", cls="mr-2 text-red-600"),
-                H3("持仓信息", cls="text-lg font-bold mb-0"),
+                UkIcon("briefcase", cls="mr-2 text-[#e41815]"),
+                H3("持仓信息", cls="text-lg font-semibold mb-0"),
                 cls="flex items-center",
             ),
             Button(
                 UkIcon("refresh-cw", size=16),
                 " 刷新",
-                cls="uk-button-primary uk-button-small flex items-center gap-1",
-                style="background-color: #d32f2f;",
+                cls=(
+                    "inline-flex items-center gap-1 rounded-lg border border-gray-200 "
+                    "bg-white px-3 py-1.5 text-xs font-medium text-gray-600 "
+                    "hover:border-[#e41815] hover:text-[#e41815]"
+                ),
                 hx_get="/home/positions",
                 hx_target="#position-info",
                 hx_swap="outerHTML",
@@ -229,14 +217,19 @@ def PositionInfo(positions: list[Position] | None = None):
 
 def TradePanel():
     # 交易操作面板 (中国红风格)
-    input_cls = "uk-input uk-form-small rounded-md mb-4 mt-1"
-    label_cls = "text-xs text-red-100 block"
-
-    ratio_btn_cls = "uk-button uk-button-default uk-button-small text-white text-[10px] px-2 min-w-[36px] border-white/30 hover:bg-white/20"
+    input_cls = (
+        "mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm "
+        "text-gray-900 outline-none transition focus:border-[#e41815] "
+        "focus:ring-2 focus:ring-[#e41815]/10"
+    )
+    label_cls = "block text-xs font-medium text-gray-500"
+    ratio_btn_cls = (
+        "rounded-md border border-gray-200 px-2 py-1 text-[11px] text-gray-600 "
+        "transition hover:border-[#e41815] hover:text-[#e41815]"
+    )
 
     return Div(
         Form(
-            # Buy/Sell Tabs
             Div(
                 Ul(
                     Li(
@@ -374,7 +367,7 @@ def _position_tag(profit_pct: float) -> tuple[str, str]:
     if profit_pct <= -0.05:
         return "风险", "bg-red-100 text-red-800"
     if profit_pct <= 0:
-        return "关注", "bg-yellow-100 text-yellow-800"
+        return "关注", "bg-gray-100 text-gray-700"
     return "正常", "bg-green-100 text-green-800"
 
 
@@ -479,7 +472,7 @@ def PositionTable(positions: list[Position] | None = None):
                         f"{p.profit / 10000:,.2f} ({profit_pct * 100:.2f}%)",
                         cls="text-green-600" if p.profit >= 0 else "text-red-600",
                     ),
-                    Td(Button("卖出", cls="text-blue-600 hover:underline")),
+                    Td(Button("卖出", cls="text-green-600 hover:underline")),
                     cls="border-t border-gray-200",
                 )
             )
@@ -537,12 +530,12 @@ def _order_status_badge(status: OrderStatus) -> tuple[str, str]:
     if status == OrderStatus.SUCCEEDED:
         return "已成交", "bg-green-100 text-green-800"
     if status == OrderStatus.PART_SUCC:
-        return "部分成交", "bg-blue-100 text-blue-800"
+        return "部分成交", "bg-gray-100 text-gray-800"
     if status == OrderStatus.CANCELED:
         return "已撤单", "bg-gray-100 text-gray-600"
     if status == OrderStatus.JUNK:
         return "废单", "bg-red-100 text-red-800"
-    return "待成交", "bg-yellow-100 text-yellow-800"
+    return "待成交", "bg-gray-100 text-gray-700"
 
 
 def OrderTable(orders: list[dict] | None = None):
@@ -590,7 +583,7 @@ def OrderTable(orders: list[dict] | None = None):
                     Td(
                         Button(
                             "撤单",
-                            cls="text-blue-600 hover:underline" if status not in [OrderStatus.SUCCEEDED, OrderStatus.CANCELED] else "text-gray-400 cursor-not-allowed",
+                            cls="text-[#e41815] hover:underline" if status not in [OrderStatus.SUCCEEDED, OrderStatus.CANCELED] else "text-gray-400 cursor-not-allowed",
                             disabled=status in [OrderStatus.SUCCEEDED, OrderStatus.CANCELED],
                         ),
                         cls="py-4",
@@ -647,7 +640,7 @@ def NoAccountDialog():
             Div(
                 # 图标
                 Div(
-                    UkIcon("alert-circle", size=48, cls="text-yellow-500"),
+                    UkIcon("alert-circle", size=48, cls="text-[#e41815]"),
                     cls="flex justify-center mb-4",
                 ),
                 # 标题
@@ -668,7 +661,7 @@ def NoAccountDialog():
                     A(
                         "创建模拟交易账户",
                         href="/system/accounts?create_sim=1",
-                        cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium",
+                        cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412] font-medium",
                     ),
                     cls="flex justify-center space-x-3",
                 ),
@@ -715,7 +708,7 @@ def main_block(
     return Div(
         Div(
             Nav(
-                A("首页", href="#", cls="hover:text-blue-600"),
+                A("首页", href="#", cls="hover:text-[#e41815]"),
                 Span(" / ", cls="text-gray-400"),
                 Span("概览", cls="text-gray-900 font-medium"),
                 cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",

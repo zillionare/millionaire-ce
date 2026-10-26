@@ -35,7 +35,7 @@ def test_frequency_and_ma_controls_target_only_their_chart() -> None:
     ma_html = _html(KlineChart.ma_buttons("weekly-chart", ma_periods=[5, 20]))
 
     assert "switchFreq_weekly_chart('week')" in freq_html
-    assert "bg-blue-600 text-white" in freq_html
+    assert "bg-[#e41815] text-white" in freq_html
     assert "switchFreq_weekly_chart('day')" in freq_html
     assert "toggleMA_weekly_chart(5)" in ma_html
     assert "toggleMA_weekly_chart(20)" in ma_html

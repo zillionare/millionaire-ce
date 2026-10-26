@@ -254,7 +254,7 @@ def _render_monthly_matrix(task: dict[str, Any]) -> Any:
                 abs(ret - best_by_month.get(month, ret)) < 1e-12
                 and len(results) > 1
             )
-            tone = "text-emerald-700 bg-emerald-50" if ret >= 0 else "text-red-700 bg-red-50"
+            tone = "text-red-600 bg-red-50" if ret >= 0 else "text-green-600 bg-green-50"
             weight = "font-bold" if is_best else ""
             mark = "*" if item.get("partial") else ""
             cells.append(
@@ -375,7 +375,7 @@ def _sort_header(
             hx_get=href,
             hx_target="#optimize-task-wrapper",
             hx_swap="outerHTML",
-            cls="text-xs cursor-pointer select-none hover:text-blue-600",
+            cls="text-xs cursor-pointer select-none hover:text-[#e41815]",
         ),
         cls="text-xs whitespace-nowrap",
     )
@@ -456,7 +456,7 @@ def _render_results(
                 Td(_metric(out_sample, "CAGR"), cls="text-xs"),
                 Td(_metric(in_sample, "Max Drawdown"), cls="text-xs"),
                 Td(
-                    Span("疑似过拟合", cls="text-xs text-amber-700 bg-amber-50 px-1 rounded")
+                    Span("疑似过拟合", cls="text-xs text-gray-500 bg-gray-100 px-1 rounded")
                     if overfit
                     else Span("-", cls="text-xs text-gray-400"),
                 ),
@@ -466,7 +466,7 @@ def _render_results(
                         href=(
                             f"/strategy/{name}/backtest/modal?prefill={prefill}"
                         ),
-                        cls="text-xs text-blue-600 hover:underline",
+                        cls="text-xs text-[#e41815] hover:underline",
                         hx_get=f"/strategy/{name}/backtest/modal?prefill={prefill}",
                         hx_target="#modal-container",
                         hx_indicator="#global-loading",
@@ -530,7 +530,7 @@ def _render_task_panel(
         progress = Div(
             Div(
                 Div(
-                    cls="bg-blue-600 h-2 rounded transition-all",
+                    cls="bg-[#e41815] h-2 rounded transition-all",
                     style=f"width:{percent}%",
                 ),
                 cls="bg-gray-200 h-2 rounded w-full overflow-hidden",
@@ -624,7 +624,7 @@ def _render_history(name: str) -> Any:
                         href=(
                             f"/strategy/{name}/optimize?task_id={task.get('task_id')}"
                         ),
-                        cls="text-xs text-blue-600 hover:underline",
+                        cls="text-xs text-[#e41815] hover:underline",
                     ),
                     cls="text-xs",
                 ),

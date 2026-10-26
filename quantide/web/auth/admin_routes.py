@@ -769,8 +769,8 @@ class AdminRoutes:
     def _get_role_color(self, role):
         """Get color class for role badge"""
         colors = {
-            "admin": "bg-purple-100 text-purple-800",
-            "manager": "bg-blue-100 text-blue-800",
+            "admin": "bg-gray-100 text-gray-700",
+            "manager": "bg-[#fff3f2] text-[#e41815]",
             "user": "bg-gray-100 text-gray-800",
         }
         return colors.get(role, "bg-gray-100 text-gray-800")

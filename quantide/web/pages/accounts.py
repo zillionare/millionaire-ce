@@ -9,10 +9,10 @@ from monsterui.all import *
 from starlette.responses import HTMLResponse, RedirectResponse
 
 from quantide.core.enums import BrokerKind
+from quantide.core.runtime.registration import register_port_backed_broker
 from quantide.data.sqlite import db
 from quantide.service.registry import BrokerRegistry
 from quantide.service.sim_broker import PaperBroker
-from quantide.core.runtime.registration import register_port_backed_broker
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import AppTheme
 
@@ -39,12 +39,12 @@ def LiveAccountCard(account: dict, is_active: bool = False):
         Div(
             Div(
                 Div(
-                    UkIcon("credit-card", size=24, cls="text-yellow-600"),
-                    cls="h-12 w-12 rounded-full bg-yellow-100 flex items-center justify-center",
+                    UkIcon("credit-card", size=24, cls="text-gray-500"),
+                    cls="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center",
                 ),
                 Div(
                     Div(
-                        Span("★", cls="text-yellow-500 mr-1") if is_active else "",
+                        Span("★", cls="text-[#e41815] mr-1") if is_active else "",
                         Span(account.get("name", ""), cls="font-medium text-gray-900"),
                         cls="flex items-center",
                     ),
@@ -72,7 +72,7 @@ def LiveAccountCard(account: dict, is_active: bool = False):
                 ),
                 Button(
                     "刷新",
-                    cls="uk-button uk-button-default uk-button-small text-blue-600 border-blue-600 hover:bg-blue-50 ml-2",
+                    cls="uk-button uk-button-default uk-button-small text-gray-600 border-gray-300 hover:bg-gray-50 ml-2",
                     hx_post=f"/system/accounts/live/{account.get('id')}/refresh",
                     hx_target="#live-accounts-list",
                 ),
@@ -95,12 +95,12 @@ def SimAccountCard(account: dict, is_active: bool = False):
         Div(
             Div(
                 Div(
-                    UkIcon("bar-chart-2", size=24, cls="text-blue-600"),
-                    cls="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center",
+                    UkIcon("bar-chart-2", size=24, cls="text-[#e41815]"),
+                    cls="h-12 w-12 rounded-full bg-[#fff3f2] flex items-center justify-center",
                 ),
                 Div(
                     Div(
-                        Span("★", cls="text-yellow-500 mr-1") if is_active else "",
+                        Span("★", cls="text-[#e41815] mr-1") if is_active else "",
                         Span(account.get("name", ""), cls="font-medium text-gray-900"),
                         cls="flex items-center",
                     ),
@@ -135,7 +135,7 @@ def SimAccountCard(account: dict, is_active: bool = False):
                 Button(
                     "重置",
                     type="button",
-                    cls="text-sm text-orange-600 hover:text-orange-800 px-3 py-1 border border-orange-600 rounded hover:bg-orange-50 ml-2",
+                    cls="text-sm text-gray-600 hover:text-gray-900 px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 ml-2",
                     onclick=f"document.getElementById('reset-dialog-{account.get('id')}').classList.remove('hidden')",
                 ),
                 ConfirmDialogModal(
@@ -201,7 +201,7 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
         # 面包屑导航
         Div(
             Nav(
-                A("首页", href="/", cls="text-sm text-gray-600 hover:text-blue-600"),
+                A("首页", href="/", cls="text-sm text-gray-600 hover:text-[#e41815]"),
                 Span(" / ", cls="text-gray-400"),
                 Span("账号管理", cls="text-sm text-gray-900 font-medium"),
                 cls="flex items-center space-x-2 mb-4",
@@ -230,7 +230,7 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
                         UkIcon("plus", size=16),
                         " 配置新实盘账户",
                         href="#",
-                        cls="flex items-center space-x-2 px-4 py-2 text-sm text-blue-600 border border-dashed border-blue-600 rounded-lg hover:bg-blue-50",
+                        cls="flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400",
                     ),
                     cls="mt-4",
                 ),
@@ -268,7 +268,7 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
                         " 新建模拟交易账户",
                         type="button",
                         onclick="document.getElementById('create-sim-modal').classList.remove('hidden')",
-                        cls="flex items-center space-x-2 px-4 py-2 text-sm text-blue-600 border border-dashed border-blue-600 rounded-lg hover:bg-blue-50",
+                        cls="flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400",
                     ),
                     cls="mt-4",
                 ),
@@ -368,14 +368,14 @@ def accounts_index(request):
 def delete_live_account(req, account_id: str):
     """删除实盘账号"""
     # TODO: 实现删除逻辑
-    return Div("实盘账号删除功能待实现", cls="text-yellow-600 p-4")
+    return Div("实盘账号删除功能待实现", cls="text-gray-500 p-4")
 
 
 @rt("/live/{account_id}/refresh", methods=["POST"])
 def refresh_live_account(req, account_id: str):
     """刷新实盘账号状态"""
     # TODO: 实现刷新逻辑
-    return Div("实盘账号刷新功能待实现", cls="text-blue-600 p-4")
+    return Div("实盘账号刷新功能待实现", cls="text-gray-500 p-4")
 
 
 def _auto_select_latest_account(reg, session):
@@ -504,18 +504,18 @@ def CreateSimAccountForm():
                 Div(
                     Span("账户名称", cls="block text-sm text-gray-700 mb-1"),
                     Input(type="text", name="name", placeholder="例如：模拟账户A", required=True,
-                          cls="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"),
+                          cls="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#e41815]/20"),
                     cls="mb-4",
                 ),
                 Div(
                     Span("初始资金（万元）", cls="block text-sm text-gray-700 mb-1"),
                     Input(type="text", name="principal", value="100", required=True,
-                          cls="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"),
+                          cls="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#e41815]/20"),
                     cls="mb-4",
                 ),
                 Div(
                     Button("创建", type="submit",
-                           cls="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"),
+                           cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]"),
                     Button("取消", type="button", onclick="document.getElementById('create-sim-modal').classList.add('hidden')",
                            cls="ml-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"),
                     cls="flex justify-end",
@@ -572,7 +572,7 @@ def _get_sim_accounts_list(reg, active_kind: str = "", active_id: str = ""):
                 " 新建模拟交易账户",
                 type="button",
                 onclick="document.getElementById('create-sim-modal').classList.remove('hidden')",
-                cls="flex items-center space-x-2 px-4 py-2 text-sm text-blue-600 border border-dashed border-blue-600 rounded-lg hover:bg-blue-50",
+                cls="flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400",
             ),
             cls="mt-4",
         ),

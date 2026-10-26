@@ -473,7 +473,7 @@ def _build_jobs_table(jobs_status: list[dict]) -> Table:
                     A(
                         "禁用" if job["enabled"] else "启用",
                         href=toggle_url,
-                        cls="text-sm text-blue-600 hover:text-blue-800 mr-2",
+                        cls="text-sm text-[#e41815] hover:text-[#c91412] mr-2",
                     ),
                     A(
                         "详情",

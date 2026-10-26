@@ -173,14 +173,14 @@ async def index(req, year: int = None, month: int = None):
             cls="mb-6"
         ),
         Div(
-            UkIcon("alert-triangle", cls="text-amber-500 mr-2"),
+            UkIcon("alert-triangle", cls="text-gray-500 mr-2"),
             Span(
                 f"当前交易日历数据范围 {data_range_text}，"
                 "未覆盖所选月份；节假日与周末均按周末默认规则显示，"
                 "请点击右上角「立即更新」拉取最新数据以获得准确的节假日标红。",
-                cls="text-sm text-amber-700",
+                cls="text-sm text-gray-600",
             ),
-            cls=("flex items-center p-3 mb-4 bg-amber-50 border border-amber-200 "
+            cls=("flex items-center p-3 mb-4 bg-gray-50 border border-gray-200 "
                  "rounded-lg")
         ) if stale else None,
         Div(

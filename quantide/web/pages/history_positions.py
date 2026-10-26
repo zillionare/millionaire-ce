@@ -57,7 +57,7 @@ def DateRangePicker(start_date: str = "", end_date: str = ""):
         Button(
             "查询",
             type="submit",
-            cls="ml-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+            cls="ml-4 px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]",
         ),
         cls="flex items-center mb-6",
     )

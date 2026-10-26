@@ -19,9 +19,9 @@ def _breadcrumb() -> Div:
     """构建页面面包屑。"""
     return Div(
         Nav(
-            A("首页", href="/", cls="hover:text-blue-600"),
+            A("首页", href="/", cls="hover:text-[#e41815]"),
             Span(">", cls="text-gray-400"),
-            A("系统维护", href="/system/", cls="hover:text-blue-600"),
+            A("系统维护", href="/system/", cls="hover:text-[#e41815]"),
             Span(">", cls="text-gray-400"),
             Span("运行时监控", cls="text-gray-900 font-medium"),
             cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",
