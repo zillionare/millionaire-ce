@@ -51,6 +51,16 @@ class AppTheme:
                 border: 1px solid rgba(44, 48, 48, 0.08);
                 box-shadow: 0 18px 45px rgba(44, 48, 48, 0.08);
             }}
+            /* <details> 原生箭头统一隐藏，避免与自定义 chevron 重复 */
+            summary {{
+                list-style: none;
+            }}
+            summary::-webkit-details-marker {{
+                display: none;
+            }}
+            summary::marker {{
+                content: "";
+            }}
         """)
 
         # 添加 HTMX

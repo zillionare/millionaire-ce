@@ -88,7 +88,7 @@ def test_header_dropdown_padding_matches_regular_nav_items():
             active_title="",
         )
     )
-    assert "px-4 py-5" in html
+    assert "h-16" in html
     assert "px-2" not in html.replace("px-2 ", "")
     assert html.count("chevron-down") == 1
     assert " ▾" not in html

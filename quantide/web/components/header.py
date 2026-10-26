@@ -47,7 +47,7 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
                                 ),
                             ),
                             cls=(
-                                "inline-flex items-center px-4 py-5 text-sm font-medium "
+                                "inline-flex h-16 items-center px-4 text-sm font-medium "
                                 "list-none [&::-webkit-details-marker]:hidden "
                                 "[&::marker]:hidden "
                                 + (active_cls if is_active else inactive_cls)
@@ -81,7 +81,7 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
                 display_text,
                 href=url,
                 cls=(
-                    "inline-flex items-center px-4 py-5 text-sm font-medium transition "
+                    "inline-flex h-16 items-center px-4 text-sm font-medium transition "
                     + (active_cls if is_active else inactive_cls)
                     + (" opacity-60 cursor-not-allowed" if disabled else "")
                 ),
