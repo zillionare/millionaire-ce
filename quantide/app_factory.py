@@ -66,6 +66,7 @@ from quantide.web.pages.system.datasource import system_datasource_app
 from quantide.web.pages.system.gateway import system_gateway_app
 from quantide.web.pages.system.jobs import system_jobs_app
 from quantide.web.pages.system.market import system_market_app
+from quantide.web.pages.system.realtime import system_realtime_app
 from quantide.web.pages.system.risk_events import system_risk_events_app
 from quantide.web.pages.system.runtime_monitor import system_runtime_monitor_app
 from quantide.web.pages.system.stocks import system_stocks_app
@@ -180,6 +181,7 @@ def _attach_runtime_to_app_states(runtime) -> None:
         system_gateway_app,
         system_jobs_app,
         system_market_app,
+        system_realtime_app,
         system_risk_events_app,
         system_runtime_monitor_app,
         system_stocks_app,
@@ -206,6 +208,7 @@ def _attach_root_app_to_app_states(root_app) -> None:
         system_gateway_app,
         system_jobs_app,
         system_market_app,
+        system_realtime_app,
         system_risk_events_app,
         system_runtime_monitor_app,
         system_stocks_app,
@@ -464,6 +467,12 @@ def create_app(
             Mount("/system/calendar", system_calendar_app),
             Mount("/system/stocks", system_stocks_app),
             Mount("/system/market", system_market_app),
+            Route(
+                "/system/realtime",
+                lambda req: RedirectResponse("/system/realtime/", status_code=303),
+                methods=["GET"],
+            ),
+            Mount("/system/realtime", system_realtime_app),
             Route(
                 "/system/jobs",
                 lambda req: RedirectResponse("/system/jobs/", status_code=303),

@@ -508,6 +508,28 @@ class StrategyRuntimeManager:
                 blocked=False,
             )
 
+    def record_system_event(
+        self,
+        *,
+        title: str,
+        message: str,
+        severity: str = "warning",
+        blocked: bool = True,
+        target_id: str = "system",
+    ) -> None:
+        """记录系统级事件（数据就绪、行情中断等）。
+
+        ``blocked=True`` 会进入 header 告警计数；恢复事件使用 ``blocked=False``。
+        """
+        self._record_risk_event(
+            scope="system",
+            target_id=target_id,
+            title=title,
+            message=message,
+            severity=severity,
+            blocked=blocked,
+        )
+
     def list_risk_events(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(item) for item in self._risk_events[:limit]]

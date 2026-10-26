@@ -40,6 +40,7 @@ SYSTEM_MAINTENANCE_MENU = [
             {"title": "交易日历", "url": "/system/calendar", "icon_path": "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"},
             {"title": "股票列表", "url": "/system/stocks", "icon_path": "M4 6h16M4 10h16M4 14h16M4 18h16"},
             {"title": "行情数据", "url": "/system/market", "icon_path": "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"},
+            {"title": "实时行情", "url": "/system/realtime", "icon_path": "M3 12h4l3 8 4-16 3 8h4"},
             {"title": "因子台账", "url": "/system/alpha-ledger", "icon_path": "M3 3v18h18M7 15l3-4 3 3 5-7"},
         ],
     },

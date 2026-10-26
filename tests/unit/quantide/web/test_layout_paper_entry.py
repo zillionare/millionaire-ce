@@ -42,6 +42,7 @@ def test_system_maintenance_menu_has_accounts_entry():
         for child in group.get("children", [])
     }
     assert "/system/accounts" in urls
+    assert "/system/realtime" in urls
 
 
 def test_header_menu_paper_entry_not_gateway_disabled():
