@@ -519,8 +519,19 @@ class StrategyRuntimeManager:
     ) -> None:
         """记录系统级事件（数据就绪、行情中断等）。
 
-        ``blocked=True`` 会进入 header 告警计数；恢复事件使用 ``blocked=False``。
+        ``blocked=True`` 会进入 header 告警计数；恢复事件使用 ``blocked=False``，
+        并同时把同一 ``target_id`` 的未恢复告警标记为已解决。
         """
+        if not blocked and target_id:
+            with self._lock:
+                resolved_at = datetime.datetime.now().isoformat(timespec="seconds")
+                for event in self._risk_events:
+                    if (
+                        str(event.get("target_id") or "") == target_id
+                        and event.get("blocked")
+                    ):
+                        event["blocked"] = False
+                        event["resolved_at"] = resolved_at
         self._record_risk_event(
             scope="system",
             target_id=target_id,

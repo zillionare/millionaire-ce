@@ -115,8 +115,6 @@ class RuntimeBootstrap:
         """
         runtime = get_settings()
         market_data_hub.start()
-        from quantide.service.data_readiness import data_readiness_monitor
-
         from quantide.service.limit_price_refresher import limit_price_refresher
         from quantide.service.minute_bar_aggregator import minute_bar_aggregator
         from quantide.service.quote_monitor import quote_monitor
@@ -125,7 +123,6 @@ class RuntimeBootstrap:
         limit_price_refresher.start()
         quote_monitor.start()
         self._start_embedded_publisher(adapters)
-        data_readiness_monitor.start()
         adapters.register("market_data", "market_data_hub", market_data_hub)
         if runtime.livequote_mode == "gateway" or runtime.gateway_enabled:
             live_quote.start()

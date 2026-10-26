@@ -248,6 +248,9 @@ def create_app(
             runtime = RuntimeBootstrap().bootstrap()
             reg = runtime.registry
             strategy_runtime_manager.bootstrap_from_runtime(runtime)
+            from quantide.service.data_readiness import data_readiness_monitor
+
+            data_readiness_monitor.start()
     except Exception as exc:
         logger.warning(f"应用运行时初始化失败，将进入初始化向导模式: {exc}")
 

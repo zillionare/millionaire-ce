@@ -154,3 +154,27 @@ def test_eod_check_skipped_before_1830():
     )
     monitor.check_end_of_day(datetime.datetime(2024, 1, 3, 18, 0))
     assert events == []
+
+
+def test_system_event_resolution_clears_header_alarm():
+    """恢复事件会把同一 target 的未解决告警标记为已解决。"""
+    from quantide.service.strategy_runtime import StrategyRuntimeManager
+
+    manager = StrategyRuntimeManager()
+    manager._save_specs = lambda: None  # 不写真实状态文件
+    manager.record_system_event(
+        title="当日涨跌停缺失",
+        message="missing",
+        severity="critical",
+        blocked=True,
+        target_id="data:limit_today",
+    )
+    assert manager.risk_summary()["open_events"] == 1
+    manager.record_system_event(
+        title="数据恢复：当日涨跌停缺失",
+        message="ok",
+        severity="info",
+        blocked=False,
+        target_id="data:limit_today",
+    )
+    assert manager.risk_summary()["open_events"] == 0
