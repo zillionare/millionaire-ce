@@ -303,7 +303,9 @@ AC-FR1901-03
 ### AC-1
 AC-NFR1001-01
 
-- 同一全绿 unit invocation 的 coverage JSON 显示 `totals.percent_covered > 95.0`；等于 95.0 不满足“>95%”。
+- 同一全绿 unit invocation 的 release metric 为 `coverage.json.totals.percent_covered`（combined statement+branch，因为 `pyproject.toml` 中 `branch = true` 已启用）；阈值严格 `> 95.0`，等于 95.0 不满足“>95%”。
+- 该 metric、阈值与禁令必须与 `spec.md` NFR-1001、`interfaces.md` §2、`tests/unit/_checkers/per_file_coverage.py` 及 `.github/workflows/unit-coverage.yml` 的 canonical command 保持一致；任一处偏离即验收失败。
+- 不允许 `--force` 或任何 threshold override。
 
 ### AC-2
 AC-NFR1001-02

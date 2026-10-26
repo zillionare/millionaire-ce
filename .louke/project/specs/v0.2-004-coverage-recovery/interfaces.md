@@ -37,8 +37,8 @@ poetry run python tests/unit/_checkers/per_file_coverage.py \
 |---|---|
 | `coverage.json` | pytest-cov JSON from canonical exit-0 run; required `totals` and `files` |
 | inventory | exact index hash `8410d32fb4b64c0d38ef21f947c45be7164185dcaa09f36a7061bc99b9c8bfbe`; classification/origin is authoritative |
-| Success exit `0` | overall `>95.0`; all v0.2-added executable rows `>=95.0`; all retained pre-v0.2 executable rows `>=80.0` or one valid waiver; 0-statement rows marked `threshold_not_applicable`; 169 report rows |
-| Failure exit nonzero | missing/extra/duplicate path; executable file absent from coverage; overall `<=95.0`; below target; invalid waiver; malformed input |
+| Success exit `0` | `coverage.json.totals.percent_covered > 95.0`; all v0.2-added executable rows `>=95.0`; all retained pre-v0.2 executable rows `>=80.0` or one valid waiver; 0-statement rows marked `threshold_not_applicable`; 169 report rows |
+| Failure exit nonzero | missing/extra/duplicate path; executable file absent from coverage; `totals.percent_covered <= 95.0`; below target; invalid waiver; malformed input |
 | Output | JSON object with `schema`, `spec_id`, `run_id`, `coverage_sha256`, `inventory_sha256`, `overall`, `rows[169]`, `counts`, `verdict`, `reasons` |
 | Row fields | `path`, `classification`, `origin`, `num_statements`, `covered_lines`, `percent_covered`, `target`, `threshold_applicable`, `waiver_id|null`, `status`, `reasons[]` |
 
