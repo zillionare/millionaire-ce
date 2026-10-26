@@ -519,7 +519,7 @@ def create_app(
 
     @rt("/trade/set-active", methods=["POST"])
     async def trade_set_active(req, session):
-        return await set_active_account(req, session)
+        return set_active_account(req)
 
     return app
 

@@ -38,6 +38,19 @@ def test_app():
         _db.init(test_db_path)
 
         reg = BrokerRegistry()
+        # 实盘账户（闪电单仅实盘显示）；注册为默认账户
+        try:
+            from quantide.service.sim_broker import PaperBroker
+
+            live_broker = PaperBroker.create(
+                portfolio_id="live_demo",
+                portfolio_name="实盘演示",
+                principal=1000000,
+            )
+            reg.register(BrokerKind.QMT, "live_demo", live_broker)
+        except Exception as e:
+            print(f"Failed to create live demo broker: {e}")
+
         try:
             sim_broker = SimulationBroker(portfolio_id="sim_demo", portfolio_name="演示账户", principal=1000000)
             reg.register(BrokerKind.SIMULATION, "sim_demo", sim_broker)
@@ -77,7 +90,7 @@ def test_app():
         auth = AuthManager(db_path=test_db_path, config={"login_path": "/auth/login"})
 
         app, rt = fast_app(
-            hdrs=tuple(Theme.blue.headers()),
+            hdrs=tuple(Theme.neutral.headers()),
             before=auth.create_beforeware(),
             middleware=(
                 Middleware(FeatureCheckMiddleware),

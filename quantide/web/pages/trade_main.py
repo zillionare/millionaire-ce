@@ -18,7 +18,7 @@ from fasthtml.common import Select as _Select
 from fasthtml.common import to_xml as _to_xml
 from loguru import logger
 from monsterui.all import *
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 from quantide.config.settings import get_settings
 from quantide.core.enums import BidType, BrokerKind, OrderSide, OrderStatus
@@ -435,8 +435,17 @@ def AssetInfoBar(total: float = 0, cash: float = 0, market_value: float = 0):
     )
 
 
-def LightningTradePanel(portfolio_id: str, kind: str, cash: float = 0, total: float = 0):
-    """闪电交易面板 - 符合 spec 的下单键盘"""
+def LightningTradePanel(
+    portfolio_id: str,
+    kind: str,
+    cash: float = 0,
+    total: float = 0,
+    is_live: bool = True,
+):
+    """闪电交易面板 - 符合 spec 的下单键盘。
+
+    实盘显示闪电单；仿真只保留普通下单（补单/测试），并提示原因。
+    """
     # 收紧输入区尺寸，并把更多宽度让给中间 speed dial 键盘。
     input_cls = "flex-1 px-3 h-9 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white text-sm"
     select_cls = "px-2 h-9 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white text-sm"
@@ -669,8 +678,28 @@ def LightningTradePanel(portfolio_id: str, kind: str, cash: float = 0, total: fl
                     ),
                     cls="flex shrink-0 items-stretch",
                 ),
-                # 右边：闪电单
-                TradeLightningSidebar(portfolio_id),
+                # 右边：闪电单（实盘）/ 补单说明（仿真）
+                (
+                    TradeLightningSidebar(portfolio_id)
+                    if is_live
+                    else Div(
+                        Div(
+                            UkIcon("zap-off", size=18, cls="text-gray-400"),
+                            cls=(
+                                "flex h-8 w-8 items-center justify-center rounded-lg "
+                                "border border-gray-200 bg-gray-50"
+                            ),
+                        ),
+                        P(
+                            "闪电单仅用于实盘；仿真账户保留普通下单，用于补单与测试。",
+                            cls="mt-3 text-sm text-gray-500",
+                        ),
+                        cls=(
+                            "flex w-[260px] flex-col items-center justify-center "
+                            "rounded-lg border border-gray-100 bg-gray-50 p-4"
+                        ),
+                    )
+                ),
                 cls="flex gap-3",
             ),
             Script(
@@ -1800,7 +1829,10 @@ def trade_main_page(request):
             # 资产信息条
             AssetInfoBar(total, cash, market_value),
             # 闪电交易面板
-            LightningTradePanel(portfolio_id, kind, cash, total),
+            LightningTradePanel(
+                portfolio_id, kind, cash, total,
+                is_live=bool(active_account.get("is_live")),
+            ),
             PositionsOrdersTabs(positions, orders, active_tab),
             cls="relative p-6",
         )
@@ -1992,11 +2024,20 @@ async def trade_live_quote(req):
     return JSONResponse(_build_live_quote_payload(asset) if asset else _build_live_quote_payload(""))
 
 
-async def set_active_account(req, session):
-    """设置活动账号"""
+async def set_active_account(req, session: dict | None = None):
+    """设置活动账号。
+
+    Args:
+        req: HTTP 请求。
+        session: 可选的 session dict（未提供时从 ``req.scope["session"]`` 读）。
+    """
+    session = session if session is not None else req.scope.get("session", {})
+    # 测试里可能传 dict 作为 req.scope，与 req 分离
+    if not isinstance(req.scope, dict):
+        req.scope = {}
     form = await req.form()
     kind = form.get("kind")
-    account_id = form.get("id")
+    account_id = form.get("id") or form.get("account_id")
 
     if not kind or not account_id:
         return Div("参数错误", cls="text-red-500 p-4")
