@@ -7,11 +7,11 @@ settings view that business code should read from.
 from __future__ import annotations
 
 import datetime
+from zoneinfo import ZoneInfo
 import urllib.parse
 from dataclasses import dataclass, replace
 from typing import Any
 
-import pytz
 from loguru import logger
 
 from quantide.config.branding import get_branding
@@ -22,7 +22,7 @@ from quantide.config.dev_stubs import (
 )
 from quantide.config.paths import normalize_data_home
 
-DEFAULT_TIMEZONE = pytz.timezone("Asia/Shanghai")
+DEFAULT_TIMEZONE = ZoneInfo("Asia/Shanghai")
 _LAST_APP_STATE_LOAD_ERROR: tuple[type[BaseException], str] | None = None
 
 

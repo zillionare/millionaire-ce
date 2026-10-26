@@ -25,7 +25,6 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-import pytz
 from freezegun import freeze_time
 
 from quantide.config.settings import DEFAULT_TIMEZONE, get_epoch

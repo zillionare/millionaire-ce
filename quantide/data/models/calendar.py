@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import datetime
+from zoneinfo import ZoneInfo
 import itertools
 from pathlib import Path
 
@@ -10,7 +11,6 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
-import pytz
 from arrow import Arrow
 from loguru import logger
 from numpy import ndarray
@@ -1073,6 +1073,7 @@ class Calendar:
         Returns:
             [description]
         """
+        tz = ZoneInfo(tzinfo) if isinstance(tzinfo, str) else tzinfo
         return datetime.datetime(
             date.year,
             date.month,
@@ -1081,7 +1082,7 @@ class Calendar:
             minute,
             second,
             microsecond,
-            tzinfo=pytz.timezone(tzinfo),
+            tzinfo=tz,
         )
 
     def replace_date(

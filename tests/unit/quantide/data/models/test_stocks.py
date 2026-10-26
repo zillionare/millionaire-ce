@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
-import pytz
 from freezegun import freeze_time
 
 from quantide.config.settings import DEFAULT_TIMEZONE
@@ -18,7 +17,7 @@ cfg = SimpleNamespace(TIMEZONE=DEFAULT_TIMEZONE, epoch=datetime.date(2024, 1, 1)
 @pytest.fixture
 def setup(asset_dir: Path):
     cfg.epoch = datetime.date(2024, 1, 1)  # type: ignore
-    cfg.TIMEZONE = pytz.timezone("Asia/Shanghai")  # type: ignore[attr-defined]
+    cfg.TIMEZONE = DEFAULT_TIMEZONE  # type: ignore[attr-defined]
     stock_list.load(asset_dir / "stock_list.parquet")
     daily_bars.connect(
         asset_dir / "2024_bars_ext_cols.parquet", asset_dir / "baseline_calendar.parquet"

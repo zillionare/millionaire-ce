@@ -7,7 +7,6 @@ from unittest import mock
 import arrow
 import pandas as pd
 import pytest
-import pytz
 from freezegun import freeze_time
 
 from quantide.config.settings import DEFAULT_TIMEZONE
@@ -20,7 +19,7 @@ cfg = SimpleNamespace(TIMEZONE=DEFAULT_TIMEZONE)
 
 @pytest.fixture
 def tf(asset_dir):
-    cfg.TIMEZONE = pytz.timezone("Asia/Shanghai")  # type: ignore[attr-defined]
+    cfg.TIMEZONE = DEFAULT_TIMEZONE  # type: ignore[attr-defined]
     tf = Calendar()
     tf.load(asset_dir / "baseline_calendar.parquet")
     return tf
