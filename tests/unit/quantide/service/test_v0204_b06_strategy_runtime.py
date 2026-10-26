@@ -946,3 +946,39 @@ def test_load_specs_handles_missing_file(tmp_path):
     before = dict(strategy_runtime_manager._runtime_specs)
     strategy_runtime_manager._load_specs()
     assert strategy_runtime_manager._runtime_specs == before
+
+
+def test_runtime_row_reads_assets_by_portfolio_id():
+    """运行时监控的资产/持仓/委托必须按 portfolio_id 查询，而不是当成日期。"""
+    from quantide.data.models import Asset
+    from quantide.data.sqlite import db
+    from quantide.service.strategy_runtime import StrategyRuntimeManager
+
+    db.init(":memory:")
+    db.upsert_asset(
+        Asset(
+            portfolio_id="paper-asset-row",
+            dt=datetime.date(2024, 1, 2),
+            principal=1_000_000,
+            cash=1_000_000,
+            frozen_cash=0,
+            market_value=0,
+            total=1_000_000,
+        )
+    )
+    runtime = SimpleNamespace(
+        runtime_id="paper:paper-asset-row",
+        mode="paper",
+        portfolio_id="paper-asset-row",
+        source_backtest_portfolio_id="",
+        strategy_name="S",
+        strategy_id="sid",
+        status="running",
+        principal=1_000_000,
+        updated_at=datetime.datetime(2024, 1, 2),
+        error=None,
+        broker=SimpleNamespace(),
+    )
+    row = StrategyRuntimeManager()._runtime_to_row(runtime)
+    assert row["total"] == 1_000_000
+    assert row["cash"] == 1_000_000

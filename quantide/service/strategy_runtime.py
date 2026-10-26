@@ -648,7 +648,7 @@ class StrategyRuntimeManager:
         positions = 0
         orders = 0
         try:
-            asset = db.get_asset(runtime.portfolio_id)
+            asset = db.get_asset(portfolio_id=runtime.portfolio_id)
             if asset is not None:
                 cash = float(asset.cash)
                 mv = float(asset.market_value)
@@ -656,12 +656,12 @@ class StrategyRuntimeManager:
         except Exception:
             pass
         try:
-            pos_df = db.get_positions(runtime.portfolio_id)
+            pos_df = db.get_positions(portfolio_id=runtime.portfolio_id)
             positions = pos_df.height
         except Exception:
             positions = 0
         try:
-            ord_df = db.get_orders(runtime.portfolio_id)
+            ord_df = db.get_orders(portfolio_id=runtime.portfolio_id)
             orders = ord_df.height
         except Exception:
             orders = 0
