@@ -64,3 +64,28 @@ def test_header_menu_paper_entry_not_gateway_disabled():
         assert live.get("requires_gateway") is True
     finally:
         registry.unregister(BrokerKind.SIMULATION, portfolio_id)
+
+
+def test_trading_menu_has_no_duplicate_accounts_entry():
+    """仿真的 sidebar 不再重复账号管理入口。"""
+    from quantide.web.layouts.main import TRADING_MENU
+
+    assert all(item.get("url") != "/system/accounts" for item in TRADING_MENU)
+
+
+def test_header_dropdown_padding_matches_regular_nav_items():
+    """多账户下拉的 Summary 与普通导航项使用相同内边距，保证垂直对齐。"""
+    from fasthtml.common import to_xml
+
+    from quantide.web.components.header import _build_nav_links
+
+    html = to_xml(
+        _build_nav_links(
+            [
+                {"title": "仿真", "children": [{"title": "A", "url": "/trade/paper/"}]},
+            ],
+            active_title="",
+        )
+    )
+    assert "px-4 py-5" in html
+    assert "px-2" not in html.replace("px-2 ", "")

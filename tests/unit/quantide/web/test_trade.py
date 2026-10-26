@@ -2194,6 +2194,15 @@ class TestSidebarLinks:
         assert response.status_code == 303
         assert response.headers["location"] == "/trade/paper/"
 
+    def test_paper_redirect_preserves_account_id(self):
+        with system_settings_e2e_session() as session:
+            response = session.client.get(
+                "/trade/paper?account_id=sim_a", follow_redirects=False
+            )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/trade/paper/?account_id=sim_a"
+
 
 class TestPaperEntry:
 
@@ -2222,7 +2231,7 @@ class TestPaperEntry:
         menu = build_header_menu(trade_enabled=True, req=req)
         paper = next(item for item in menu if item.get("title") == "仿真")
 
-        assert paper.get("url") == "/trade/paper?account_id=sim_a"
+        assert paper.get("url") == "/trade/paper/?account_id=sim_a"
         assert paper.get("disabled") in (None, False)
         assert not paper.get("children")
 
@@ -2241,9 +2250,9 @@ class TestPaperEntry:
         children = paper.get("children") or []
         assert len(children) == 3
         assert {c["url"] for c in children} == {
-            "/trade/paper?account_id=sim_a",
-            "/trade/paper?account_id=sim_b",
-            "/trade/paper?account_id=sim_c",
+            "/trade/paper/?account_id=sim_a",
+            "/trade/paper/?account_id=sim_b",
+            "/trade/paper/?account_id=sim_c",
         }
         names = {c["title"] for c in children}
         assert names == {"仿真A", "仿真B", "仿真C"}

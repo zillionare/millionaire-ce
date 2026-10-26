@@ -140,7 +140,7 @@ def _render_paper_picker(layout: MainLayout, sims: list[dict]) -> Any:
                 Td(
                     A(
                         "进入",
-                        href=f"/trade/paper?account_id={account_id}",
+                        href=f"/trade/paper/?account_id={account_id}",
                         cls="uk-button uk-button-primary uk-button-small",
                     ),
                 ),

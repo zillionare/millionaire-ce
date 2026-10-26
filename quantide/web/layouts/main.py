@@ -68,7 +68,6 @@ TRADING_MENU = [
     {"title": "历史持仓", "url": "/trade/positions/history", "icon_path": "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"},
     {"title": "历史委托", "url": "/trade/orders/history", "icon_path": "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"},
     {"title": "历史成交", "url": "/trade/records/history", "icon_path": "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"},
-    {"title": "账号管理", "url": "/system/accounts", "icon_path": "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"},
 ]
 
 MARKET_MENU = [
@@ -112,7 +111,7 @@ def _build_paper_entry(req: object | None = None) -> dict[str, object]:
     """根据仿真账户数量生成 sidebar 仿真入口的菜单项。
 
     - 0 账户：`disabled`，文案 "未配置仿真账户"，`title` 提示
-    - 1 账户：单按钮，跳 `/trade/paper?account_id=<id>`
+    - 1 账户：单按钮，跳 `/trade/paper/?account_id=<id>`
     - 2+ 账户：带 `children` 列表，浏览器原生 `<details>` 渲染下拉
     """
     sims: list[dict] = []
@@ -141,13 +140,13 @@ def _build_paper_entry(req: object | None = None) -> dict[str, object]:
         only = sims[0]
         return {
             "title": "仿真",
-            "url": f"/trade/paper?account_id={only.get('id', '')}",
+            "url": f"/trade/paper/?account_id={only.get('id', '')}",
         }
 
     children = [
         {
             "title": s.get("name") or s.get("id", ""),
-            "url": f"/trade/paper?account_id={s.get('id', '')}",
+            "url": f"/trade/paper/?account_id={s.get('id', '')}",
         }
         for s in sims
     ]

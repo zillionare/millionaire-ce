@@ -40,7 +40,10 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
                         Summary(
                             Span(display_text, cls="inline-flex items-center text-sm font-medium"),
                             Span(" ▾", cls="text-xs ml-1"),
-                            cls=active_cls if is_active else inactive_cls,
+                            cls=(
+                                "inline-flex items-center px-4 py-5 text-sm font-medium "
+                                + (active_cls if is_active else inactive_cls)
+                            ),
                         ),
                         Div(
                             *[
@@ -55,7 +58,7 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
                         ),
                         cls="relative inline-block",
                     ),
-                    cls="inline-flex items-center px-2",
+                    cls="inline-flex items-center",
                 )
             )
             continue

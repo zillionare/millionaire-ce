@@ -213,6 +213,13 @@ def _attach_root_app_to_app_states(root_app) -> None:
         mounted_app.state.root_app = root_app
 
 
+def _redirect_preserving_query(req, target: str) -> RedirectResponse:
+    """重定向并保留 query string（避免丢失 account_id）。"""
+    query = getattr(getattr(req, "url", None), "query", "") or ""
+    destination = f"{target}?{query}" if query else target
+    return RedirectResponse(destination, status_code=303)
+
+
 def create_app(
     app_config_dir: str | Path | None = None,
     enforce_single_instance: bool = True,
@@ -302,37 +309,37 @@ def create_app(
             ),
             Route(
                 "/live",
-                lambda req: RedirectResponse("/trade/live/", status_code=303),
+                lambda req: _redirect_preserving_query(req, "/trade/live/"),
                 methods=["GET"],
             ),
             Route(
                 "/live/",
-                lambda req: RedirectResponse("/trade/live/", status_code=303),
+                lambda req: _redirect_preserving_query(req, "/trade/live/"),
                 methods=["GET"],
             ),
             Route(
                 "/papertrade",
-                lambda req: RedirectResponse("/trade/paper/", status_code=303),
+                lambda req: _redirect_preserving_query(req, "/trade/paper/"),
                 methods=["GET"],
             ),
             Route(
                 "/papertrade/",
-                lambda req: RedirectResponse("/trade/paper/", status_code=303),
+                lambda req: _redirect_preserving_query(req, "/trade/paper/"),
                 methods=["GET"],
             ),
             Route(
                 "/trade/simulation",
-                lambda req: RedirectResponse("/trade/paper/", status_code=303),
+                lambda req: _redirect_preserving_query(req, "/trade/paper/"),
                 methods=["GET"],
             ),
             Route(
                 "/trade/live",
-                lambda req: RedirectResponse("/trade/live/", status_code=303),
+                lambda req: _redirect_preserving_query(req, "/trade/live/"),
                 methods=["GET"],
             ),
             Route(
                 "/trade/paper",
-                lambda req: RedirectResponse("/trade/paper/", status_code=303),
+                lambda req: _redirect_preserving_query(req, "/trade/paper/"),
                 methods=["GET"],
             ),
             Mount("/home", home_app),

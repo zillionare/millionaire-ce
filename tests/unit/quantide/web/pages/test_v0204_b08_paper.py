@@ -124,6 +124,8 @@ def test_render_paper_picker_with_sims():
     # the function executed without error.
     assert isinstance(text, str)
     assert "请选择仿真账户" in text or "Mock" in text  # inner content via main_block
+    assert "/trade/paper/?account_id=p1" in text
+    assert "/trade/paper/?account_id=p2" in text
 
 
 def test_render_paper_picker_empty():
