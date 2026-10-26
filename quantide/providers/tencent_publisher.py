@@ -38,6 +38,12 @@ from quantide.data.fetchers.tencent import TencentDataFetcher
 #: 默认轮询间隔（秒）
 DEFAULT_INTERVAL = 3.0
 
+#: 行情请求时段（含集合竞价与收盘后 30 秒，确保拿到收盘快照）
+SESSION_WINDOWS = (
+    (datetime.time(9, 15), datetime.time(11, 30)),
+    (datetime.time(13, 0), datetime.time(15, 0, 30)),
+)
+
 
 def _resolve_symbols(symbols: list[str] | None) -> list[str]:
     """未显式给定时，从本地股票列表取在市标的。"""
@@ -66,6 +72,8 @@ class TencentPublisher:
         symbols: list[str] | None = None,
         interval: float = DEFAULT_INTERVAL,
         fetcher: TencentDataFetcher | None = None,
+        calendar: Any | None = None,
+        clock: Any | None = None,
     ) -> None:
         """初始化。
 
@@ -73,12 +81,42 @@ class TencentPublisher:
             symbols: 标的列表；None 表示使用本地股票列表。
             interval: 轮询间隔（秒）。
             fetcher: 可注入的腾讯适配器（测试用）。
+            calendar: 交易日历（测试可注入）。
+            clock: 时钟函数（测试可注入）。
         """
         self.symbols = list(symbols) if symbols else None
         self.interval = max(0.5, float(interval))
         self._fetcher = fetcher or TencentDataFetcher()
+        self._calendar = calendar
+        self._clock = clock or datetime.datetime.now
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def _calendar_obj(self) -> Any:
+        if self._calendar is not None:
+            return self._calendar
+        from quantide.data.models.calendar import calendar
+
+        return calendar
+
+    def _in_session(self, now: datetime.datetime | None = None) -> bool:
+        """当前是否处于需要请求行情的交易时段。"""
+        now = now or self._clock()
+        try:
+            if not self._calendar_obj().is_trade_day(now):
+                return False
+        except Exception:
+            # 日历未加载时至少避开周末；节假日由运行时日历兜底。
+            if now.weekday() >= 5:
+                return False
+        tm = now.time()
+        return any(start <= tm <= end for start, end in SESSION_WINDOWS)
+
+    def _tick(self, now: datetime.datetime | None = None) -> int:
+        """交易时段内发布一轮；休市/午休直接跳过。"""
+        if not self._in_session(now):
+            return 0
+        return self.publish_once()
 
     def publish_once(self) -> int:
         """拉取并发布一轮，返回成功发布的标的数。"""
@@ -155,7 +193,7 @@ class TencentPublisher:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            count = self.publish_once()
+            count = self._tick()
             if count:
                 logger.debug("已发布 {} 个标的的行情", count)
             self._stop.wait(self.interval)

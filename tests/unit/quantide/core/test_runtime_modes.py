@@ -72,6 +72,7 @@ def test_runtime_bootstrap_paper_uses_live_quote_market_data(monkeypatch):
     runtime_cfg = SimpleNamespace(
         runtime_mode="paper",
         gateway_enabled=True,
+        gateway_base_url="http://gateway.local",
         runtime_broker_adapter="",
         livequote_mode="none",
     )
@@ -136,3 +137,44 @@ def test_register_broker_adapters_preserves_portfolio_name(monkeypatch):
     bootstrap._register_broker_adapters(registry, AdapterRegistry())
     items = {item["id"]: item for item in registry.list_by_kind(BrokerKind.SIMULATION)}
     assert items["sim_test"]["name"] == "Paper 100万"
+
+
+def test_runtime_bootstrap_uses_hub_when_gateway_url_empty(monkeypatch):
+    """网关已开启但地址为空时，不应启动 live_quote，行情回落到 Hub。"""
+    db.init(":memory:")
+    db.insert_portfolio(
+        Portfolio(
+            portfolio_id="paper-hub-account",
+            kind=BrokerKind.SIMULATION,
+            start=datetime.date(2024, 1, 2),
+            name="paper-hub-account",
+            status=True,
+        )
+    )
+    db.upsert_asset(
+        Asset(
+            portfolio_id="paper-hub-account",
+            dt=datetime.date(2024, 1, 2),
+            principal=100000,
+            cash=100000,
+            frozen_cash=0,
+            market_value=0,
+            total=100000,
+        )
+    )
+    runtime_cfg = SimpleNamespace(
+        runtime_mode="paper",
+        gateway_enabled=True,
+        gateway_base_url="",
+        runtime_broker_adapter="",
+        livequote_mode="none",
+    )
+    started: list[bool] = []
+    monkeypatch.setattr(runtime_modes, "get_settings", lambda: runtime_cfg)
+    monkeypatch.setattr(runtime_modes.scheduler, "start", lambda: None)
+    monkeypatch.setattr(
+        runtime_modes.live_quote, "start", lambda: started.append(True)
+    )
+    runtime = runtime_modes.RuntimeBootstrap(mode="paper").bootstrap()
+    assert started == []
+    assert runtime.market_data is runtime_modes.market_data_hub

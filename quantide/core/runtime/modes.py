@@ -5,6 +5,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from loguru import logger
+
 from quantide.config.settings import get_settings
 from quantide.core.enums import BrokerKind
 from quantide.core.ports import MarketDataPort
@@ -124,10 +126,17 @@ class RuntimeBootstrap:
         quote_monitor.start()
         self._start_embedded_publisher(adapters)
         adapters.register("market_data", "market_data_hub", market_data_hub)
-        if runtime.livequote_mode == "gateway" or runtime.gateway_enabled:
+        gateway_url = str(getattr(runtime, "gateway_base_url", "") or "").strip()
+        if (
+            runtime.livequote_mode == "gateway" or runtime.gateway_enabled
+        ) and gateway_url:
             live_quote.start()
             adapters.register("market_data", "live_quote", live_quote)
             return live_quote
+        if runtime.livequote_mode == "gateway" or runtime.gateway_enabled:
+            logger.warning(
+                "交易网关地址为空，live_quote 不启动；实时行情改用 MarketDataHub"
+            )
         return market_data_hub
 
     def _start_embedded_publisher(self, adapters: AdapterRegistry) -> None:
@@ -218,7 +227,8 @@ class RuntimeBootstrap:
         runtime = get_settings()
         broker_name = runtime.runtime_broker_adapter
         mode_name = runtime.livequote_mode
-        use_gateway = runtime.gateway_enabled and (
+        gateway_url = str(getattr(runtime, "gateway_base_url", "") or "").strip()
+        use_gateway = runtime.gateway_enabled and bool(gateway_url) and (
             broker_name == "gateway" or mode_name == "gateway"
         )
         if not use_gateway:
