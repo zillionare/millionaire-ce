@@ -190,3 +190,17 @@ def test_daily_aux_detects_all_one_adjust_factor():
     )
     monitor.check_morning(datetime.datetime(2024, 1, 3, 9, 25))
     assert any(event["target_id"] == "data:daily_aux" for event in events)
+
+
+def test_quote_check_has_open_grace_window():
+    """开盘/午后第一分钟不因发布者尚未发出首笔行情而误报。"""
+    now = datetime.datetime(2024, 1, 3, 13, 0, 20)
+    quotes = _Quotes(datetime.datetime(2024, 1, 3, 11, 30))
+    monitor, events = _monitor(
+        _Calendar(datetime.date(2024, 1, 2)),
+        _Daily(datetime.date(2024, 1, 2), _aux_frame()),
+        _Limits(2),
+        quotes=quotes,
+    )
+    monitor.check_quotes(now)
+    assert events == []

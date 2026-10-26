@@ -149,6 +149,13 @@ class DataReadinessMonitor:
         now = now or self._clock()
         if not self._in_session(now):
             return
+        # 开盘/午后第一分钟给发布者一个启动宽限，避免 13:00:00 的
+        # 定时检查在首笔行情到达前误报“行情中断”。
+        tm = now.time()
+        if datetime.time(9, 30) <= tm < datetime.time(9, 31) or (
+            datetime.time(13, 0) <= tm < datetime.time(13, 1)
+        ):
+            return
         status = self._quotes_obj().status()
         last = status.get("last_received_at")
         if not status.get("started"):
