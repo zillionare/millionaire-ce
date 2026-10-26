@@ -181,6 +181,8 @@ class RuntimeBootstrap:
                 portfolio_id=portfolio_id,
                 kind=kind,
                 adapter_name=name,
+                portfolio_name=getattr(broker, "portfolio_name", ""),
+                status=getattr(broker, "status", True),
             )
 
     def _load_accounts_from_db(

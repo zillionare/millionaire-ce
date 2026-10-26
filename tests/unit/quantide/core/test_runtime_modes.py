@@ -119,3 +119,20 @@ def test_embedded_tencent_publisher_starts_when_enabled(monkeypatch):
     assert started["started"] is True
     assert started["symbols"] == ["600519.SH", "000001.SZ"]
     assert started["interval"] == 2.0
+
+
+def test_register_broker_adapters_preserves_portfolio_name(monkeypatch):
+    """注册 adapter 时保留账户名称，避免侧边栏显示账户 ID。"""
+    from types import SimpleNamespace
+
+    from quantide.core.runtime.adapter_registry import AdapterRegistry
+    from quantide.service.registry import BrokerRegistry
+
+    registry = BrokerRegistry()
+    broker = SimpleNamespace(portfolio_name="Paper 100万", status=True)
+    registry.register(BrokerKind.SIMULATION, "sim_test", broker)
+
+    bootstrap = runtime_modes.RuntimeBootstrap(mode="paper")
+    bootstrap._register_broker_adapters(registry, AdapterRegistry())
+    items = {item["id"]: item for item in registry.list_by_kind(BrokerKind.SIMULATION)}
+    assert items["sim_test"]["name"] == "Paper 100万"
