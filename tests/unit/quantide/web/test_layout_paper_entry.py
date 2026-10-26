@@ -42,3 +42,25 @@ def test_system_maintenance_menu_has_accounts_entry():
         for child in group.get("children", [])
     }
     assert "/system/accounts" in urls
+
+
+def test_header_menu_paper_entry_not_gateway_disabled():
+    """仿真入口不依赖网关，不应被 requires_gateway 置灰。"""
+    from quantide.web.layouts.main import build_header_menu
+
+    registry = BrokerRegistry()
+    portfolio_id = "sim_nav_gateway"
+    registry.register(
+        BrokerKind.SIMULATION,
+        portfolio_id,
+        SimpleNamespace(portfolio_name="Paper 100万", status=True),
+    )
+    try:
+        menu = build_header_menu(trade_enabled=False, req=None)
+        paper = next(item for item in menu if item.get("title") == "仿真")
+        live = next(item for item in menu if item.get("title") == "实盘")
+        assert paper.get("requires_gateway") is not True
+        assert paper.get("disabled") is not True
+        assert live.get("requires_gateway") is True
+    finally:
+        registry.unregister(BrokerKind.SIMULATION, portfolio_id)

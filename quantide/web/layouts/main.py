@@ -163,7 +163,8 @@ def build_header_menu(trade_enabled: bool, req: object | None = None) -> list[di
     menu.append(_build_paper_entry(req))
     if not trade_enabled:
         for item in menu:
-            if item.get("title") in {"实盘", "仿真"}:
+            # 仿真（Paper）不依赖交易网关；只有实盘需要。
+            if item.get("title") == "实盘":
                 item["requires_gateway"] = True
     return menu
 
