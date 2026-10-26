@@ -30,3 +30,15 @@ def test_paper_entry_uses_singleton_when_request_missing():
             assert portfolio_id in str(entry["url"])
     finally:
         registry.unregister(BrokerKind.SIMULATION, portfolio_id)
+
+
+def test_system_maintenance_menu_has_accounts_entry():
+    """系统维护侧边栏包含账号管理入口。"""
+    from quantide.web.layouts.main import SYSTEM_MAINTENANCE_MENU
+
+    urls = {
+        child["url"]
+        for group in SYSTEM_MAINTENANCE_MENU
+        for child in group.get("children", [])
+    }
+    assert "/system/accounts" in urls

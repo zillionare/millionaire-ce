@@ -47,6 +47,7 @@ SYSTEM_MAINTENANCE_MENU = [
         "title": "系统设置",
         "icon": "settings",
         "children": [
+            {"title": "账号管理", "url": "/system/accounts", "icon_path": "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"},
             {"title": "定时任务", "url": "/system/jobs", "icon_path": "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"},
             {"title": "交易网关", "url": "/system/gateway", "icon_path": "M13 10V3L4 14h7v7l9-11h-7z"},
             {"title": "数据源", "url": "/system/datasource", "icon_path": "M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"},
