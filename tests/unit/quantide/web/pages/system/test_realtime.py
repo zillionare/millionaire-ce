@@ -63,3 +63,32 @@ def test_realtime_content_empty_state(monkeypatch):
     monkeypatch.setattr(realtime, "quote_monitor", _FakeQuotes(rows=[], last=None))
     html = to_xml(realtime._render_content(datetime.datetime(2024, 1, 3, 10, 0), ""))
     assert "尚未收到行情" in html
+
+
+def test_realtime_filter_survives_polling(monkeypatch):
+    """轮询时必须携带筛选输入，避免下一次刷新覆盖用户输入。"""
+    now = datetime.datetime(2024, 1, 3, 10, 0)
+    monkeypatch.setattr(realtime, "_is_session", lambda current: True)
+    monkeypatch.setattr(
+        realtime,
+        "quote_monitor",
+        _FakeQuotes(
+            rows=[
+                {
+                    "symbol": "600519.SH",
+                    "name": "贵州茅台",
+                    "price": 1334.0,
+                    "prev_close": 1335.0,
+                    "volume": 100.0,
+                    "amount": 2000.0,
+                    "quote_ts": now,
+                    "received_at": now,
+                }
+            ],
+            last=now,
+        ),
+    )
+    html = to_xml(realtime._render_content(now, "600519"))
+    assert 'value="600519"' in html
+    assert 'id="realtime-filter"' in html
+    assert 'hx-include="#realtime-filter"' in html

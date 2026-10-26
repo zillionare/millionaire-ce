@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 from typing import Any
-from urllib.parse import quote
 
 from fasthtml.common import (
     H2,
@@ -231,8 +230,6 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
         else "—"
     )
     panel_url = "/system/realtime/panel"
-    if query:
-        panel_url += f"?q={quote(query)}"
     return Div(
         Div(
             H2("实时行情", cls="text-lg font-semibold text-gray-900"),
@@ -256,6 +253,7 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
                 Input(
                     name="q",
                     value=query,
+                    autocomplete="off",
                     placeholder="输入代码或名称过滤，例如 600519 / 茅台",
                     cls=(
                         "w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm "
@@ -270,6 +268,7 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
                 hx_get="/system/realtime/panel",
                 hx_target="#realtime-panel",
                 hx_swap="innerHTML",
+                id="realtime-filter",
                 cls="flex gap-2",
             ),
             Div(*_data_health(now), cls="flex flex-wrap items-center gap-2"),
@@ -305,6 +304,7 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
         ),
         id="realtime-panel",
         hx_get=panel_url,
+        hx_include="#realtime-filter",
         hx_trigger=_POLL,
         hx_swap="innerHTML",
     )
