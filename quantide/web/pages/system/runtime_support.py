@@ -117,7 +117,7 @@ def build_runtime_table_content(action_base_path: str, target_selector: str) -> 
     return Div(
         Div(
             H2("运行时监控", cls="text-lg font-semibold text-gray-900"),
-            Span("live/paper 常驻，backtest 按需创建", cls="text-xs text-gray-500"),
+            Span("运行时实例与封控状态总览", cls="text-xs text-gray-500"),
             cls="p-6 border-b border-gray-200 flex items-center justify-between",
         ),
         Div(
