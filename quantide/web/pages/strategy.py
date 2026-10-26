@@ -1664,7 +1664,7 @@ def index(req, session):
                 A("策略", href="/strategy", cls="hover:text-blue-600"),
                 Span(">", cls="text-gray-400"),
                 Span("策略列表", cls="text-gray-900 font-medium"),
-                cls="flex items-center space-x-2 text-sm text-gray-600",
+                cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",
             ),
             cls="mb-4",
         ),

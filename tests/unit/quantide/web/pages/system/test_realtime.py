@@ -92,3 +92,11 @@ def test_realtime_filter_survives_polling(monkeypatch):
     assert 'value="600519"' in html
     assert 'id="realtime-filter"' in html
     assert 'hx-include="#realtime-filter"' in html
+
+
+def test_realtime_breadcrumb_is_left_aligned():
+    from fasthtml.common import to_xml
+
+    html = to_xml(realtime._breadcrumb())
+    assert "justify-start" in html
+    assert "w-fit" in html
