@@ -255,17 +255,19 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
                     value=query,
                     autocomplete="off",
                     placeholder="输入代码或名称过滤，例如 600519 / 茅台",
+                    style="height:2rem;min-height:2rem;box-sizing:border-box;padding-top:0;padding-bottom:0;",
                     cls=(
-                        "h-9 w-full max-w-xs rounded-lg border border-gray-200 bg-white "
-                        "px-3 text-sm outline-none focus:border-[#e41815] "
+                        "h-8 w-full max-w-xs rounded-lg border border-gray-200 bg-white "
+                        "px-3 text-sm leading-8 outline-none focus:border-[#e41815] "
                         "focus:ring-2 focus:ring-[#e41815]/10"
                     ),
                 ),
                 Button(
                     "筛选",
                     type="submit",
+                    style="height:2rem;min-height:2rem;box-sizing:border-box;",
                     cls=(
-                        "inline-flex h-9 items-center justify-center rounded-lg border "
+                        "inline-flex h-8 items-center justify-center rounded-lg border "
                         "border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 "
                         "transition hover:bg-gray-50 hover:text-gray-900"
                     ),
