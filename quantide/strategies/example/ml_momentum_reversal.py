@@ -1026,7 +1026,9 @@ class MLMomentumReversalStrategy(BaseStrategy):
             phase = execution_clock.phase(tm)
         except Exception:
             return True
-        return phase.name in {"auction", "post_close"}
+        # 只允许在集合竞价窗口内“启动”新决策；14:57 已开始的计算可以
+        # 自然跑过 15:00，但收盘后重启/新进入的 on_bar 不再补交易。
+        return phase.name == "auction"
 
     def _mark_retrained(self) -> None:
         """记录一次重训完成，重置交易日计数。"""

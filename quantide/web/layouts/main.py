@@ -326,7 +326,7 @@ class MainLayout(BaseLayout):
         return Main(
             self._resolve_main_content(),
             id="layout-main-content",
-            cls="flex-1 p-6 w-full",
+            cls="flex-1 min-w-0 p-6 w-full",
         )
 
     def _build_sidebar(self, *, fragment_navigation_enabled: bool, hx_swap_oob: bool = False):

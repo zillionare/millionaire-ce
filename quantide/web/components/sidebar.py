@@ -127,7 +127,7 @@ def sidebar_component(
 
     aside_attrs: dict[str, str] = {
         "id": "layout-sidebar",
-        "cls": "w-64 bg-white min-h-screen border-r border-gray-200",
+        "cls": "w-64 shrink-0 bg-white min-h-screen border-r border-gray-200",
     }
     if hx_swap_oob:
         aside_attrs["hx_swap_oob"] = "true"
