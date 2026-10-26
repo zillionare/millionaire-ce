@@ -75,11 +75,36 @@ class Strategy(ABC):
         if log_time is None:
             log_time = self._current_time
         rendered_message = self._render_log_message(msg, *args, **kwargs)
-        # 注意：不能把 record["time"] 替换成普通 datetime，loguru 的
-        # 默认时间格式会退化成字面量 "YYYY-MM-DD HH:mm:ss.SSS"。
-        # 回测虚拟时间由 write_backtest_log(dt=log_time) 持久化；控制台
-        # 仍使用真实时间。
-        self.logger.log(level, msg, *args, **kwargs)
+        # 回测需要在日志中显示虚拟时间；loguru 的默认 formatter 依赖
+        # 其 datetime 子类，直接塞普通 datetime 会把格式串当字面量输出。
+        # 用 loguru 的 datetime 包装可同时保留格式化与测试可读的 record["time"]。
+        if log_time:
+            if isinstance(log_time, datetime.date) and not isinstance(
+                log_time, datetime.datetime
+            ):
+                log_time = datetime.datetime.combine(log_time, datetime.time.min)
+            try:
+                from loguru._datetime import datetime as _LoguruDatetime
+
+                sim_time = _LoguruDatetime(
+                    log_time.year,
+                    log_time.month,
+                    log_time.day,
+                    log_time.hour,
+                    log_time.minute,
+                    log_time.second,
+                    log_time.microsecond,
+                    tzinfo=log_time.tzinfo,
+                )
+
+                def _time_patcher(record):
+                    record["time"] = sim_time
+
+                self.logger.patch(_time_patcher).log(level, msg, *args, **kwargs)
+            except Exception:
+                self.logger.log(level, msg, *args, **kwargs)
+        else:
+            self.logger.log(level, msg, *args, **kwargs)
         write_backtest_log = getattr(self.broker, "write_backtest_log", None)
         if callable(write_backtest_log):
             write_backtest_log(
