@@ -103,6 +103,46 @@ class PortBackedBroker:
             )
         return result
 
+    def get_bars_range(
+        self,
+        assets: list[str] | None,
+        start_dt: datetime.datetime | datetime.date,
+        end_dt: datetime.datetime | datetime.date | None = None,
+        adjust: str | None = None,
+        include_forming_bar: bool = True,
+    ):
+        """把批量行情请求转发给底层 broker（PaperBroker 等）。"""
+        handler = getattr(self._port, "get_bars_range", None)
+        if not callable(handler):
+            raise AttributeError("底层 broker 不支持 get_bars_range")
+        return handler(
+            assets,
+            start_dt,
+            end_dt,
+            adjust=adjust,
+            include_forming_bar=include_forming_bar,
+        )
+
+    def get_history(
+        self,
+        asset: str,
+        count: int,
+        end_dt: datetime.datetime | None = None,
+        frame_type: str = "1d",
+        include_forming_bar: bool = True,
+    ):
+        """把单标的历史行情请求转发给底层 broker。"""
+        handler = getattr(self._port, "get_history", None)
+        if not callable(handler):
+            raise AttributeError("底层 broker 不支持 get_history")
+        return handler(
+            asset,
+            count,
+            end_dt,
+            frame_type,
+            include_forming_bar=include_forming_bar,
+        )
+
     def get_prices(self, assets: list[str]) -> dict[str, float]:
         getter = getattr(self._port, "get_prices", None)
         if callable(getter):

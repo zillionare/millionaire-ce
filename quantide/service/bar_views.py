@@ -602,7 +602,14 @@ class LiveBarView(HistBarView):
         )
         if completed is None or completed.is_empty():
             return pl.DataFrame()
+        # get_bars_range 的 end_dt 常是 date；forming 注入需要带时间，
+        # 用当日 15:00 作为收盘代表时刻。
+        forming_dt = (
+            end_dt
+            if isinstance(end_dt, datetime.datetime)
+            else datetime.datetime.combine(end_date, datetime.time(15, 0))
+        )
         completed = self._inject_forming(
-            completed, end_dt, assets or completed["asset"].unique().to_list(), include_forming_bar
+            completed, forming_dt, assets or completed["asset"].unique().to_list(), include_forming_bar
         )
         return completed.sort(["date", "asset"])

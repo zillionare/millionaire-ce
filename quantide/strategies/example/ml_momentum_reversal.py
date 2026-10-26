@@ -787,7 +787,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             or ["000300.SH", "000905.SH", "000852.SH"]
         )
         self.live_min_quote_coverage = float(
-            self.config.get("live_min_quote_coverage", 0.98)
+            self.config.get("live_min_quote_coverage", 0.90)
         )
         self.market_cap_trim_pct = min(
             0.5,
@@ -828,6 +828,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self._last_executed_signal_date: datetime.date | None = None
         #: 实盘行情缺失标志（置 True 时本次 on_bar 不交易，下次重试）
         self._data_missing: bool = False
+        self._last_data_missing_log: datetime.date | None = None
         self._cached_norm_panel: pl.DataFrame | None = None
         self._panel_start: datetime.date | None = None
         self._panel_end: datetime.date | None = None
@@ -1065,11 +1066,26 @@ class MLMomentumReversalStrategy(BaseStrategy):
         start: datetime.date,
         end: datetime.date,
         assets: list[str] | None = None,
+        *,
+        include_forming_bar: bool = True,
     ) -> pl.DataFrame:
-        """通过 broker 视图取已完成日线；回测走 HistBarView，实盘走 LiveBarView。"""
+        """通过 broker 视图取日线；回测走 HistBarView，实盘走 LiveBarView。
+
+        选股池构建必须用已完成 bar（``include_forming_bar=False``），否则
+        当日 forming 行缺少 PIT 市值，会让 market_cap_trim 退化成全市场。
+        """
         broker = self.broker
         if hasattr(broker, "get_bars_range"):
-            return broker.get_bars_range(assets, start, end, adjust=None)
+            try:
+                return broker.get_bars_range(
+                    assets,
+                    start,
+                    end,
+                    adjust=None,
+                    include_forming_bar=include_forming_bar,
+                )
+            except TypeError:  # 兼容未实现该参数的 broker
+                return broker.get_bars_range(assets, start, end, adjust=None)
         return daily_bars.get_bars_in_range(
             start, end, assets=assets, adjust=None, eager_mode=True
         )
@@ -1111,6 +1127,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             init_bars = self._load_bars(
                 calendar.shift(signal_date, -25, FrameType.DAY),
                 signal_date,
+                include_forming_bar=False,
             )
             assert isinstance(init_bars, pl.DataFrame)
             if init_bars.is_empty():
@@ -1586,10 +1603,12 @@ class MLMomentumReversalStrategy(BaseStrategy):
             today = signal_date
             if target_date != today:
                 self._data_missing = True
-                self.log(
-                    f"实盘行情缺失：今日({today}) 无行情，最新 {target_date}，不交易",
-                    level="WARNING",
-                )
+                if self._last_data_missing_log != today:
+                    self._last_data_missing_log = today
+                    self.log(
+                        f"实盘行情缺失：今日({today}) 无行情，最新 {target_date}，不交易",
+                        level="WARNING",
+                    )
                 return [], {}, {}
             today_rows = hist_slice.filter(pl.col("date") == today)
             held = {
@@ -1601,18 +1620,22 @@ class MLMomentumReversalStrategy(BaseStrategy):
             missing_held = sorted(a for a in held if a not in present)
             if missing_held:
                 self._data_missing = True
-                self.log(
-                    f"实盘行情缺失：持仓 {missing_held} 今日无行情，不交易",
-                    level="ERROR",
-                )
+                if self._last_data_missing_log != today:
+                    self._last_data_missing_log = today
+                    self.log(
+                        f"实盘行情缺失：持仓 {missing_held} 今日无行情，不交易",
+                        level="ERROR",
+                    )
                 return [], {}, {}
             coverage = len(present) / max(1, len(self._live_universe_assets or []))
             if coverage < self.live_min_quote_coverage:
                 self._data_missing = True
-                self.log(
-                    f"实盘行情覆盖不足：{coverage:.1%} < {self.live_min_quote_coverage:.0%}，不交易",
-                    level="ERROR",
-                )
+                if self._last_data_missing_log != today:
+                    self._last_data_missing_log = today
+                    self.log(
+                        f"实盘行情覆盖不足：{coverage:.1%} < {self.live_min_quote_coverage:.0%}，不交易",
+                        level="ERROR",
+                    )
                 return [], {}, {}
         if self._should_retrain(signal_date):
             self._model, self._model_engine = _fit_ml_model(

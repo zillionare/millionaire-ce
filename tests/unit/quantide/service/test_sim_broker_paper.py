@@ -438,3 +438,19 @@ async def test_paper_fills_from_publisher_price_payload(paper_broker):
     result = await task
     assert len(result.trades or []) == 1
     assert result.trades[0].price == pytest.approx(10.0)
+
+
+def test_port_backed_broker_forwards_get_bars_range():
+    """PortBackedBroker 必须把 get_bars_range 转发给 PaperBroker。"""
+    from quantide.core.runtime.port_broker import PortBackedBroker
+
+    class _Port:
+        def get_bars_range(self, *args, **kwargs):
+            return "range-ok"
+
+        def get_history(self, *args, **kwargs):
+            return "history-ok"
+
+    wrapper = PortBackedBroker(_Port(), "p1", "sim")
+    assert wrapper.get_bars_range([], datetime.date(2024, 1, 1)) == "range-ok"
+    assert wrapper.get_history("600519.SH", 2, frame_type="30m") == "history-ok"

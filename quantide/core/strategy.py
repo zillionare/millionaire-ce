@@ -75,12 +75,11 @@ class Strategy(ABC):
         if log_time is None:
             log_time = self._current_time
         rendered_message = self._render_log_message(msg, *args, **kwargs)
-        if log_time:
-            def _temp_patcher(record):
-                record["time"] = log_time
-            self.logger.patch(_temp_patcher).log(level, msg, *args, **kwargs)
-        else:
-            self.logger.log(level, msg, *args, **kwargs)
+        # 注意：不能把 record["time"] 替换成普通 datetime，loguru 的
+        # 默认时间格式会退化成字面量 "YYYY-MM-DD HH:mm:ss.SSS"。
+        # 回测虚拟时间由 write_backtest_log(dt=log_time) 持久化；控制台
+        # 仍使用真实时间。
+        self.logger.log(level, msg, *args, **kwargs)
         write_backtest_log = getattr(self.broker, "write_backtest_log", None)
         if callable(write_backtest_log):
             write_backtest_log(

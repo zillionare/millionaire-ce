@@ -318,6 +318,23 @@ class PaperBroker(AbstractBroker):
         except Exception:  # pragma: no cover - 数据层未就绪
             return 0.0, 0.0
 
+    def get_bars_range(
+        self,
+        assets: list[str] | None,
+        start_dt: datetime.datetime | datetime.date,
+        end_dt: datetime.datetime | datetime.date | None = None,
+        adjust: str | None = None,
+        include_forming_bar: bool = True,
+    ) -> pl.DataFrame:
+        """批量日线；日频策略据此拿到今日 forming bar。"""
+        return self._bar_view.get_bars_range(
+            assets,
+            start_dt,
+            end_dt,
+            adjust=adjust,
+            include_forming_bar=include_forming_bar,
+        )
+
     def get_history(
         self,
         asset: str,
