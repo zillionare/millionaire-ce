@@ -141,7 +141,7 @@ def test_load_backtest_run_config_swallows_strategy_loader_exception(monkeypatch
 
 def test_form_to_config_uses_base_value_when_form_key_missing():
     """[AC-NFR1101-01] When form lacks custom_*, base value is used."""
-    out = _form_to_config({}, {"a": 1, "b": 2})
+    out = _form_to_config({}, {"a": 1, "b": 2}, editable_keys=())
     assert out == {"a": 1, "b": 2}
 
 

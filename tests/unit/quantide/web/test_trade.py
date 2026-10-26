@@ -2049,7 +2049,7 @@ class TestGatewayFirstNavigation:
             for item in menu
             if item.get("requires_gateway")
         }
-        assert gated_titles == {"实盘", "仿真"}
+        assert gated_titles == {"实盘"}
 
     def test_build_header_menu_keeps_trade_entries_open_when_gateway_ready(self):
         from quantide.web.layouts.main import build_header_menu
@@ -2248,9 +2248,17 @@ class TestPaperEntry:
         names = {c["title"] for c in children}
         assert names == {"仿真A", "仿真B", "仿真C"}
 
-    def test_simulation_falls_back_to_disabled_when_registry_unavailable(self):
+    def test_simulation_falls_back_to_disabled_when_registry_unavailable(
+        self, monkeypatch
+    ):
+        from quantide.web.layouts import main as main_module
         from quantide.web.layouts.main import build_header_menu
 
+        class _EmptyRegistry:
+            def list_by_kind(self, kind):
+                return []
+
+        monkeypatch.setattr(main_module, "BrokerRegistry", lambda: _EmptyRegistry())
         req = SimpleNamespace(scope={})
         menu = build_header_menu(trade_enabled=True, req=req)
         paper = next(item for item in menu if item.get("title") == "仿真")

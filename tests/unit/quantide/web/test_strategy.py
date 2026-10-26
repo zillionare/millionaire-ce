@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pandas as pd
 import polars as pl
 import pytest
-from fasthtml.common import to_xml
+from fasthtml.common import Div, to_xml
 
 from quantide.data.models import Portfolio
 from quantide.factors import FEATURE_COLS
@@ -603,20 +603,22 @@ def test_deploy_backtest_to_paper_modal_requests_principal_confirmation():
     assert 'hx-post="/strategy/backtest/demo-pf/deploy/paper"' in html
 
 
-def test_paper_modal_renders_config_table_when_default_config_provided():
-    """#47 followup: paper modal 也要渲染 config 表 (与 live 对齐)."""
+def test_paper_modal_renders_readonly_params_and_fee_inputs():
+    """转入弹窗：策略参数只读，仅交易费用可改."""
     html = to_xml(
         strategy_page._paper_deploy_modal(
             "demo-pf",
             principal="500000",
-            config={"symbol": "000001.SZ", "fast": 5},
+            config={"symbol": "000001.SZ", "fast": 5, "commission": 0.0002},
             default_config={"symbol": "000001.SZ", "fast": 3, "slow": 10},
         )
     )
     assert 'id="deploy-paper-form"' in html
+    assert "策略参数（以回测为准，只读）" in html
     assert "fast" in html
-    assert 'name="custom_fast"' in html
-    assert "5" in html
+    assert 'name="custom_fast"' not in html
+    assert 'name="custom_commission"' in html
+    assert "0.0002" in html
 
 
 def test_load_backtest_run_config_resolves_default_from_strategy_class(monkeypatch):
@@ -1337,7 +1339,7 @@ def test_backtest_list_shows_only_changed_params(monkeypatch):
     """回测报告列表的参数列只显示与默认不同的参数。"""
     from quantide.service import backtest_params
 
-    defaults = backtest_params.default_backtest_params(_ModalDemoStrategy)
+    backtest_params.default_backtest_params(_ModalDemoStrategy)
     config = {
         "top_k": 5,
         "keep_top_n": 15,
@@ -1388,3 +1390,19 @@ def test_backtest_list_shows_only_changed_params(monkeypatch):
     assert "top_k=5" not in html
     assert "features" not in html
     assert "commission" not in html
+
+
+def test_strategy_dialog_uses_golden_ratio_max_height():
+    """对话框宽度/最大高度比约为 1.618，正文可滚动。"""
+    html = to_xml(
+        strategy_page._strategy_dialog_modal(
+            "标题",
+            Div("内容"),
+            Div("底部"),
+            modal_id="golden-modal",
+            width_cls="max-w-2xl",
+        )
+    )
+    assert "max-w-2xl" in html
+    assert "max-h-[26rem]" in html
+    assert "overflow-y-auto" in html

@@ -126,6 +126,15 @@ def _strategy_modal_script() -> Any:
     )
 
 
+#: 对话框最大高度按宽高比 1.618 推导（width / 1.618）。
+_MODAL_MAX_HEIGHTS = {
+    "max-w-md": "max-h-[17.3rem]",
+    "max-w-lg": "max-h-[19.8rem]",
+    "max-w-xl": "max-h-[22.3rem]",
+    "max-w-2xl": "max-h-[26rem]",
+}
+
+
 def _strategy_dialog_modal(
     title: str,
     body: Any,
@@ -134,25 +143,35 @@ def _strategy_dialog_modal(
     modal_id: str,
     width_cls: str = "max-w-lg",
 ) -> Any:
-    """渲染策略页面统一风格的对话框。"""
+    """渲染策略页面统一风格的对话框。
+
+    内容超过黄金分割高度时在正文区域滚动，避免对话框溢出视口。
+    """
+    max_height_cls = _MODAL_MAX_HEIGHTS.get(width_cls, "max-h-[26rem]")
     return Div(
         Div(cls="fixed inset-0 bg-black/50 transition-opacity"),
         Div(
             Div(
                 Div(
                     Div(
-                        H3(title, cls="text-lg font-medium leading-6 text-gray-900"),
-                        cls="px-6 py-5 border-b border-gray-200",
+                        Div(
+                            H3(title, cls="text-lg font-medium leading-6 text-gray-900"),
+                            cls="px-6 py-4 border-b border-gray-200 shrink-0",
+                        ),
+                        Div(body, cls="px-6 py-5 overflow-y-auto"),
+                        Div(footer, cls="px-6 py-4 border-t border-gray-100 shrink-0"),
+                        cls=(
+                            "inline-flex flex-col w-full "
+                            f"{width_cls} {max_height_cls} overflow-hidden "
+                            "rounded-lg bg-white text-left align-middle shadow-xl"
+                        ),
                     ),
-                    Div(body, cls="px-6 py-5"),
-                    Div(footer, cls="px-6 py-4 border-t border-gray-100"),
-                    cls=f"inline-block w-full {width_cls} overflow-hidden rounded-lg bg-white text-left align-middle shadow-xl",
+                    cls="flex min-h-full items-center justify-center p-4 text-center",
                 ),
-                cls="flex min-h-full items-center justify-center p-4 text-center",
+                cls="fixed inset-0 z-10 overflow-y-auto",
             ),
-            cls="fixed inset-0 z-10 overflow-y-auto",
-        ),
-        id=modal_id,
+            id=modal_id,
+        )
     )
 
 def _normalize_stats(stats):
@@ -2901,53 +2920,87 @@ def _render_deploy_result(message: str, is_error: bool = False) -> Any:
     return Div(message, id="deploy-result", cls=cls, hx_swap_oob="true")
 
 
+def _render_strategy_config_readonly(
+    config: dict[str, Any],
+    default_config: dict[str, Any] | None = None,
+) -> Any:
+    """策略参数只读展示（转入后以回测参数为准）。"""
+    defaults = default_config or {}
+    keys = [
+        key
+        for key in dict.fromkeys(list(config.keys()) + list(defaults.keys()))
+        if key not in BROKER_FEE_PARAM_DEFAULTS
+    ]
+    if not keys:
+        return None
+    rows = [
+        Tr(
+            Td(Code(key), cls="text-xs"),
+            Td(repr(config.get(key, defaults.get(key))), cls="text-xs text-gray-700"),
+            Td(repr(defaults.get(key, config.get(key))), cls="text-xs text-gray-400"),
+        )
+        for key in keys
+    ]
+    return Details(
+        Summary(
+            "策略参数（以回测为准，只读）",
+            cls="cursor-pointer text-sm font-semibold text-gray-600",
+        ),
+        P(
+            "转入后沿用回测时的参数，不能在此修改。",
+            cls="text-xs text-gray-500 mt-1 mb-2",
+        ),
+        Div(
+            Table(
+                Thead(
+                    Tr(
+                        Th("key", cls="text-xs"),
+                        Th("回测值", cls="text-xs"),
+                        Th("默认值", cls="text-xs"),
+                    )
+                ),
+                Tbody(*rows),
+                cls="table table-sm w-full",
+            ),
+            cls="max-h-48 overflow-y-auto rounded-lg border border-gray-200",
+        ),
+        cls="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2",
+    )
+
+
 def _render_config_table(
     config: dict[str, Any],
     default_config: dict[str, Any] | None = None,
     form_id_suffix: str = "paper",
 ) -> Any:
-    """渲染策略 config 表格 (列: key / default / custom).
+    """兼容旧接口：策略参数只读展示（form_id_suffix 保留兼容）。"""
+    _ = form_id_suffix
+    return _render_strategy_config_readonly(config, default_config)
 
-    default_config 来自策略类 ``default_config()``, 缺则用空 dict.
-    config 来自回测 run 实际值, 表格行按 config 顺序排列.
-    """
-    defaults = default_config or {}
-    if not config and not defaults:
-        return None
-    rows: list[Any] = []
-    all_keys = list(dict.fromkeys(list(config.keys()) + list(defaults.keys())))
-    for key in all_keys:
-        cur = config.get(key, defaults.get(key))
-        default_val = defaults.get(key, cur)
-        rows.append(
-            Tr(
-                Td(Code(key), cls="text-xs"),
-                Td(repr(default_val), cls="text-xs text-gray-500"),
-                Td(
-                    Input(
-                        name=f"custom_{key}",
-                        type="text",
-                        value="" if cur is None else str(cur),
-                        cls="input input-sm w-full",
-                    ),
-                    cls="text-xs",
+
+def _render_fee_inputs(config: dict[str, Any]) -> Any:
+    """交易费用输入（转入时唯一允许覆盖的配置项）。"""
+    inputs = []
+    for key, default in BROKER_FEE_PARAM_DEFAULTS.items():
+        inputs.append(
+            Div(
+                fh.Label(
+                    TRADE_PARAM_LABELS.get(key, key),
+                    cls="text-xs text-gray-500",
                 ),
+                Input(
+                    name=f"custom_{key}",
+                    type="number",
+                    step="any",
+                    value=str(config.get(key, default)),
+                    cls="input input-sm w-full",
+                ),
+                cls="space-y-1",
             )
         )
     return Div(
-        P("策略参数（可编辑覆盖）", cls="text-sm text-gray-500 mt-4"),
-        Table(
-            Thead(
-                Tr(
-                    Th("key", cls="text-xs"),
-                    Th("default", cls="text-xs"),
-                    Th("custom", cls="text-xs"),
-                )
-            ),
-            Tbody(*rows),
-            cls="table table-sm w-full",
-        ),
-        cls="mt-2",
+        H4("交易费用（可修改）", cls="text-sm font-semibold text-gray-600 mt-4 mb-2"),
+        Div(*inputs, cls="grid grid-cols-2 gap-3"),
     )
 
 
@@ -2969,9 +3022,8 @@ def _paper_deploy_modal(
             error_block,
             Form(
                 Input(type="hidden", name="portfolio_id", value=portfolio_id),
-                _render_config_table(
-                    config or {}, default_config, form_id_suffix="paper"
-                ),
+                _render_strategy_config_readonly(config or {}, default_config),
+                _render_fee_inputs(config or {}),
                 Div(
                     fh.Label("仿真本金", cls="text-sm text-gray-500"),
                     Input(
@@ -3008,6 +3060,7 @@ def _paper_deploy_modal(
             cls="flex justify-end gap-2",
         ),
         modal_id="deploy-paper-modal",
+        width_cls="max-w-2xl",
     )
 
 
@@ -3039,9 +3092,8 @@ def _live_deploy_modal(
 
     account_id = str(live_accounts[0].get("id") or "gateway:default")
     account_name = str(live_accounts[0].get("name") or account_id)
-    config_table = _render_config_table(
-        config or {}, default_config, form_id_suffix="live"
-    )
+    strategy_config = _render_strategy_config_readonly(config or {}, default_config)
+    fee_inputs = _render_fee_inputs(config or {})
     return _strategy_dialog_modal(
         "确认转入实盘",
         Div(
@@ -3049,7 +3101,8 @@ def _live_deploy_modal(
             P(f"实盘网关：{account_name}", cls="mt-3 text-sm text-gray-700"),
             Form(
                 Input(type="hidden", name="live_account_id", value=account_id),
-                config_table,
+                strategy_config,
+                fee_inputs,
                 id="deploy-live-form",
             ),
             cls="space-y-4",
@@ -3073,6 +3126,7 @@ def _live_deploy_modal(
             cls="flex justify-end gap-2",
         ),
         modal_id="deploy-live-modal",
+        width_cls="max-w-2xl",
     )
 
 
@@ -3343,19 +3397,23 @@ def _build_cheat_on_close_badge(portfolio_id: str):
     )
 
 
-def _form_to_config(form, base_config: dict[str, Any]) -> dict[str, Any]:
-    """把 form 自定义字段 (custom_*) 合并到 base_config.
+def _form_to_config(
+    form,
+    base_config: dict[str, Any],
+    editable_keys: tuple[str, ...] = tuple(BROKER_FEE_PARAM_DEFAULTS),
+) -> dict[str, Any]:
+    """把 form 中允许覆盖的字段合并到 base_config。
 
-    base_config 中存在的 key → 用 form 自定义值覆盖; 缺失的 key 不补.
+    默认只允许交易费用（``custom_commission`` 等）覆盖；策略参数
+    始终沿用回测配置，防止转入后偏离回测结果。
     """
-    out: dict[str, Any] = {}
-    for key, val in base_config.items():
+    out: dict[str, Any] = dict(base_config)
+    for key in editable_keys:
         form_key = f"custom_{key}"
         if form_key in form:
-            raw = form[form_key]
-            out[key] = _coerce_form_value(raw)
-        else:
-            out[key] = val
+            out[key] = _coerce_form_value(form[form_key])
+        elif key not in out:
+            out[key] = BROKER_FEE_PARAM_DEFAULTS.get(key)
     return out
 
 

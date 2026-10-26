@@ -1257,7 +1257,7 @@ def test_coerce_form_value_string_passthrough():
 def test_form_to_config_empty():
     """[AC-NFR1101-01] Empty form returns base_config."""
     base = {"x": 1}
-    out = _form_to_config({}, base)
+    out = _form_to_config({}, base, editable_keys=())
     assert out == {"x": 1}
 
 
@@ -1265,7 +1265,7 @@ def test_form_to_config_replaces_with_custom_keys():
     """[AC-NFR1101-01] Form values override base keys via custom_{key} pattern."""
     base = {"x": 1, "y": 2}
     form = {"custom_x": "100", "custom_y": "200"}
-    out = _form_to_config(form, base)
+    out = _form_to_config(form, base, editable_keys=("x", "y"))
     assert out["x"] == 100  # int converted
     assert out["y"] == 200
 
@@ -1283,7 +1283,7 @@ def test_form_to_config_partial_override():
     """[AC-NFR1101-01] When form has some custom keys, others stay."""
     base = {"a": 1, "b": 2, "c": 3}
     form = {"custom_a": "999"}
-    out = _form_to_config(form, base)
+    out = _form_to_config(form, base, editable_keys=("a",))
     assert out["a"] == 999
     assert out["b"] == 2
     assert out["c"] == 3
@@ -1293,7 +1293,7 @@ def test_form_to_config_float_override():
     """[AC-NFR1101-01] Override with float string."""
     base = {"threshold": 0}
     form = {"custom_threshold": "0.5"}
-    out = _form_to_config(form, base)
+    out = _form_to_config(form, base, editable_keys=("threshold",))
     assert out["threshold"] == 0.5
 
 
@@ -1348,3 +1348,12 @@ def test_load_backtest_run_config_no_default_config():
 
 
 # ---------------------------------------------------------------------------
+
+
+def test_form_to_config_ignores_strategy_params_by_default():
+    """默认仅允许交易费用覆盖，策略参数沿用回测值。"""
+    base = {"fast": 3, "commission": 0.0001}
+    form = {"custom_fast": "99", "custom_commission": "0.0002"}
+    out = _form_to_config(form, base)
+    assert out["fast"] == 3
+    assert out["commission"] == 0.0002
