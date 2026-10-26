@@ -163,7 +163,7 @@ def _build_runtime_rows(action_base_path: str, target_selector: str) -> list[Any
                 Td(item["strategy_id"] or "-", cls="whitespace-nowrap px-4 py-2 font-mono text-xs"),
                 Td(_runtime_status_chip(item["status"]), cls="whitespace-nowrap px-4 py-2"),
                 Td(item.get("alert_text") or "-", cls="px-4 py-2 text-sm text-gray-600 min-w-[160px]"),
-                Td(f"{item['total']:.2f}", cls="whitespace-nowrap px-4 py-2 tabular-nums"),
+                Td(f"{item['total']:,.2f}", cls="whitespace-nowrap px-4 py-2 tabular-nums"),
                 Td(str(item["positions"]), cls="whitespace-nowrap px-4 py-2"),
                 Td(str(item["orders"]), cls="whitespace-nowrap px-4 py-2"),
                 Td(item["updated_at"], cls="whitespace-nowrap px-4 py-2 text-xs text-gray-500"),

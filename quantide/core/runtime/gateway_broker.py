@@ -92,6 +92,13 @@ class GatewayBrokerWrapper(AbstractBroker):
         self._live_execution_window: str = "auction"
         self._live_execution_slippage: float = 0.001
         self._deferred_orders: list[dict[str, Any]] = []
+        from quantide.service.bar_views import LiveBarView
+
+        self._bar_view = LiveBarView(
+            bars=daily_bars,
+            market_data=None,
+            today_func=self._today,
+        )
 
     def set_clock(self, dt: datetime.datetime | None) -> None:
         """设置当前策略时钟，便于 live 回放测试复用同一路径。"""
@@ -111,6 +118,23 @@ class GatewayBrokerWrapper(AbstractBroker):
     @property
     def deferred_orders(self) -> list[dict[str, Any]]:
         return list(self._deferred_orders)
+    def get_bars_range(
+        self,
+        assets: list[str] | None,
+        start_dt: datetime.datetime | datetime.date,
+        end_dt: datetime.datetime | datetime.date | None = None,
+        adjust: str | None = None,
+        include_forming_bar: bool = True,
+    ) -> pl.DataFrame:
+        """批量日线；供日频策略在 live 模式构建面板。"""
+        return self._bar_view.get_bars_range(
+            assets,
+            start_dt,
+            end_dt,
+            adjust=adjust,
+            include_forming_bar=include_forming_bar,
+        )
+
     def get_history(
         self,
         asset: str,
