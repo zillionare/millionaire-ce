@@ -115,13 +115,17 @@ def _build_paper_entry(req: object | None = None) -> dict[str, object]:
     - 2+ 账户：带 `children` 列表，浏览器原生 `<details>` 渲染下拉
     """
     sims: list[dict] = []
+    reg = None
     if req is not None:
         reg = getattr(req, "scope", {}).get("registry")
-        if reg is not None:
-            try:
-                sims = list(reg.list_by_kind(BrokerKind.SIMULATION) or [])
-            except Exception:
-                sims = []
+    if reg is None:
+        # BrokerRegistry 是单例；大多数页面 render() 不传 req，仍应读取
+        # bootstrap 时注册的账户，避免导航一直显示“未配置仿真账户”。
+        reg = BrokerRegistry()
+    try:
+        sims = list(reg.list_by_kind(BrokerKind.SIMULATION) or [])
+    except Exception:
+        sims = []
 
     if not sims:
         return {
