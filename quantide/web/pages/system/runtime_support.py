@@ -152,8 +152,8 @@ def _build_runtime_rows(action_base_path: str, target_selector: str) -> list[Any
     for item in strategy_runtime_manager.list_runtime_rows():
         action_items = _build_runtime_actions(item, action_base_path, target_selector)
         actions = Td(
-            Div(*action_items, cls="flex items-center gap-2 flex-wrap") if action_items else Span("-", cls="text-xs text-gray-400"),
-            cls="px-4 py-2",
+            Div(*action_items, cls="flex items-center gap-2") if action_items else Span("-", cls="text-xs text-gray-400"),
+            cls="whitespace-nowrap px-4 py-2",
         )
         rows.append(
             Tr(
