@@ -178,3 +178,15 @@ def test_system_event_resolution_clears_header_alarm():
         target_id="data:limit_today",
     )
     assert manager.risk_summary()["open_events"] == 0
+
+
+def test_daily_aux_detects_all_one_adjust_factor():
+    """复权因子全被填充为 1.0 时应告警。"""
+    frame = _aux_frame().with_columns(pl.lit(1.0).alias("adjust"))
+    monitor, events = _monitor(
+        _Calendar(datetime.date(2024, 1, 2)),
+        _Daily(datetime.date(2024, 1, 2), frame),
+        _Limits(2),
+    )
+    monitor.check_morning(datetime.datetime(2024, 1, 3, 9, 25))
+    assert any(event["target_id"] == "data:daily_aux" for event in events)

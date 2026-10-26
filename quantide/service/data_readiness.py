@@ -96,8 +96,21 @@ class DataReadinessMonitor:
                 name="data_readiness.quotes",
             )
             self._scheduled = True
+        self._load_existing_alerts()
         self.check_morning()
         self.check_end_of_day()
+
+    def _load_existing_alerts(self) -> None:
+        """重启后恢复未解决的数据告警状态，避免重复告警或无法恢复。"""
+        try:
+            from quantide.service.strategy_runtime import strategy_runtime_manager
+
+            for event in strategy_runtime_manager.list_risk_events(limit=100):
+                target_id = str(event.get("target_id") or "")
+                if event.get("blocked") and target_id.startswith("data:"):
+                    self._states[target_id.removeprefix("data:")] = False
+        except Exception:  # pragma: no cover - 运行时未就绪
+            pass
 
     # ------------------------------------------------------------------
     # 检查项
@@ -218,8 +231,11 @@ class DataReadinessMonitor:
         total = max(1, frame.height)
         if "adjust" in frame.columns:
             adjust_cov = frame["adjust"].is_not_null().sum() / total
+            # 全为 1.0 通常意味着复权因子抓取失败（Tushare 会 fillna(1.0)）。
+            adjust_ratio = (frame["adjust"] != 1.0).sum() / total
         else:
             adjust_cov = 0.0
+            adjust_ratio = 0.0
         if {"up_limit", "down_limit"}.issubset(frame.columns):
             limit_cov = (
                 ((frame["up_limit"] > 0) & (frame["down_limit"] > 0)).sum() / total
@@ -228,11 +244,12 @@ class DataReadinessMonitor:
             limit_cov = 0.0
         ok = (
             adjust_cov >= _ADJUST_COVERAGE_THRESHOLD
+            and adjust_ratio >= 0.50
             and limit_cov >= _DAILY_LIMIT_COVERAGE_THRESHOLD
         )
         message = (
             f"{day} 共 {total} 行：复权因子覆盖 {adjust_cov * 100:.1f}%，"
-            f"涨跌停覆盖 {limit_cov * 100:.1f}%。"
+            f"有效因子 {adjust_ratio * 100:.1f}%，涨跌停覆盖 {limit_cov * 100:.1f}%。"
         )
         self._set_state(
             "daily_aux",
