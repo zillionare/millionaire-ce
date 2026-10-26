@@ -78,7 +78,7 @@ def sidebar_component(
                     )
                 )
 
-            s_cls = "flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer list-none [&::-webkit-details-marker]:hidden transition-colors"
+            s_cls = "flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer list-none [&::-webkit-details-marker]:hidden [&::marker]:hidden transition-colors"
             s_cls += f" {active_cls if item_active and not any_child_active else base_text_cls} {hover_cls}"
 
             items.append(

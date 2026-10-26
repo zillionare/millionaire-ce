@@ -39,9 +39,17 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
                     Details(
                         Summary(
                             Span(display_text, cls="inline-flex items-center text-sm font-medium"),
-                            Span(" ▾", cls="text-xs ml-1"),
+                            UkIcon(
+                                "chevron-down",
+                                cls=(
+                                    "w-4 h-4 ml-1 transition-transform duration-200 "
+                                    "group-open:-rotate-180"
+                                ),
+                            ),
                             cls=(
                                 "inline-flex items-center px-4 py-5 text-sm font-medium "
+                                "list-none [&::-webkit-details-marker]:hidden "
+                                "[&::marker]:hidden "
                                 + (active_cls if is_active else inactive_cls)
                             ),
                         ),
@@ -56,7 +64,7 @@ def _build_nav_links(nav_items: list[tuple[str, str]] | list[dict[str, Any]], ac
                             ],
                             cls="absolute z-50 mt-1 min-w-[160px] rounded-lg border border-gray-100 bg-white shadow-lg",
                         ),
-                        cls="relative inline-block",
+                        cls="relative inline-block group",
                     ),
                     cls="inline-flex items-center",
                 )
