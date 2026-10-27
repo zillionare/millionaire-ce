@@ -943,6 +943,7 @@ def LightningTradePanel(
                             updateCurrentReferencePrice();
                             updateQuickPriceAvailability();
                             updateQuickPrices();
+                            updateEstShares();
                         } catch (error) {
                             updateQuickPriceAvailability();
                         }
@@ -983,6 +984,7 @@ def LightningTradePanel(
                         updateQuickPrices();
                         updatePriceChangeHint();
                         updateQuickPriceAvailability();
+                        updateEstShares();
                     }
 
                     async function fetchAssetStats(asset) {
@@ -1087,22 +1089,40 @@ def LightningTradePanel(
                         formSubmit.click();
                     }
 
+                    function getEstimatePrice() {
+                        const limitPrice = parseFloat(priceInput.value) || 0;
+                        if (priceMode.value !== 'MARKET' && limitPrice > 0) {
+                            return limitPrice;
+                        }
+                        const currentPrice = getCurrentQuotePrice();
+                        if (currentPrice > 0) {
+                            return currentPrice;
+                        }
+                        const closePrice = getReferenceClosePrice();
+                        if (closePrice > 0) {
+                            return closePrice;
+                        }
+                        return limitPrice > 0 ? limitPrice : 0;
+                    }
+
                     function updateEstShares() {
-                        const price = parseFloat(priceInput.value) || 0;
                         const value = parseFloat(valueInput.value) || 0;
                         const mode = document.querySelector('input[name="order_mode"]:checked').value;
-                        const isMarket = priceMode.value === 'MARKET';
 
-                        if ((price <= 0 && !isMarket) || value <= 0) {
+                        if (value <= 0) {
                             estShares.textContent = '';
                             return;
                         }
 
                         let shares;
                         if (mode === 'AMOUNT') {
+                            const price = getEstimatePrice();
+                            if (price <= 0) {
+                                estShares.textContent = '';
+                                return;
+                            }
                             const amountYuan = value * 10000;
-                            const p = isMarket ? 1 : price;
-                            shares = Math.floor(amountYuan / p / 100) * 100;
+                            shares = Math.floor(amountYuan / price / 100) * 100;
                         } else {
                             shares = Math.floor(value) * 100;
                         }
@@ -1121,19 +1141,17 @@ def LightningTradePanel(
                     }
 
                     function setPosition(fraction) {
-                        const price = parseFloat(priceInput.value) || 0;
                         const mode = document.querySelector('input[name="order_mode"]:checked').value;
-                        const isMarket = priceMode.value === 'MARKET';
-
-                        if (price <= 0 && !isMarket) return;
+                        const amountYuan = cash * fraction;
 
                         if (mode === 'AMOUNT') {
-                            const amountYuan = cash * fraction;
-                            valueInput.value = (amountYuan / 10000).toFixed(4).replace(/\\.?0+$/, '');
+                            valueInput.value = (amountYuan / 10000).toFixed(4).replace(/\.?0+$/, '');
                         } else {
-                            const p = isMarket ? 1 : price;
-                            const amountYuan = cash * fraction;
-                            const shares = Math.floor(amountYuan / p / 100) * 100;
+                            const price = getEstimatePrice();
+                            if (price <= 0) {
+                                return;
+                            }
+                            const shares = Math.floor(amountYuan / price / 100) * 100;
                             valueInput.value = Math.floor(shares / 100);
                         }
 

@@ -1702,6 +1702,18 @@ class TestLoginRoutes:
         assert "priceInput.value = display.textContent.trim();" in text
         assert "priceMode.value = 'LIMIT';" in text
 
+    def test_trade_panel_estimates_shares_for_market_orders(self, test_client):
+        """市价单也应用现价/昨收估算数量，而不是固定按 1 元计算。"""
+        response = test_client.get("/trade")
+        text = response.text
+
+        assert response.status_code == 200
+        assert "function getEstimatePrice()" in text
+        assert "const currentPrice = getCurrentQuotePrice();" in text
+        assert "const closePrice = getReferenceClosePrice();" in text
+        assert "const price = getEstimatePrice();" in text
+        assert "const p = isMarket ? 1 : price;" not in text
+
     def test_trade_panel_polls_live_quote_and_gates_speed_dial(self, test_client):
         """验证现价轮询与 speed dial 可点击状态由选股控制。"""
         response = test_client.get("/trade")
