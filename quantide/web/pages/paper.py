@@ -36,14 +36,11 @@ def _resolve_default_paper_account(req) -> str | None:
 
 @rt("/")
 def paper_list(req, session):
-    """`GET /trade/paper/` 入口。
+    """`GET /trade/paper/` 已废弃：统一跳转到 /trade（带 account_id）。"""
+    account_id = _resolve_account_id(req)
+    url = "/trade" + (f"?account_id={account_id}" if account_id else "")
+    return RedirectResponse(url, status_code=303)
 
-    行为：
-    * 无 `?account_id=` 且有且仅有一个 SIMULATION 账户：直接渲染该账户
-    * 无 `?account_id=` 且有多个 SIMULATION 账户：渲染账户选择列表
-    * 无 `?account_id=` 且无 SIMULATION 账户：渲染空态
-    * 有 `?account_id=`：按 ID 加载
-    """
     reg = _get_registry(req)
     if reg is None:
         return _render_no_registry(session)

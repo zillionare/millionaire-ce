@@ -18,7 +18,11 @@ from fasthtml.common import Select as _Select
 from fasthtml.common import to_xml as _to_xml
 from loguru import logger
 from monsterui.all import *
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+)
 
 from quantide.config.settings import get_settings
 from quantide.core.enums import BidType, BrokerKind, OrderSide, OrderStatus
@@ -58,10 +62,16 @@ def _get_all_accounts(reg: BrokerRegistry) -> list[dict]:
     return accounts
 
 
-def _get_active_account(reg: BrokerRegistry, session: dict) -> dict | None:
-    """获取当前活动账号"""
+def _get_active_account(
+    reg: BrokerRegistry, session: dict, query_params: dict | None = None
+) -> dict | None:
+    """获取当前活动账号；query_params 中的 account_id 优先。"""
+    account_id = None
+    if query_params:
+        account_id = query_params.get("account_id")
     kind_str = session.get("active_account_kind")
-    account_id = session.get("active_account_id")
+    if not account_id:
+        account_id = session.get("active_account_id")
 
     if not kind_str or not account_id:
         default = reg.get_default() if reg else None
@@ -1764,7 +1774,7 @@ def trade_main_page(request):
         return HTMLResponse(to_xml(layout.render()))
 
     # 获取活动账号
-    active_account = _get_active_account(reg, session)
+    active_account = _get_active_account(reg, session, request.query_params)
 
     # 如果没有活动账号，显示选择页面
     if not active_account:
@@ -2038,6 +2048,8 @@ async def set_active_account(req, session: dict | None = None):
     form = await req.form()
     kind = form.get("kind")
     account_id = form.get("id") or form.get("account_id")
+    if not account_id and hasattr(req, "query_params"):
+        account_id = req.query_params.get("account_id")
 
     if not kind or not account_id:
         return Div("参数错误", cls="text-red-500 p-4")

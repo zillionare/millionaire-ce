@@ -2290,180 +2290,41 @@ class TestPaperEntry:
 
 class TestPaperAccountPage:
 
-    def test_paper_route_returns_200(self):
+    def test_paper_route_redirects_to_trade(self):
         with system_settings_e2e_session() as session:
             response = session.client.get(
                 "/trade/paper/",
                 follow_redirects=False,
             )
 
-        assert response.status_code == 200
-        assert "仿真交易" in response.text
+        assert response.status_code == 303
+        assert response.headers["location"] == "/trade"
 
-    def test_paper_with_unknown_account_id_renders_not_found(self):
+    def test_paper_with_unknown_account_id_redirects_with_account_id(self):
         with system_settings_e2e_session() as session:
             response = session.client.get(
                 "/trade/paper/?account_id=missing_account_xyz_for_test",
                 follow_redirects=False,
             )
 
-        assert response.status_code == 200
-        assert "未找到该仿真账户" in response.text
+        assert response.status_code == 303
+        assert response.headers["location"] == (
+            "/trade?account_id=missing_account_xyz_for_test"
+        )
 
-    def test_paper_entry_handler_dispatches_by_account_count(self, monkeypatch):
+    def test_paper_entry_redirects_to_trade_with_account_id(self):
+        """paper 页统一重定向到 /trade，并保留 account_id。"""
         from quantide.web.pages import paper as paper_page
 
-        def _build_req(sim_list, get_map=None, query_params=None):
-            reg = SimpleNamespace()
-            reg.list_by_kind = lambda kind: sim_list
-            reg.get = lambda kind, pid: (get_map or {}).get(pid)
-            return SimpleNamespace(
-                scope={"registry": reg},
-                query_params=query_params or {},
-            )
+        def _build_req(account_id=None):
+            return SimpleNamespace(scope={"registry": None}, query_params={"account_id": account_id} if account_id else {})
 
-        class _StubBroker:
-            def __init__(self, account_id, name):
-                self.portfolio_id = account_id
-                self.portfolio_name = name
-                self.positions = []
-                self.total_assets = 100000
-                self.cash = 100000
-                self.principal = 100000
+        result = paper_page.paper_list(_build_req(), {})
+        assert result.status_code == 303
+        assert result.headers["location"] == "/trade"
 
-        monkeypatch.setattr(
-            paper_page, "_render_paper_account",
-            lambda layout, broker: f"<rendered {broker.portfolio_id}>",
-        )
-        monkeypatch.setattr(paper_page, "_render_empty_paper", lambda layout: "<empty>")
-        monkeypatch.setattr(
-            paper_page, "_render_paper_picker",
-            lambda layout, sims: f"<picker {len(sims)}>",
-        )
-
-        result0 = paper_page.paper_list(_build_req([]), {})
-        assert result0 == "<empty>"
-
-        result1 = paper_page.paper_list(
-            _build_req(
-                [{"id": "sim_a", "name": "A", "status": True}],
-                get_map={"sim_a": _StubBroker("sim_a", "A")},
-            ),
-            {},
-        )
-        assert result1 == "<rendered sim_a>"
-
-        result2 = paper_page.paper_list(
-            _build_req(
-                [
-                    {"id": "sim_a", "name": "A", "status": True},
-                    {"id": "sim_b", "name": "B", "status": True},
-                ],
-            ),
-            {},
-        )
-        assert result2 == "<picker 2>"
-
-        result3 = paper_page.paper_list(
-            _build_req(
-                [],
-                get_map={"sim_explicit": _StubBroker("sim_explicit", "E")},
-                query_params={"account_id": "sim_explicit"},
-            ),
-            {},
-        )
-        assert result3 == "<rendered sim_explicit>"
-
-        result4 = paper_page.paper_list(
-            _build_req(
-                [],
-                query_params={"account_id": "ghost"},
-            ),
-            {},
-        )
-        result4_str = str(result4)
-        assert "ghost" in result4_str
-        assert "p-6" in result4_str
-
-
-class TestBrokerRegistry:
-    """测试 BrokerRegistry"""
-
-    def test_register_and_get(self):
-        """测试注册和获取 broker"""
-        registry = BrokerRegistry()
-        portfolio_id = "test_registry"
-
-        try:
-            broker = SimulationBroker.create(
-                portfolio_id=portfolio_id,
-                portfolio_name="测试",
-                principal=1000000,
-            )
-            registry.register(BrokerKind.SIMULATION, portfolio_id, broker)
-
-            retrieved = registry.get(BrokerKind.SIMULATION, portfolio_id)
-            assert retrieved is not None
-            assert retrieved.portfolio_id == portfolio_id
-        finally:
-            registry.unregister(BrokerKind.SIMULATION, portfolio_id)
-
-    def test_list_by_kind(self):
-        """测试按类型列出 broker"""
-        registry = BrokerRegistry()
-        portfolio_id = "test_list_kind"
-
-        try:
-            broker = SimulationBroker.create(
-                portfolio_id=portfolio_id,
-                portfolio_name="测试",
-                principal=1000000,
-            )
-            registry.register(BrokerKind.SIMULATION, portfolio_id, broker)
-
-            brokers = registry.list_by_kind(BrokerKind.SIMULATION)
-            assert len(brokers) > 0
-            assert any(b["id"] == portfolio_id for b in brokers)
-        finally:
-            registry.unregister(BrokerKind.SIMULATION, portfolio_id)
-
-    def test_unregister(self):
-        """测试注销 broker"""
-        registry = BrokerRegistry()
-        portfolio_id = "test_unregister"
-
-        broker = SimulationBroker.create(
-            portfolio_id=portfolio_id,
-            portfolio_name="测试",
-            principal=1000000,
-        )
-        registry.register(BrokerKind.SIMULATION, portfolio_id, broker)
-
-        assert registry.get(BrokerKind.SIMULATION, portfolio_id) is not None
-
-        registry.unregister(BrokerKind.SIMULATION, portfolio_id)
-        assert registry.get(BrokerKind.SIMULATION, portfolio_id) is None
-
-
-class TestSimulationBroker:
-    """测试 SimulationBroker"""
-
-    def test_create_with_custom_interval(self):
-        """测试使用自定义市值更新间隔创建账户"""
-        portfolio_id = "test_interval"
-        broker = SimulationBroker.create(
-            portfolio_id=portfolio_id,
-            portfolio_name="测试",
-            principal=1000000,
-            market_value_update_interval=5.0,
-        )
-
-        assert broker._market_value_update_interval == 5.0
-
-        from quantide.service.registry import BrokerRegistry
-
-        registry = BrokerRegistry()
-        registry.unregister(BrokerKind.SIMULATION, portfolio_id)
+        result2 = paper_page.paper_list(_build_req("sim_a"), {})
+        assert result2.headers["location"] == "/trade?account_id=sim_a"
 
     def test_default_interval(self):
         """测试默认市值更新间隔"""
