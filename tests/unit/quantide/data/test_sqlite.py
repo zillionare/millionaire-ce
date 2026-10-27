@@ -1307,3 +1307,57 @@ def test_delete_portfolio_cascade_does_not_raise_on_empty_portfolio(setup):
     db = setup
     db.delete_portfolio_cascade("non-existent-id")
     assert db.get_portfolio("non-existent-id") is None
+
+
+def test_query_orders_and_trades_range(setup):
+    """历史委托/成交按日期范围 + 账户过滤。"""
+    db = setup
+    p1, p2 = "range_p1", "range_p2"
+    d1 = datetime.date(2024, 1, 1)
+    d2 = datetime.date(2024, 1, 2)
+    d3 = datetime.date(2024, 1, 3)
+
+    def _order(qtoid, portfolio_id, tm):
+        return Order(
+            portfolio_id=portfolio_id,
+            qtoid=qtoid,
+            asset="000001.SZ",
+            price=10.0,
+            shares=100,
+            side=OrderSide.BUY,
+            bid_type=BidType.MARKET,
+            tm=tm,
+        )
+
+    db.insert_order(_order("o1", p1, datetime.datetime.combine(d1, datetime.time(10))))
+    db.insert_order(_order("o2", p1, datetime.datetime.combine(d2, datetime.time(10))))
+    db.insert_order(_order("o3", p1, datetime.datetime.combine(d3, datetime.time(10))))
+    db.insert_order(_order("o4", p2, datetime.datetime.combine(d2, datetime.time(10))))
+
+    orders = db.query_orders_range(d1, d2, portfolio_id=p1)
+    assert sorted(orders["qtoid"].to_list()) == ["o1", "o2"]
+    assert db.query_orders_range(d3, d3, portfolio_id=p2).is_empty()
+
+    def _trade(tid, qtoid, tm):
+        return Trade(
+            portfolio_id=p1,
+            tid=tid,
+            qtoid=qtoid,
+            foid="f1",
+            asset="000001.SZ",
+            shares=100,
+            price=10.0,
+            amount=1000.0,
+            tm=tm,
+            side=OrderSide.BUY,
+            cid="c1",
+        )
+
+    db.insert_trades([
+        _trade("t1", "o1", datetime.datetime.combine(d1, datetime.time(10))),
+        _trade("t2", "o2", datetime.datetime.combine(d2, datetime.time(10))),
+        _trade("t3", "o3", datetime.datetime.combine(d3, datetime.time(10))),
+    ])
+    trades = db.query_trades_range(d1, d2, portfolio_id=p1)
+    assert sorted(trades["tid"].to_list()) == ["t1", "t2"]
+    assert db.query_trades_range(d1, d1, portfolio_id=p2).is_empty()

@@ -375,6 +375,28 @@ class SQLiteDB:
 
         return df.with_columns(pl.col("tm").cast(pl.Datetime))
 
+    def query_orders_range(
+        self,
+        start: datetime.date | datetime.datetime,
+        end: datetime.date | datetime.datetime,
+        portfolio_id: str | None = None,
+    ) -> pl.DataFrame:
+        """查询时间范围内的委托（包含 start 当天，截止 end 当天）。"""
+        if isinstance(start, datetime.datetime):
+            start = start.date()
+        if isinstance(end, datetime.datetime):
+            end = end.date()
+        where = "tm >= ? and tm < ?"
+        params: list = [start, end + datetime.timedelta(days=1)]
+        if portfolio_id:
+            where += " and portfolio_id = ?"
+            params.append(portfolio_id)
+        rows = self["orders"].rows_where(where, params)
+        df = pl.DataFrame(rows)
+        if len(df) == 0:
+            return pl.DataFrame()
+        return df.with_columns(pl.col("tm").cast(pl.Datetime))
+
     def orders_all(self, portfolio_id: str | None = None) -> pl.DataFrame:
         """获取所有订单信息"""
         if portfolio_id:
@@ -606,6 +628,28 @@ class SQLiteDB:
         if len(df) == 0:
             return pl.DataFrame()
 
+        return df.with_columns(pl.col("tm").cast(pl.Datetime))
+
+    def query_trades_range(
+        self,
+        start: datetime.date | datetime.datetime,
+        end: datetime.date | datetime.datetime,
+        portfolio_id: str | None = None,
+    ) -> pl.DataFrame:
+        """查询时间范围内的成交（包含 start 当天，截止 end 当天）。"""
+        if isinstance(start, datetime.datetime):
+            start = start.date()
+        if isinstance(end, datetime.datetime):
+            end = end.date()
+        where = "tm >= ? and tm < ?"
+        params: list = [start, end + datetime.timedelta(days=1)]
+        if portfolio_id:
+            where += " and portfolio_id = ?"
+            params.append(portfolio_id)
+        rows = self["trades"].rows_where(where, params)
+        df = pl.DataFrame(rows)
+        if len(df) == 0:
+            return pl.DataFrame()
         return df.with_columns(pl.col("tm").cast(pl.Datetime))
 
     def trades_all(self, portfolio_id: str | None = None) -> pl.DataFrame:

@@ -973,7 +973,18 @@ def LightningTradePanel(
                             return;
                         }
                         selectedAssetStats = stats;
-                        setLimitPlaceholderPrice(stats.current || stats.close || '');
+                        const referencePrice = stats.current || stats.close || '';
+                        setLimitPlaceholderPrice(referencePrice);
+                        const referenceParsed = parseFloat(referencePrice);
+                        if (
+                            priceMode.value === 'LIMIT'
+                            && !priceInput.value.trim()
+                            && !isNaN(referenceParsed)
+                            && referenceParsed > 0
+                        ) {
+                            priceInput.value = referenceParsed.toFixed(2);
+                            clearQuickPriceSelection();
+                        }
                         setReferenceText('close', stats.close);
                         setReferenceText('ma5', stats.ma5);
                         setReferenceText('ma10', stats.ma10);
@@ -2010,9 +2021,11 @@ async def place_order_trade(req):
         try:
             price = float(price_str)
         except ValueError:
-            return _render_toast("价格格式错误")
+            price = 0.0
         if price <= 0:
-            return _render_toast("价格必须大于0")
+            price = _resolve_live_current_price(asset) or _resolve_trade_reference_close(asset)
+        if price <= 0:
+            return _render_toast("价格格式错误")
 
     try:
         value = float(value_str)

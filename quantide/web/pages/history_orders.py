@@ -8,6 +8,7 @@ from starlette.responses import HTMLResponse
 
 from quantide.data.sqlite import db
 from quantide.web.layouts.main import MainLayout
+from quantide.web.pages.history_common import display_name, side_label, status_label
 
 
 def _get_active_account(req) -> tuple[str, str] | None:
@@ -32,13 +33,13 @@ def DateRangePicker(start_date: str = "", end_date: str = ""):
         Div(
             Span("开始日期", cls="text-sm text-gray-600 mr-2"),
             Input(type="date", name="start_date", value=start_date,
-                  cls="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"),
+                  cls="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"),
             cls="flex items-center",
         ),
         Div(
             Span("结束日期", cls="text-sm text-gray-600 mr-2"),
             Input(type="date", name="end_date", value=end_date,
-                  cls="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"),
+                  cls="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"),
             cls="flex items-center ml-4",
         ),
         Button("查询", type="submit",
@@ -118,21 +119,23 @@ def history_orders_list(request):
 
     orders = []
     try:
-        df = db.get_orders(
-            dt=datetime.date.fromisoformat(start_date),
+        df = db.query_orders_range(
+            start=datetime.date.fromisoformat(start_date),
+            end=datetime.date.fromisoformat(end_date),
             portfolio_id=account_id,
         )
         if not df.is_empty():
             for row in df.iter_rows(named=True):
+                asset = str(row.get("asset", "") or "")
                 orders.append({
                     "tm": str(row.get("tm", ""))[:19],
-                    "asset": row.get("asset", ""),
-                    "name": row.get("name", ""),
-                    "side": "买入" if row.get("side") == "BUY" else "卖出",
-                    "price": row.get("price", 0),
-                    "shares": row.get("shares", 0),
-                    "filled": row.get("filled", 0),
-                    "status": row.get("status", ""),
+                    "asset": asset,
+                    "name": display_name(asset, row.get("name", "")),
+                    "side": side_label(row.get("side")),
+                    "price": row.get("price") or 0,
+                    "shares": row.get("shares") or 0,
+                    "filled": row.get("filled") or 0,
+                    "status": status_label(row.get("status")),
                 })
     except Exception as e:
         print(f"Failed to query orders: {e}")
