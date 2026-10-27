@@ -1977,11 +1977,7 @@ async def search_trade_assets(req):
         return HTMLResponse(to_xml(Div(id="asset-search-dropdown", cls="hidden")))
 
     if result_df is None or len(result_df) == 0:
-        return HTMLResponse(to_xml(Div(
-            Div("无匹配结果", cls="px-3 py-2 text-sm text-gray-500"),
-            id="asset-search-dropdown",
-            cls="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-48 overflow-y-auto",
-        )))
+        return HTMLResponse(to_xml(Div(id="asset-search-dropdown", cls="hidden")))
 
     # 只返回代码/名称/拼音，避免逐条查询行情阻塞事件循环。
     result_df = result_df.sort_values("asset").head(20)

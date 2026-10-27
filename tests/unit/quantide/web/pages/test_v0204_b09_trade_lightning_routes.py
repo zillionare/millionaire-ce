@@ -69,15 +69,16 @@ async def test_search_fuzzy_raises_returns_hidden_dropdown():
 
 
 @pytest.mark.asyncio
-async def test_search_no_matches_returns_empty_dropdown():
-    """[AC-NFR1101-01] When fuzzy_search returns empty df, returns the 'no match' dropdown."""
+async def test_search_no_matches_returns_hidden_dropdown():
+    """[AC-NFR1101-01] When fuzzy_search returns empty df, returns hidden dropdown."""
     req = _make_req(query_params={"asset_query": "xyz"})
     with patch.object(tl_mod, "stock_list") as mock_sl:
         mock_sl.fuzzy_search = MagicMock(return_value=pd.DataFrame())
         resp = await trade_lightning_search(req)
     assert isinstance(resp, HTMLResponse)
     body = resp.body.decode()
-    assert "无匹配结果" in body
+    assert "hidden" in body
+    assert "无匹配结果" not in body
 
 
 @pytest.mark.asyncio

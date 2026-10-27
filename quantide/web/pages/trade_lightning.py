@@ -846,18 +846,10 @@ async def trade_lightning_search(req):
 
     if result_df is None or len(result_df) == 0:
         return HTMLResponse(
-            to_xml(
-                Div(
-                    Div("无匹配结果", cls="px-3 py-2 text-sm text-gray-500"),
-                    id="lightning-asset-search-dropdown",
-                    cls=(
-                        "absolute z-50 mt-1 w-full rounded-lg border border-gray-300 bg-white "
-                        "shadow-lg max-h-48 overflow-y-auto"
-                    ),
-                )
-            )
+            to_xml(Div(id="lightning-asset-search-dropdown", cls="hidden"))
         )
 
+    result_df = result_df.sort_values("asset").head(20)
     items = []
     for _, row in result_df.iterrows():
         asset = row.get("asset", "")

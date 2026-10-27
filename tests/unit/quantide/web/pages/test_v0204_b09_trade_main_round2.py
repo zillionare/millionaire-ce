@@ -611,14 +611,16 @@ async def test_search_trade_assets_empty_query_returns_hidden_dropdown():
 
 
 @pytest.mark.asyncio
-async def test_search_trade_assets_no_match_renders_no_match_dropdown():
-    """[AC-NFR1101-01] No fuzzy matches renders '无匹配结果' dropdown."""
+async def test_search_trade_assets_no_match_returns_hidden_dropdown():
+    """[AC-NFR1101-01] No fuzzy matches returns a hidden dropdown."""
     req = _make_req(query_params={"q": "nonexistent"})
     with patch.object(tm, "stock_list") as mock_sl:
         mock_sl.fuzzy_search = MagicMock(return_value=pd.DataFrame())
         resp = await search_trade_assets(req)
     assert isinstance(resp, HTMLResponse)
-    assert "无匹配结果" in resp.body.decode()
+    body = resp.body.decode()
+    assert "hidden" in body
+    assert "无匹配结果" not in body
 
 
 @pytest.mark.asyncio
