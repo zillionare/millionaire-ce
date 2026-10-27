@@ -17,6 +17,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from quantide.core.enums import BrokerKind
 from quantide.web.pages import trade_main as tm
 from quantide.web.pages.trade_main import (
+    cancel_order_trade,
     place_order_trade,
     search_trade_assets,
     set_active_account,
@@ -101,6 +102,37 @@ async def test_search_trade_assets_with_valid_query_renders_dropdown_items():
     body = resp.body.decode()
     assert "平安银行" in body
     assert "000001.SZ" in body
+
+
+# ---------------------------------------------------------------------------
+# cancel_order_trade
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_order_trade_calls_broker_and_refreshes_orders():
+    """撤单走当前账号 broker，并返回 OOB 委托表。"""
+    fake_broker = MagicMock()
+    fake_broker.cancel_order = AsyncMock(return_value=None)
+    reg = MagicMock()
+    reg.get = MagicMock(return_value=fake_broker)
+    req = _make_req(
+        scope={
+            "registry": reg,
+            "session": {
+                "active_account_kind": BrokerKind.SIMULATION.value,
+                "active_account_id": "sim_1",
+            },
+        }
+    )
+    req.path_params = {"qtoid": "o1"}
+    with patch.object(tm, "_positions_orders_for_account", return_value=([], [])):
+        resp = await cancel_order_trade(req)
+    assert isinstance(resp, HTMLResponse)
+    body = resp.body.decode()
+    assert "撤单已提交" in body
+    assert "hx-swap-oob" in body
+    fake_broker.cancel_order.assert_awaited_once_with("o1")
 
 
 # ---------------------------------------------------------------------------

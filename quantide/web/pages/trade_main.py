@@ -1528,6 +1528,7 @@ def PositionTable(positions: list[Position], hx_swap_oob: bool = False):
                 style="background-color: #d32f2f;",
                 hx_get="/trade/positions",
                 hx_target="#position-table",
+                hx_swap="outerHTML",
             ),
             cls="flex items-center justify-between mb-4 px-6 pt-4",
         ),
@@ -1590,6 +1591,7 @@ def TodayOrdersTable(orders: list[Order], hx_swap_oob: bool = False):
                             "撤单",
                             cls="uk-button uk-button-small uk-button-default",
                             hx_post=f"/trade/cancel/{o.qtoid}",
+                            hx_target="#trade-toast-slot",
                             hx_confirm="确定要撤单吗？",
                         )
                         # 撤单按钮对所有可撤单状态可见。
@@ -1624,6 +1626,7 @@ def TodayOrdersTable(orders: list[Order], hx_swap_oob: bool = False):
                 style="background-color: #d32f2f;",
                 hx_get="/trade/orders",
                 hx_target="#today-orders",
+                hx_swap="outerHTML",
             ),
             cls="flex items-center justify-between mb-4 px-6 pt-4",
         ),
@@ -2041,6 +2044,37 @@ async def place_order_trade(req):
         )))
     except Exception as e:
         return _render_toast(f"下单失败: {str(e)}")
+
+
+async def cancel_order_trade(req):
+    """撤销委托（模拟盘走 broker，实盘走 gateway）。"""
+    qtoid = str(req.path_params.get("qtoid") or "").strip()
+    if not qtoid:
+        return HTMLResponse(to_xml(_trade_toast("缺少委托 ID")))
+    reg = _get_registry(req)
+    session = req.scope.get("session", {})
+    kind = session.get("active_account_kind")
+    account_id = session.get("active_account_id")
+    broker = None
+    if reg and kind and account_id:
+        try:
+            broker = reg.get(BrokerKind(kind), account_id)
+        except Exception:
+            broker = None
+    if broker is None:
+        return HTMLResponse(to_xml(_trade_toast("未找到可用的交易账号")))
+    try:
+        await broker.cancel_order(qtoid)
+    except Exception as e:
+        return HTMLResponse(to_xml(_trade_toast(f"撤单失败: {e}")))
+    try:
+        _, orders = _positions_orders_for_account(broker, kind)
+    except Exception:
+        orders = []
+    return HTMLResponse(to_xml(Div(
+        _trade_toast("撤单已提交", level="success"),
+        TodayOrdersTable(orders, hx_swap_oob=True),
+    )))
 
 
 async def search_trade_assets(req):

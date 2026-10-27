@@ -83,6 +83,7 @@ from quantide.web.pages.trade_lightning import (
     trade_lightning_update,
 )
 from quantide.web.pages.trade_main import (
+    cancel_order_trade,
     place_order_trade,
     search_trade_assets,
     set_active_account,
@@ -363,6 +364,7 @@ def create_app(
             Route("/trade/asset-stats", trade_asset_stats, methods=["GET"]),
             Route("/trade/live-quote", trade_live_quote, methods=["GET"]),
             Route("/trade/order", place_order_trade, methods=["POST"]),
+            Route("/trade/cancel/{qtoid}", cancel_order_trade, methods=["POST"]),
             Route(
                 "/trade/lightning/{portfolio_id:str}/create-modal",
                 trade_lightning_create_modal,
