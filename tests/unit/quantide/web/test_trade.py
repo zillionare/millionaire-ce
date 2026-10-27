@@ -1607,8 +1607,20 @@ class TestLoginRoutes:
         assert 'bg-green-600 text-white hover:bg-green-700' in html
         assert 'type="button"' in html
         assert 'data-asset="000001.SZ"' in html
+        assert 'data-display="平安银行（000001.SZ）"' in html
         assert 'data-price="11.00"' in html
         assert 'data-avail-lots="5"' in html
+
+    def test_trade_panel_position_double_click_prefills_sell(self, test_client):
+        """双击持仓行：填写名称/价格，可售时切到卖出并带入数量。"""
+        response = test_client.get("/trade")
+        text = response.text
+
+        assert response.status_code == 200
+        assert "const canSell = !isNaN(availLots) && availLots > 0;" in text
+        assert "priceInput.value = rowPrice.toFixed(2);" in text
+        assert "activateTradeSide('SELL', false);" in text
+        assert "valueInput.value = String(availLots);" in text
 
     def test_trade_panel_has_asset_search(self, test_client):
         """验证股票代码输入框带有搜索下拉功能 (issue #9)."""
@@ -1681,7 +1693,9 @@ class TestLoginRoutes:
         assert "function getQuickPriceBase()" in text
         assert "this.dataset.marketOrder === 'true'" in text
         assert "btn.dataset.marketOrder === 'true'" in text
-        assert "display.textContent = '';" in text
+        assert "let newPrice = basePrice * (1 + pct);" in text
+        assert "selectedAssetStats.up_limit" in text
+        assert "selectedAssetStats.down_limit" in text
         assert "priceMode.value = 'MARKET';" in text
         assert "priceMode.value = 'LIMIT';" in text
 
@@ -1701,7 +1715,8 @@ class TestLoginRoutes:
         assert "function setReferencePriceButtonsEnabled(enabled)" in text
         assert "btn.disabled = !enabled;" in text
         assert "function updateQuickPriceAvailability()" in text
-        assert "return getCurrentQuotePrice();" in text
+        assert "const closePrice = parseFloat(selectedAssetStats.close || '');" in text
+        assert "const hasBasePrice = getReferenceClosePrice() > 0;" in text
         assert "node.textContent = selectedAssetStats.current || '';" in text
         assert "if (items.length === 1) {" in text
         assert "selectAsset(items[0]);" in text

@@ -196,6 +196,8 @@ def _build_asset_stats(asset: str) -> dict[str, str | bool]:
         "ma30": "",
         "ma60": "",
         "current": "",
+        "up_limit": "",
+        "down_limit": "",
     }
     bars = _load_trade_reference_bars(asset, datetime.date.today(), 60)
     if bars.is_empty():
@@ -210,6 +212,18 @@ def _build_asset_stats(asset: str) -> dict[str, str | bool]:
     payload["visible"] = True
     payload["close"] = _format_trade_metric(closes[-1])
     payload["current"] = _format_trade_metric(current_price or closes[-1])
+    try:
+        from quantide.data import get_limit_price_store
+
+        down_limit, up_limit = get_limit_price_store().get_limits(
+            asset, datetime.date.today()
+        )
+        if up_limit > 0:
+            payload["up_limit"] = _format_trade_metric(up_limit)
+        if down_limit > 0:
+            payload["down_limit"] = _format_trade_metric(down_limit)
+    except Exception:
+        pass
     for period in (5, 10, 20, 30, 60):
         if len(closes) >= period:
             payload[f"ma{period}"] = _format_trade_metric(sum(closes[-period:]) / period)
@@ -230,7 +244,7 @@ def _load_trade_reference_bars(
         A date-sorted Polars DataFrame.
     """
     try:
-        bars = daily_bars.get_bars(periods, end=end, assets=[asset], eager_mode=True, adjust=None)
+        bars = daily_bars.get_bars(periods, end=end, assets=[asset], eager_mode=True, adjust="qfq")
     except Exception:
         bars = pl.DataFrame()
     if not bars.is_empty():
@@ -901,8 +915,8 @@ def LightningTradePanel(
 
                     function updateQuickPriceAvailability() {
                         const hasAsset = !!assetCode.value;
-                        const hasCurrentPrice = getCurrentQuotePrice() > 0;
-                        setQuickPriceButtonsEnabled(hasAsset && hasCurrentPrice);
+                        const hasBasePrice = getReferenceClosePrice() > 0;
+                        setQuickPriceButtonsEnabled(hasAsset && hasBasePrice);
                         setReferencePriceButtonsEnabled(hasAsset);
                     }
 
@@ -962,6 +976,8 @@ def LightningTradePanel(
                         setReferenceText('ma30', stats.ma30);
                         setReferenceText('ma60', stats.ma60);
                         updateCurrentReferencePrice();
+                        updateQuickPrices();
+                        updatePriceChangeHint();
                         updateQuickPriceAvailability();
                     }
 
@@ -1091,7 +1107,13 @@ def LightningTradePanel(
                     }
 
                     function getQuickPriceBase() {
-                        return getCurrentQuotePrice();
+                        if (selectedAssetStats) {
+                            const closePrice = parseFloat(selectedAssetStats.close || '');
+                            if (!isNaN(closePrice) && closePrice > 0) {
+                                return closePrice;
+                            }
+                        }
+                        return 0;
                     }
 
                     function setPosition(fraction) {
@@ -1186,26 +1208,31 @@ def LightningTradePanel(
                         if (!asset) {
                             return;
                         }
+                        const rowPrice = parseFloat(row.dataset.price || '');
                         assetDisplay.value = row.dataset.display || asset;
                         assetCode.value = asset;
                         hideSearchDropdown();
                         priceMode.value = 'LIMIT';
                         clearQuickPriceSelection();
-                        priceInput.value = '';
+                        if (!isNaN(rowPrice) && rowPrice > 0) {
+                            priceInput.value = rowPrice.toFixed(2);
+                        } else {
+                            priceInput.value = '';
+                        }
                         updatePriceMode();
-                        const rowPrice = parseFloat(row.dataset.price || '');
                         setLimitPlaceholderPrice(
                             !isNaN(rowPrice) && rowPrice > 0 ? rowPrice.toFixed(2) : ''
                         );
                         const availLots = parseFloat(row.dataset.availLots || '');
-                        if (!isNaN(availLots) && availLots > 0) {
+                        const canSell = !isNaN(availLots) && availLots > 0;
+                        if (canSell) {
                             setOrderMode('QUANTITY');
                             valueInput.value = String(availLots);
+                            activateTradeSide('SELL', false);
                         } else {
                             setOrderMode('AMOUNT');
                             valueInput.value = '';
                         }
-                        activateTradeSide('SELL', false);
                         updateLabel();
                         updateEstShares();
                         updateCurrentReferencePrice();
@@ -1327,11 +1354,20 @@ def LightningTradePanel(
                         document.querySelectorAll('.quick-price-btn').forEach(function(btn) {
                             const display = btn.querySelector('.quick-price-display');
                             const pct = parseFloat(btn.dataset.pct);
-                            if (btn.dataset.marketOrder === 'true' || basePrice <= 0 || isNaN(pct)) {
+                            if (basePrice <= 0 || isNaN(pct)) {
                                 display.textContent = '';
                                 return;
                             }
-                            const newPrice = basePrice * (1 + pct);
+                            let newPrice = basePrice * (1 + pct);
+                            if (btn.dataset.marketOrder === 'true' && selectedAssetStats) {
+                                const limitText = pct > 0
+                                    ? selectedAssetStats.up_limit
+                                    : selectedAssetStats.down_limit;
+                                const limitPrice = parseFloat(limitText || '');
+                                if (!isNaN(limitPrice) && limitPrice > 0) {
+                                    newPrice = limitPrice;
+                                }
+                            }
                             display.textContent = newPrice.toFixed(2);
                         });
                     }
@@ -1438,7 +1474,7 @@ def PositionTable(positions: list[Position]):
                     ),
                     cls="trade-position-row cursor-pointer",
                     data_asset=p.asset,
-                    data_display=p.asset,
+                    data_display=f"{resolve_asset_name(p.asset)}（{p.asset}）",
                     data_price=f"{current_price:.2f}" if current_price > 0 else "",
                     data_avail_lots=str(avail_lots),
                 )
