@@ -38,40 +38,17 @@ def _resolve_default_paper_account(req) -> str | None:
 def paper_list(req, session):
     """`GET /trade/paper/` 已废弃：统一跳转到 /trade（带 account_id）。"""
     account_id = _resolve_account_id(req)
+    if account_id:
+        reg = _get_registry(req)
+        if reg is not None:
+            try:
+                if reg.get(BrokerKind.SIMULATION, account_id) is not None:
+                    session["active_account_kind"] = BrokerKind.SIMULATION.value
+                    session["active_account_id"] = account_id
+            except Exception:
+                pass
     url = "/trade" + (f"?account_id={account_id}" if account_id else "")
     return RedirectResponse(url, status_code=303)
-
-    reg = _get_registry(req)
-    if reg is None:
-        return _render_no_registry(session)
-
-    sims = reg.list_by_kind(BrokerKind.SIMULATION)
-    requested = _resolve_account_id(req)
-
-    layout = MainLayout(title="仿真交易", user=session.get("auth"))
-
-    if requested:
-        broker = reg.get(BrokerKind.SIMULATION, requested)
-        if broker is None:
-            return Div(
-                H2("未找到该仿真账户", cls="text-lg font-bold"),
-                P(f"账户 ID: {requested}", cls="text-sm text-gray-600"),
-                A("返回仿真列表", href="/trade/paper/", cls="text-[#e41815]"),
-                cls="p-6",
-            )
-        return _render_paper_account(layout, broker)
-
-    if not sims:
-        return _render_empty_paper(layout)
-
-    if len(sims) == 1:
-        only = sims[0]
-        broker = reg.get(BrokerKind.SIMULATION, only.get("id"))
-        if broker is None:
-            return _render_empty_paper(layout)
-        return _render_paper_account(layout, broker)
-
-    return _render_paper_picker(layout, sims)
 
 
 BRAND_RED = "#e41815"

@@ -1676,7 +1676,11 @@ class TestLoginRoutes:
         assert "flex flex-col items-center justify-center gap-1" in text
         assert "disabled:opacity-40 disabled:cursor-not-allowed" in text
         assert "quick-price-btn aspect-square" in text
-        assert 'grid h-full w-[196px] grid-cols-4 gap-1' in text
+        assert 'id="quick-price-grid"' in text
+        assert 'id="trade-order-panel"' in text
+        assert "function layoutQuickGrid()" in text
+        assert "new ResizeObserver(layoutQuickGrid).observe(orderPanel);" in text
+        assert "grid.style.gridTemplateRows = 'repeat(5, ' + sizePx + ')';" in text
         assert ">涨停<" in text
         assert ">跌停<" in text
         assert ">9%<" in text

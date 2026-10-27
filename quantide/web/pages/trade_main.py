@@ -65,13 +65,27 @@ def _get_all_accounts(reg: BrokerRegistry) -> list[dict]:
 def _get_active_account(
     reg: BrokerRegistry, session: dict, query_params: dict | None = None
 ) -> dict | None:
-    """获取当前活动账号；query_params 中的 account_id 优先。"""
-    account_id = None
-    if query_params:
-        account_id = query_params.get("account_id")
+    """获取当前活动账号；query_params 中的 account_id 优先并写回 session。"""
     kind_str = session.get("active_account_kind")
-    if not account_id:
-        account_id = session.get("active_account_id")
+    account_id = session.get("active_account_id")
+    resolved_broker = None
+
+    query_account_id = None
+    if query_params:
+        query_account_id = query_params.get("account_id")
+    if query_account_id and reg:
+        for candidate in (BrokerKind.QMT, BrokerKind.SIMULATION):
+            try:
+                candidate_broker = reg.get(candidate, query_account_id)
+            except Exception:
+                candidate_broker = None
+            if candidate_broker is not None:
+                kind_str = candidate.value
+                account_id = query_account_id
+                resolved_broker = candidate_broker
+                session["active_account_kind"] = kind_str
+                session["active_account_id"] = account_id
+                break
 
     if not kind_str or not account_id:
         default = reg.get_default() if reg else None
@@ -80,7 +94,7 @@ def _get_active_account(
         kind_str, account_id = default
 
     kind = BrokerKind(kind_str) if isinstance(kind_str, str) else kind_str
-    broker = reg.get(kind, account_id) if reg else None
+    broker = resolved_broker or (reg.get(kind, account_id) if reg else None)
 
     if broker:
         name = ""
@@ -625,6 +639,8 @@ def LightningTradePanel(
                     # Row 7: Buy/Sell buttons with active state
                     Div(
                         Input(type="hidden", name="side", value="BUY", id="side-input"),
+                        Input(type="hidden", name="account_kind", value=kind, id="account-kind-input"),
+                        Input(type="hidden", name="account_id", value=portfolio_id, id="account-id-input"),
                         Button(
                             Span("*", cls="absolute top-0 left-2 text-xs", id="buy-star"),
                             "买入",
@@ -647,6 +663,7 @@ def LightningTradePanel(
                     ),
                     # Hidden submit for HTMX
                     Input(type="submit", cls="hidden", id="form-submit"),
+                    id="trade-order-panel",
                     cls="w-[236px] flex-shrink-0 space-y-2",
                 ),
                 # 中间：价格快捷输入区
@@ -684,7 +701,8 @@ def LightningTradePanel(
                             ]
                             for label, pct in row
                         ],
-                        cls="grid h-full w-[196px] grid-cols-4 gap-1",
+                        id="quick-price-grid",
+                        cls="grid w-[220px] grid-cols-4 gap-1.5",
                     ),
                     cls="flex shrink-0 items-stretch",
                 ),
@@ -1403,6 +1421,37 @@ def LightningTradePanel(
                         updatePriceChangeHint();
                     });
 
+                    function layoutQuickGrid() {
+                        const panel = document.getElementById('trade-order-panel');
+                        const grid = document.getElementById('quick-price-grid');
+                        if (!panel || !grid) {
+                            return;
+                        }
+                        const gap = 6;
+                        const height = panel.getBoundingClientRect().height;
+                        if (height <= 0) {
+                            return;
+                        }
+                        const size = (height - gap * 4) / 5;
+                        const width = size * 4 + gap * 3;
+                        const sizePx = size.toFixed(2) + 'px';
+                        grid.style.width = width.toFixed(2) + 'px';
+                        grid.style.height = height.toFixed(2) + 'px';
+                        grid.style.gridTemplateColumns = 'repeat(4, ' + sizePx + ')';
+                        grid.style.gridTemplateRows = 'repeat(5, ' + sizePx + ')';
+                        grid.style.gap = gap + 'px';
+                        grid.querySelectorAll('.quick-price-btn').forEach(function(btn) {
+                            btn.style.width = sizePx;
+                            btn.style.height = sizePx;
+                        });
+                    }
+
+                    const orderPanel = document.getElementById('trade-order-panel');
+                    if (window.ResizeObserver && orderPanel) {
+                        new ResizeObserver(layoutQuickGrid).observe(orderPanel);
+                    }
+                    window.addEventListener('resize', layoutQuickGrid);
+
                     // Initial state
                     clearReferencePrices();
                     setQuickPriceButtonsEnabled(false);
@@ -1410,6 +1459,8 @@ def LightningTradePanel(
                     updateLabel();
                     updateEstShares();
                     updateQuickPrices();
+                    layoutQuickGrid();
+                    requestAnimationFrame(layoutQuickGrid);
                 })();
                 """
             ),
@@ -1423,7 +1474,7 @@ def LightningTradePanel(
     )
 
 
-def PositionTable(positions: list[Position]):
+def PositionTable(positions: list[Position], hx_swap_oob: bool = False):
     """持仓明细表格"""
     headers = ["证券代码", "证券名称", "当前持股", "可用股数", "市值", "最新价", "成本价", "盈亏", "盈亏比例", "操作"]
 
@@ -1487,10 +1538,11 @@ def PositionTable(positions: list[Position]):
         ),
         id="position-table",
         cls="bg-white dark:bg-gray-800 rounded-lg shadow mb-6 overflow-hidden",
+        **({"hx_swap_oob": "true"} if hx_swap_oob else {}),
     )
 
 
-def TodayOrdersTable(orders: list[Order]):
+def TodayOrdersTable(orders: list[Order], hx_swap_oob: bool = False):
     """当日委托表格"""
     headers = ["时间", "代码", "名称", "方向", "委托价", "委托量", "成交量", "状态", "操作"]
 
@@ -1582,6 +1634,7 @@ def TodayOrdersTable(orders: list[Order]):
         ),
         id="today-orders",
         cls="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden",
+        **({"hx_swap_oob": "true"} if hx_swap_oob else {}),
     )
 
 
@@ -1841,12 +1894,12 @@ def trade_main_page(request):
         except Exception as e:
             logger.warning(f"获取资产信息失败: {e}")
 
-    # 持仓 / 委托：直接走 gateway JSON API（Issue #31 + 用户架构要求），
-    # 不再走 broker 包装层。错误一律吞掉，留空表 + log warning。
+    # 仿真账户直接读 broker（paper 的成交/委托在 broker 内），
+    # 实盘仍走 gateway JSON API。错误一律吞掉，留空表 + log warning。
     try:
-        positions, orders = _resolve_positions_orders_from_settings()
+        positions, orders = _positions_orders_for_account(broker, kind)
     except Exception as e:
-        logger.warning(f"从 gateway 拉取持仓/委托失败: {e}")
+        logger.warning(f"加载持仓/委托失败: {e}")
 
     def main_block():
         return Div(
@@ -1893,26 +1946,34 @@ async def place_order_trade(req):
     Returns:
         HTMLResponse: 包含下单结果的 HTML 响应
     """
+    form = await req.form()
     reg = _get_registry(req)
+    session = req.scope.get("session", {})
     broker = None
-    if reg:
-        session = req.scope.get("session", {})
-        active_kind = session.get("active_account_kind")
-        active_id = session.get("active_account_id")
-        if active_kind and active_id:
-            broker = reg.get(BrokerKind(active_kind), active_id)
-        else:
-            default = reg.get_default()
-            if default:
-                broker = reg.get(default[0], default[1])
+    account_kind = str(form.get("account_kind") or session.get("active_account_kind") or "")
+    account_id = str(form.get("account_id") or session.get("active_account_id") or "")
+    requested_account = bool(account_kind and account_id)
+    if reg and requested_account:
+        try:
+            broker = reg.get(BrokerKind(account_kind), account_id)
+        except Exception:
+            broker = None
+    if broker is None and reg and not requested_account:
+        default = reg.get_default()
+        if default:
+            default_kind, account_id = default
+            account_kind = (
+                default_kind.value
+                if isinstance(default_kind, BrokerKind)
+                else str(default_kind)
+            )
+            broker = reg.get(default[0], account_id)
 
     def _render_toast(message: str, level: str = "error"):
         return HTMLResponse(to_xml(_trade_toast(message, level)))
 
     if not broker:
         return _render_toast("未找到可用的交易账号")
-
-    form = await req.form()
     side = form.get("side", "BUY")
     asset = form.get("asset", "").strip()
     price_mode = form.get("price_mode", "LIMIT")
@@ -1968,8 +2029,16 @@ async def place_order_trade(req):
         if not _trade_result_has_order(result):
             return _render_toast("未生成有效委托，请检查价格、数量和持仓后重试")
 
+        try:
+            positions, orders = _positions_orders_for_account(broker, account_kind)
+        except Exception:
+            positions, orders = [], []
         side_text = "买入" if side == "BUY" else "卖出"
-        return _render_toast(f"{side_text}委托已提交: {asset}", level="success")
+        return HTMLResponse(to_xml(Div(
+            _trade_toast(f"{side_text}委托已提交: {asset}", level="success"),
+            TodayOrdersTable(orders, hx_swap_oob=True),
+            PositionTable(positions, hx_swap_oob=True),
+        )))
     except Exception as e:
         return _render_toast(f"下单失败: {str(e)}")
 
@@ -2130,6 +2199,15 @@ def _safe_positions(broker) -> list[Position]:
     if isinstance(positions_dict, dict):
         return list(positions_dict.values())
     return list(positions_dict) if positions_dict else []
+
+
+def _positions_orders_for_account(
+    broker, kind: str | None
+) -> tuple[list[Position], list[Order]]:
+    """按账号类型加载持仓/委托：仿真走 broker，实盘走 gateway."""
+    if broker is not None and str(kind) == BrokerKind.SIMULATION.value:
+        return _safe_positions(broker), _safe_orders(broker)
+    return _resolve_positions_orders_from_settings()
 
 
 def _fetch_positions_orders_via_gateway(
@@ -2313,7 +2391,18 @@ async def trade_positions_refresh(req):
 
     Issue #31 + 用户架构要求：数据从 broker 包装层切到直接 gateway JSON API。
     """
-    positions, _ = _resolve_positions_orders_from_settings()
+    reg = _get_registry(req)
+    session = req.scope.get("session", {}) or {}
+    account = _get_active_account(reg, session, req.query_params) if reg else None
+    broker = None
+    if reg and account:
+        try:
+            broker = reg.get(BrokerKind(account["kind"]), account["id"])
+        except Exception:
+            broker = None
+    positions, _ = _positions_orders_for_account(
+        broker, account["kind"] if account else None
+    )
     return HTMLResponse(_to_xml(PositionTable(positions)))
 
 
@@ -2324,5 +2413,16 @@ async def trade_orders_refresh(req):
 
     Issue #31 + 用户架构要求：数据从 broker 包装层切到直接 gateway JSON API。
     """
-    _, orders = _resolve_positions_orders_from_settings()
+    reg = _get_registry(req)
+    session = req.scope.get("session", {}) or {}
+    account = _get_active_account(reg, session, req.query_params) if reg else None
+    broker = None
+    if reg and account:
+        try:
+            broker = reg.get(BrokerKind(account["kind"]), account["id"])
+        except Exception:
+            broker = None
+    _, orders = _positions_orders_for_account(
+        broker, account["kind"] if account else None
+    )
     return HTMLResponse(_to_xml(TodayOrdersTable(orders)))
