@@ -26,7 +26,6 @@ from fasthtml.common import (
 
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
-from quantide.data.models.stocks import stock_list
 from quantide.service.quote_monitor import quote_monitor
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import AppTheme
@@ -189,22 +188,22 @@ def _data_health(now: datetime.datetime) -> list[Any]:
         from quantide.data import get_limit_price_store
 
         limits = get_limit_price_store().limits_map(now.date())
-        expected = int(stock_list.size or 0)
-        count = len(limits)
-        coverage = count / expected if expected else (1.0 if count else 0.0)
-        tone = (
-            "bg-green-50 text-green-700"
-            if coverage >= 0.9
-            else ("bg-gray-100 text-gray-700" if coverage >= 0.5 else "bg-red-50 text-red-600")
-        )
-        items.append(
-            Span(
-                f"当日涨跌停：{count}/{expected or '?'}（{coverage * 100:.0f}%）",
-                cls=f"rounded-full px-2.5 py-1 text-xs {tone}",
+        if limits:
+            items.append(
+                Span(
+                    "涨跌停价已获取",
+                    cls="rounded-full bg-green-50 px-2.5 py-1 text-xs text-green-700",
+                )
             )
-        )
+        else:
+            items.append(
+                Span(
+                    "涨跌停价未获取",
+                    cls="rounded-full bg-red-50 px-2.5 py-1 text-xs text-red-600",
+                )
+            )
     except Exception:
-        items.append(Span("当日涨跌停：数据层未就绪", cls="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500"))
+        items.append(Span("涨跌停价未获取", cls="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500"))
     items.append(
         A(
             "查看风险事件 →",
@@ -215,7 +214,12 @@ def _data_health(now: datetime.datetime) -> list[Any]:
     return items
 
 
-def _render_content(now: datetime.datetime, query: str) -> Div:
+def _trade_url(session: dict) -> str:
+    account_id = str(session.get("active_account_id") or "").strip()
+    return f"/trade?account_id={account_id}" if account_id else "/trade"
+
+
+def _render_content(now: datetime.datetime, query: str, trade_url: str = "/trade") -> Div:
     status = quote_monitor.status()
     last_received = status.get("last_received_at")
     freshness, tone, hint = _freshness(now, last_received)
@@ -232,7 +236,15 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
     panel_url = "/system/realtime/panel"
     return Div(
         Div(
-            H2("实时行情", cls="text-lg font-semibold text-gray-900"),
+            Div(
+                H2("实时行情", cls="text-lg font-semibold text-gray-900"),
+                A(
+                    "去交易 →",
+                    href=trade_url,
+                    cls="text-xs font-medium text-[#e41815] hover:text-[#c91412]",
+                ),
+                cls="flex items-center gap-3",
+            ),
             Span(
                 "行情源 → MessageHub → 本页；用于确认系统正在接收实时数据",
                 cls="text-xs text-gray-500",
@@ -324,7 +336,11 @@ def index(req, session):
     layout.main_block = lambda: Div(
         _breadcrumb(),
         Div(
-            _render_content(datetime.datetime.now(), req.query_params.get("q", "")),
+            _render_content(
+                datetime.datetime.now(),
+                req.query_params.get("q", ""),
+                _trade_url(session),
+            ),
             cls="max-w-[1400px] mx-auto w-full",
         ),
         cls="space-y-6 max-w-[1400px] mx-auto w-full",
@@ -333,7 +349,9 @@ def index(req, session):
 
 
 @rt("/panel")
-def panel(req):
+def panel(req, session):
     return _render_content(
-        datetime.datetime.now(), req.query_params.get("q", "")
+        datetime.datetime.now(),
+        req.query_params.get("q", ""),
+        _trade_url(session),
     )
