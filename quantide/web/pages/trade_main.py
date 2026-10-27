@@ -265,6 +265,29 @@ def _load_trade_reference_bars(
     return fallback.with_columns(pl.col("date").cast(pl.Date)).sort("date")
 
 
+def _resolve_local_trade_close(asset: str) -> float:
+    """本地日线的最新收盘价（不触发网络拉取）。"""
+    if not asset:
+        return 0.0
+    try:
+        bars = daily_bars.get_bars(
+            5,
+            end=datetime.date.today(),
+            assets=[asset],
+            eager_mode=True,
+            adjust="qfq",
+        )
+    except Exception:
+        return 0.0
+    if bars is None or bars.is_empty():
+        return 0.0
+    try:
+        value = float(bars.sort("date").row(-1, named=True).get("close") or 0)
+    except Exception:
+        return 0.0
+    return value if value > 0 else 0.0
+
+
 def _resolve_trade_reference_close(asset: str) -> float:
     """Resolve the latest reference close price for a trade symbol.
 
@@ -2018,14 +2041,17 @@ async def place_order_trade(req):
 
     price = 0.0
     if price_mode == "LIMIT":
-        try:
-            price = float(price_str)
-        except ValueError:
+        if str(price_str).strip() == "":
             price = 0.0
+        else:
+            try:
+                price = float(price_str)
+            except ValueError:
+                return _render_toast("价格格式错误")
         if price <= 0:
-            price = _resolve_live_current_price(asset) or _resolve_trade_reference_close(asset)
+            price = _resolve_local_trade_close(asset)
         if price <= 0:
-            return _render_toast("价格格式错误")
+            return _render_toast("价格必须大于0")
 
     try:
         value = float(value_str)

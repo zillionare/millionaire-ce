@@ -9,6 +9,7 @@ from starlette.responses import HTMLResponse
 from quantide.core.enums import BrokerKind
 from quantide.data.sqlite import db
 from quantide.web.layouts.main import MainLayout
+from quantide.web.pages.history_common import display_name
 
 
 def _get_registry(req):
@@ -189,10 +190,11 @@ def history_positions_list(request):
                 pnl = market_value - cost_value
                 pnl_pct = (pnl / cost_value) if cost_value else 0
 
+                asset = str(row.get("asset", "") or "")
                 positions.append({
                     "dt": row.get("dt", ""),
-                    "asset": row.get("asset", ""),
-                    "name": row.get("name", ""),
+                    "asset": asset,
+                    "name": display_name(asset, row.get("name", "")),
                     "shares": shares,
                     "cost_price": cost_price,
                     "current_price": current_price,
