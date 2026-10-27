@@ -1692,10 +1692,8 @@ class TestLoginRoutes:
         assert response.status_code == 200
         assert "function getQuickPriceBase()" in text
         assert "this.dataset.marketOrder === 'true'" in text
-        assert "btn.dataset.marketOrder === 'true'" in text
-        assert "let newPrice = basePrice * (1 + pct);" in text
-        assert "selectedAssetStats.up_limit" in text
-        assert "selectedAssetStats.down_limit" in text
+        assert "const newPrice = basePrice * (1 + pct);" in text
+        assert "display.textContent = newPrice.toFixed(2);" in text
         assert "priceMode.value = 'MARKET';" in text
         assert "priceMode.value = 'LIMIT';" in text
 

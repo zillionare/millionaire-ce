@@ -196,8 +196,6 @@ def _build_asset_stats(asset: str) -> dict[str, str | bool]:
         "ma30": "",
         "ma60": "",
         "current": "",
-        "up_limit": "",
-        "down_limit": "",
     }
     bars = _load_trade_reference_bars(asset, datetime.date.today(), 60)
     if bars.is_empty():
@@ -212,18 +210,6 @@ def _build_asset_stats(asset: str) -> dict[str, str | bool]:
     payload["visible"] = True
     payload["close"] = _format_trade_metric(closes[-1])
     payload["current"] = _format_trade_metric(current_price or closes[-1])
-    try:
-        from quantide.data import get_limit_price_store
-
-        down_limit, up_limit = get_limit_price_store().get_limits(
-            asset, datetime.date.today()
-        )
-        if up_limit > 0:
-            payload["up_limit"] = _format_trade_metric(up_limit)
-        if down_limit > 0:
-            payload["down_limit"] = _format_trade_metric(down_limit)
-    except Exception:
-        pass
     for period in (5, 10, 20, 30, 60):
         if len(closes) >= period:
             payload[f"ma{period}"] = _format_trade_metric(sum(closes[-period:]) / period)
@@ -1358,16 +1344,7 @@ def LightningTradePanel(
                                 display.textContent = '';
                                 return;
                             }
-                            let newPrice = basePrice * (1 + pct);
-                            if (btn.dataset.marketOrder === 'true' && selectedAssetStats) {
-                                const limitText = pct > 0
-                                    ? selectedAssetStats.up_limit
-                                    : selectedAssetStats.down_limit;
-                                const limitPrice = parseFloat(limitText || '');
-                                if (!isNaN(limitPrice) && limitPrice > 0) {
-                                    newPrice = limitPrice;
-                                }
-                            }
+                            const newPrice = basePrice * (1 + pct);
                             display.textContent = newPrice.toFixed(2);
                         });
                     }
