@@ -1695,6 +1695,7 @@ class TestLoginRoutes:
         assert "const newPrice = basePrice * (1 + pct);" in text
         assert "display.textContent = newPrice.toFixed(2);" in text
         assert "priceMode.value = 'MARKET';" in text
+        assert "priceInput.value = display.textContent.trim();" in text
         assert "priceMode.value = 'LIMIT';" in text
 
     def test_trade_panel_polls_live_quote_and_gates_speed_dial(self, test_client):

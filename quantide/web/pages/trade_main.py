@@ -1359,8 +1359,12 @@ def LightningTradePanel(
                             const pct = parseFloat(this.dataset.pct);
                             if (this.dataset.marketOrder === 'true') {
                                 clearQuickPriceSelection();
+                                const display = this.querySelector('.quick-price-display');
                                 priceMode.value = 'MARKET';
                                 updatePriceMode();
+                                if (display && display.textContent.trim() !== '') {
+                                    priceInput.value = display.textContent.trim();
+                                }
                                 updateCurrentReferencePrice();
                                 updateQuickPrices();
                                 return;
