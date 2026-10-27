@@ -1423,6 +1423,32 @@ class PaperBroker(AbstractBroker):
                         del self._active_orders[asset]
                     break
 
+            if found:
+                return
+
+            # 服务重启后待处理订单不在内存中；允许按持久化记录撤单。
+            stored = db.get_order(qt_oid)
+            if stored is None or stored.portfolio_id != self.portfolio_id:
+                return
+            if stored.status not in {
+                OrderStatus.UNREPORTED,
+                OrderStatus.WAIT_REPORTING,
+                OrderStatus.REPORTED,
+                OrderStatus.PART_SUCC,
+            }:
+                return
+            if stored.filled > 0:
+                stored.status = OrderStatus.PARTSUCC_CANCEL
+            else:
+                stored.status = OrderStatus.CANCELED
+            stored.status_msg = "Canceled by user"
+            db.update_order(
+                qt_oid,
+                status=stored.status.value,
+                status_msg=stored.status_msg,
+                filled=stored.filled,
+            )
+
     async def cancel_all_orders(self, side: OrderSide | None = None):
         """取消所有订单。
 
