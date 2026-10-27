@@ -1667,6 +1667,8 @@ class TestLoginRoutes:
         assert 'grid h-full w-[196px] grid-cols-4 gap-1' in text
         assert ">涨停<" in text
         assert ">跌停<" in text
+        assert ">9%<" in text
+        assert ">-1%<" in text
         assert 'data-market-order="true"' in text
         assert "text-sm font-medium leading-tight whitespace-nowrap" in text
 
@@ -1700,7 +1702,7 @@ class TestLoginRoutes:
         assert "btn.disabled = !enabled;" in text
         assert "function updateQuickPriceAvailability()" in text
         assert "return getCurrentQuotePrice();" in text
-        assert "referenceValues.current.textContent = selectedAssetStats.current || '';" in text
+        assert "node.textContent = selectedAssetStats.current || '';" in text
         assert "if (items.length === 1) {" in text
         assert "selectAsset(items[0]);" in text
 
@@ -1876,62 +1878,36 @@ class TestLoginRoutes:
         assert payload["current"] == "11.00"
         assert payload["ma5"] == ""
 
-    def test_trade_search_uses_latest_fetcher_price_when_today_has_no_local_bars(
+    def test_trade_search_is_bounded_and_does_not_fetch_prices(
         self, test_client, monkeypatch
     ):
-        """验证搜索结果会回退到 fetcher 最近可用交易日的收盘价。"""
-        import pandas as pd
-
+        """搜索接口只返回前 20 条代码/名称，不逐条查行情（避免阻塞事件循环）。"""
         from quantide.web.pages import trade_main as trade_page
 
         result_df = pl.DataFrame(
             {
-                "asset": ["000002.SZ"],
-                "name": ["万科A"],
-                "pinyin": ["WKA"],
+                "asset": [f"{i:06d}.SZ" for i in range(30)],
+                "name": [f"股票{i}" for i in range(30)],
+                "pinyin": [f"GP{i}" for i in range(30)],
             }
         ).to_pandas()
 
-        monkeypatch.setattr(trade_page.stock_list, "fuzzy_search", lambda *args, **kwargs: result_df)
         monkeypatch.setattr(
-            trade_page.daily_bars,
-            "get_price",
-            lambda *args, **kwargs: (_ for _ in ()).throw(IndexError("missing")),
-        )
-        monkeypatch.setattr(
-            trade_page.daily_bars,
-            "get_bars",
-            lambda *args, **kwargs: pl.DataFrame(),
+            trade_page.stock_list, "fuzzy_search", lambda *args, **kwargs: result_df
         )
 
-        class _Fetcher:
-            def fetch_calendar(self, epoch):
-                return pd.DataFrame(
-                    {
-                        "date": [datetime.date(2024, 12, 30), datetime.date(2024, 12, 31)],
-                        "is_open": [1, 1],
-                    }
-                )
+        def _boom(*args, **kwargs):
+            raise AssertionError("search must not fetch prices")
 
-            def fetch_bars_ext(self, dates):
-                frame = pd.DataFrame(
-                    {
-                        "date": [datetime.date(2024, 12, 31)],
-                        "asset": ["000002.SZ"],
-                        "close": [23.45],
-                        "up_limit": [25.8],
-                        "down_limit": [21.11],
-                    }
-                )
-                return frame, []
+        monkeypatch.setattr(trade_page.daily_bars, "get_price", _boom)
+        monkeypatch.setattr(trade_page, "_load_trade_reference_bars", _boom)
 
-        monkeypatch.setattr(trade_page, "get_data_fetcher", lambda: _Fetcher())
-
-        response = test_client.get("/trade/search?q=%E4%B8%87%E7%A7%91")
+        response = test_client.get("/trade/search?q=000")
 
         assert response.status_code == 200
-        assert "万科A" in response.text
-        assert 'data-price="23.45"' in response.text
+        assert response.text.count("asset-search-item") == 20
+        assert 'data-price=""' in response.text
+        assert "股票0" in response.text
 
 
 class TestTradeOrderRoute:

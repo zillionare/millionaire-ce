@@ -676,11 +676,11 @@ def LightningTradePanel(
                                 disabled=True,
                             )
                             for row in [
-                                [("涨停", 0.10), ("5", 0.05), ("-1", -0.01), ("-6", -0.06)],
-                                [("9", 0.09), ("4", 0.04), ("-2", -0.02), ("-7", -0.07)],
-                                [("8", 0.08), ("3", 0.03), ("-3", -0.03), ("-8", -0.08)],
-                                [("7", 0.07), ("2", 0.02), ("-4", -0.04), ("-9", -0.09)],
-                                [("6", 0.06), ("1", 0.01), ("-5", -0.05), ("跌停", -0.10)],
+                                [("涨停", 0.10), ("5%", 0.05), ("-1%", -0.01), ("-6%", -0.06)],
+                                [("9%", 0.09), ("4%", 0.04), ("-2%", -0.02), ("-7%", -0.07)],
+                                [("8%", 0.08), ("3%", 0.03), ("-3%", -0.03), ("-8%", -0.08)],
+                                [("7%", 0.07), ("2%", 0.02), ("-4%", -0.04), ("-9%", -0.09)],
+                                [("6%", 0.06), ("1%", 0.01), ("-5%", -0.05), ("跌停", -0.10)],
                             ]
                             for label, pct in row
                         ],
@@ -787,13 +787,22 @@ def LightningTradePanel(
                         });
                     }
 
+                    function setReferenceText(key, value) {
+                        const node = referenceValues[key];
+                        if (node) {
+                            node.textContent = value || '';
+                        }
+                    }
+
                     function clearReferencePrices() {
                         selectedAssetStats = null;
                         limitPlaceholderPrice = '';
                         clearQuickPriceSelection();
                         stopLiveQuotePolling();
                         Object.values(referenceValues).forEach(function(node) {
-                            node.textContent = '';
+                            if (node) {
+                                node.textContent = '';
+                            }
                         });
                         updateLimitPricePlaceholder();
                         updatePriceChangeHint();
@@ -801,11 +810,15 @@ def LightningTradePanel(
                     }
 
                     function updateCurrentReferencePrice() {
-                        if (!selectedAssetStats) {
-                            referenceValues.current.textContent = '';
+                        const node = referenceValues.current;
+                        if (!node) {
                             return;
                         }
-                        referenceValues.current.textContent = selectedAssetStats.current || '';
+                        if (!selectedAssetStats) {
+                            node.textContent = '';
+                            return;
+                        }
+                        node.textContent = selectedAssetStats.current || '';
                     }
 
                     function clearQuickPriceSelection() {
@@ -942,12 +955,12 @@ def LightningTradePanel(
                         }
                         selectedAssetStats = stats;
                         setLimitPlaceholderPrice(stats.current || stats.close || '');
-                        referenceValues.close.textContent = stats.close || '';
-                        referenceValues.ma5.textContent = stats.ma5 || '';
-                        referenceValues.ma10.textContent = stats.ma10 || '';
-                        referenceValues.ma20.textContent = stats.ma20 || '';
-                        referenceValues.ma30.textContent = stats.ma30 || '';
-                        referenceValues.ma60.textContent = stats.ma60 || '';
+                        setReferenceText('close', stats.close);
+                        setReferenceText('ma5', stats.ma5);
+                        setReferenceText('ma10', stats.ma10);
+                        setReferenceText('ma20', stats.ma20);
+                        setReferenceText('ma30', stats.ma30);
+                        setReferenceText('ma60', stats.ma60);
                         updateCurrentReferencePrice();
                         updateQuickPriceAvailability();
                     }
@@ -1970,23 +1983,14 @@ async def search_trade_assets(req):
             cls="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-48 overflow-y-auto",
         )))
 
-    today = datetime.date.today()
+    # 只返回代码/名称/拼音，避免逐条查询行情阻塞事件循环。
+    result_df = result_df.head(20)
     items = []
     for _, row in result_df.iterrows():
         asset = row.get("asset", "")
         name = row.get("name", "")
         pinyin = row.get("pinyin", "")
         display = f"{name}（{asset}）"
-        # 尝试获取最新收盘价
-        price = ""
-        try:
-            close, up_limit, down_limit = daily_bars.get_price(asset, today)
-            if close and close > 0:
-                price = str(close)
-        except Exception:
-            fallback_bars = _load_trade_reference_bars(asset, today, 1)
-            if not fallback_bars.is_empty():
-                price = str(fallback_bars.row(0, named=True).get("close", ""))
         items.append(
             Div(
                 Div(name, cls="text-sm font-medium text-gray-900 dark:text-white"),
@@ -1995,7 +1999,7 @@ async def search_trade_assets(req):
                 data_asset=asset,
                 data_name=name,
                 data_display=display,
-                data_price=price,
+                data_price="",
                 tabindex="0",
                 role="button",
             )
