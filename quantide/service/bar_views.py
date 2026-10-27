@@ -377,6 +377,7 @@ class LiveBarView(HistBarView):
                 ts_date = ts_date.date()
             if ts_date != self._today():
                 return None
+        up_limit, down_limit = self._limits(asset)
         return {
             "date": self._today(),
             "asset": asset,
@@ -386,6 +387,12 @@ class LiveBarView(HistBarView):
             "close": price,
             "volume": snapshot.get("volume") or 0,
             "amount": snapshot.get("amount") or 0,
+            # forming 行必须显式给出 is_st/adjust/涨跌停：策略在 14:57 会用
+            # ``~is_st`` 过滤候选，null 会被 Polars 当作不满足而丢掉全部标的。
+            "adjust": 1.0,
+            "is_st": bool(self._is_st(asset)),
+            "up_limit": up_limit,
+            "down_limit": down_limit,
             "prev_close": snapshot.get("prev_close"),
         }
 

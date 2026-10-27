@@ -61,3 +61,8 @@ def test_get_bars_range_injects_today_forming_bar_with_date_end():
     today = frame.filter(pl.col("date") == datetime.date(2024, 1, 3))
     assert today.height == 1
     assert float(today["close"][0]) == 10.5
+    # forming 行必须有明确的 is_st，否则策略的 ~is_st 过滤会把今日标的全丢掉
+    assert today["is_st"][0] is False
+    assert float(today["adjust"][0]) == 1.0
+    assert "up_limit" in frame.columns
+    assert "down_limit" in frame.columns
