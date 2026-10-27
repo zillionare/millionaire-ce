@@ -590,6 +590,63 @@ def test_deploy_to_paper_full_flow_with_mocked_dependencies(monkeypatch):
     assert runtime.mode == "paper"
 
 
+def test_deploy_to_paper_passes_fee_config(monkeypatch):
+    """策略转仿真时把佣金/印花税/过户费/最低佣金/滑点带到 PaperBroker。"""
+    import threading as _threading
+
+    class _NoStartThread:
+        def __init__(self, target, args, daemon, name):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(_threading, "Thread", _NoStartThread)
+    captured: dict = {}
+    fake_paper = SimpleNamespace(avail=0)
+
+    def _fake_create(cls, **kw):
+        captured.update(kw)
+        return fake_paper
+
+    monkeypatch.setattr(
+        "quantide.service.strategy_runtime.PaperBroker.create",
+        classmethod(_fake_create),
+    )
+    monkeypatch.setattr(
+        "quantide.service.strategy_runtime.register_port_backed_broker",
+        lambda **kw: SimpleNamespace(),
+    )
+    fake_ctx = SimpleNamespace(
+        registry=SimpleNamespace(),
+        adapters=SimpleNamespace(),
+        market_data=SimpleNamespace(),
+    )
+    strategy_runtime_manager._runtime = fake_ctx
+    strategy_runtime_manager._backtest_history["bt-fee"] = _make_backtest("bt-fee")
+
+    config = {
+        "commission": 0.0002,
+        "stamp_duty": 0.0005,
+        "transfer_fee": "1e-05",
+        "min_commission": 5.0,
+        "slippage_pct": 0.001,
+    }
+    strategy_runtime_manager.deploy_to_paper(
+        portfolio_id="bt-fee",
+        principal=10_000.0,
+        registry=fake_ctx.registry,
+        market_data=fake_ctx.market_data,
+        config=config,
+    )
+
+    assert captured["commission"] == pytest.approx(0.0002)
+    assert captured["stamp_tax"] == pytest.approx(0.0005)
+    assert captured["transfer_fee"] == pytest.approx(1e-5)
+    assert captured["min_commission"] == pytest.approx(5.0)
+    assert captured["slippage"] == pytest.approx(0.001)
+
+
 def test_deploy_to_paper_raises_when_runtime_not_initialized(monkeypatch):
     """When self._runtime is None, deploy_to_paper raises RuntimeError.
     Covers L291-L293."""

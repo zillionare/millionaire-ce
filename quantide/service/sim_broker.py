@@ -54,6 +54,8 @@ class PaperBroker(AbstractBroker):
         principal: float = 1_000_000,
         commission: float = 1e-4,
         stamp_tax: float = 0.001,
+        transfer_fee: float = 0.0,
+        min_commission: float = 5.0,
         slippage: float = 0.0,
         dry_run: bool = False,
         portfolio_name: str = "simulation",
@@ -69,6 +71,8 @@ class PaperBroker(AbstractBroker):
             principal: 初始资金
             commission: 佣金费率 (默认 1e-4 = 0.01%, A 股双边)
             stamp_tax: 印花税率 (默认 0.001 = 0.1%, A 股仅卖方, FR-180)
+            transfer_fee: 过户费率 (默认 0, 双边)
+            min_commission: 单笔最低佣金 (默认 5 元)
             slippage: 滑点 (比率, 默认 0.0, FR-200)
             dry_run: dry-run 模式 (默认 False, FR-440): True 时 buy/sell 记录信号不实际下单
             portfolio_name: 账户名称
@@ -96,6 +100,8 @@ class PaperBroker(AbstractBroker):
         self._auction_epsilon = float(auction_epsilon)
         self._bar_view = LiveBarView(bars=daily_bars, market_data=market_data, today_func=self._get_today)
         self._stamp_tax = stamp_tax
+        self._transfer_fee = transfer_fee
+        self._min_commission = min_commission
         self._slippage = slippage
         self._dry_run = dry_run
         self._dry_run_signals: list[dict] = []
@@ -132,6 +138,10 @@ class PaperBroker(AbstractBroker):
         portfolio_id: str,
         principal: float = 1_000_000,
         commission: float = 1e-4,
+        stamp_tax: float = 0.001,
+        transfer_fee: float = 0.0,
+        min_commission: float = 5.0,
+        slippage: float = 0.0,
         portfolio_name: str = "simulation",
         info: str = "",
         market_value_update_interval: float = 10.0,
@@ -163,6 +173,10 @@ class PaperBroker(AbstractBroker):
             portfolio_id=portfolio_id,
             principal=principal,
             commission=commission,
+            stamp_tax=stamp_tax,
+            transfer_fee=transfer_fee,
+            min_commission=min_commission,
+            slippage=slippage,
             portfolio_name=portfolio_name,
             info=info,
             market_value_update_interval=market_value_update_interval,
@@ -200,6 +214,27 @@ class PaperBroker(AbstractBroker):
             info=pf.info or "",
             market_data=market_data,
         )
+
+    def apply_fee_config(
+        self,
+        *,
+        commission: float | None = None,
+        stamp_tax: float | None = None,
+        transfer_fee: float | None = None,
+        min_commission: float | None = None,
+        slippage: float | None = None,
+    ) -> None:
+        """应用策略转仿真时保存的交易费用/滑点配置。"""
+        if commission is not None:
+            self._commission = float(commission)
+        if stamp_tax is not None:
+            self._stamp_tax = float(stamp_tax)
+        if transfer_fee is not None:
+            self._transfer_fee = float(transfer_fee)
+        if min_commission is not None:
+            self._min_commission = float(min_commission)
+        if slippage is not None:
+            self._slippage = float(slippage)
 
     def _on_limit_update(self, data: dict):
         """涨跌停更新回调。
@@ -1028,9 +1063,10 @@ class PaperBroker(AbstractBroker):
         Returns:
             fee = 佣金 (max(5.0, amount * commission)) + 印花税 (仅卖方, amount * stamp_tax)
         """
-        commission = max(5.0, amount * self._commission)
+        commission = max(self._min_commission, amount * self._commission)
+        transfer = amount * self._transfer_fee
         stamp = amount * self._stamp_tax if side == OrderSide.SELL else 0.0
-        return commission + stamp
+        return commission + transfer + stamp
 
     def _apply_trade_to_portfolio(self, trade: Trade):
         """应用成交到投资组合（仅更新内存状态）。
@@ -1138,7 +1174,8 @@ class PaperBroker(AbstractBroker):
                     est_price = quote.get("lastPrice", 0)
 
         if est_price > 0:
-            est_cost = est_price * shares * (1 + self._commission)
+            est_amount = est_price * shares
+            est_cost = est_amount + self._calculate_fee(est_amount, OrderSide.BUY)
             if est_cost > self._cash:
                 raise InsufficientCash(asset, est_cost, self._cash)
 

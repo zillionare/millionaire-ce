@@ -20,6 +20,21 @@ from quantide.service.registry import BrokerRegistry
 from quantide.service.sim_broker import PaperBroker
 
 
+def _optional_float(value: Any) -> float | None:
+    """把配置值转成 float；空值/非法值返回 None（保留 broker 默认）。"""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or(value: Any, default: float) -> float:
+    parsed = _optional_float(value)
+    return parsed if parsed is not None else default
+
+
 @dataclass
 class StrategyRuntime:
     runtime_id: str
@@ -282,11 +297,16 @@ class StrategyRuntimeManager:
             return existing
         effective_config = config if config is not None else run.config
         account_id = f"paper-{run.strategy_name}-{uuid.uuid4().hex[:8]}"
+        config = effective_config or {}
         broker = PaperBroker.create(
             portfolio_id=account_id,
             portfolio_name=f"{run.strategy_name}-paper",
             principal=principal,
-            commission=float((effective_config or {}).get("commission", 1e-4)),
+            commission=_float_or(config.get("commission"), 1e-4),
+            stamp_tax=_float_or(config.get("stamp_duty"), 5e-4),
+            transfer_fee=_float_or(config.get("transfer_fee"), 1e-5),
+            min_commission=_float_or(config.get("min_commission"), 5.0),
+            slippage=_float_or(config.get("slippage_pct"), 0.001),
             market_data=market_data,
         )
         runtime = self._runtime
@@ -1138,6 +1158,18 @@ class StrategyRuntimeManager:
             broker = self._registry.get(account_kind, portfolio_id)
         if broker is None:
             raise RuntimeError(f"账户不存在: {account_kind}:{portfolio_id}")
+        if account_kind == BrokerKind.SIMULATION.value:
+            port = getattr(broker, "port", None)
+            apply_fee_config = getattr(port, "apply_fee_config", None)
+            if callable(apply_fee_config):
+                config = dict(spec.get("config") or {})
+                apply_fee_config(
+                    commission=_optional_float(config.get("commission")),
+                    stamp_tax=_optional_float(config.get("stamp_duty")),
+                    transfer_fee=_optional_float(config.get("transfer_fee")),
+                    min_commission=_optional_float(config.get("min_commission")),
+                    slippage=_optional_float(config.get("slippage_pct")),
+                )
         return self._start_strategy_runtime(
             mode=str(spec.get("mode") or ""),
             strategy_name=str(spec.get("strategy_name") or ""),

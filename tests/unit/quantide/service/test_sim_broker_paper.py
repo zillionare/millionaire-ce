@@ -479,3 +479,19 @@ def test_port_backed_broker_forwards_get_bars_range():
     wrapper = PortBackedBroker(_Port(), "p1", "sim")
     assert wrapper.get_bars_range([], datetime.date(2024, 1, 1)) == "range-ok"
     assert wrapper.get_history("600519.SH", 2, frame_type="30m") == "history-ok"
+
+
+def test_paper_broker_fee_config_includes_min_transfer_stamp(paper_broker):
+    """费用配置：最低佣金 + 过户费（双边）+ 印花税（卖出）。"""
+    paper_broker.apply_fee_config(
+        commission=1e-4,
+        stamp_tax=5e-4,
+        transfer_fee=1e-5,
+        min_commission=5.0,
+        slippage=0.001,
+    )
+    # 买入 1000 元：5 元最低佣金 + 0.01 元过户费
+    assert paper_broker._calculate_fee(1000.0, OrderSide.BUY) == pytest.approx(5.01)
+    # 卖出 1000 元：5 + 0.01 + 0.5 印花税
+    assert paper_broker._calculate_fee(1000.0, OrderSide.SELL) == pytest.approx(5.51)
+    assert paper_broker._slippage == pytest.approx(0.001)
