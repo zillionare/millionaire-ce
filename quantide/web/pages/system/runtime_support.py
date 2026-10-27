@@ -37,10 +37,18 @@ def _risk_severity_chip(severity: str):
     return Span(severity, cls=cls)
 
 
-def build_risk_event_center_content(limit: int = 8) -> Div:
-    """构建风险事件中心内容。"""
+def build_risk_event_center_content(limit: int = 20) -> Div:
+    """构建风险事件中心内容；未恢复告警优先展示。"""
     summary = strategy_runtime_manager.risk_summary()
-    events = strategy_runtime_manager.list_risk_events(limit=limit)
+    events = strategy_runtime_manager.list_risk_events(limit=100)
+    events.sort(
+        key=lambda item: (
+            bool(item.get("blocked")),
+            str(item.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+    events = events[:limit]
     rows = _build_risk_event_rows(events)
     return Div(
         Div(
@@ -100,7 +108,7 @@ def _build_risk_event_rows(events: list[dict[str, Any]]) -> list[Any]:
     return [Tr(Td("暂无风险事件", colspan="4", cls="px-4 py-6 text-center text-gray-400"))]
 
 
-def build_risk_event_center_card(refresh_path: str, limit: int = 8) -> Div:
+def build_risk_event_center_card(refresh_path: str, limit: int = 20) -> Div:
     """构建带自动刷新的风险事件卡片。"""
     return Div(
         build_risk_event_center_content(limit=limit),

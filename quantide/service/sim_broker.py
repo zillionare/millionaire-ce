@@ -980,24 +980,24 @@ class PaperBroker(AbstractBroker):
             self._cash -= (trade.amount + trade.fee)
             if trade.asset in self._positions:
                 pos = self._positions[trade.asset]
-                # 更新成本价 (简单加权平均)
-                # Cost = (OldShares * OldPrice + NewShares * TradePrice) / TotalShares
+                # 更新成本价（含买入手续费）
                 new_shares = pos.shares + trade.shares
                 if new_shares > 0:
-                    pos.price = (pos.shares * pos.price + trade.shares * trade.price) / new_shares
+                    total_cost = pos.shares * pos.price + trade.amount + trade.fee
+                    pos.price = total_cost / new_shares
                 pos.shares = new_shares
                 # T+1: avail 不变
             else:
-                # 新建持仓
+                # 新建持仓（成本价含买入手续费）
                 pos = Position(
                     portfolio_id=self.portfolio_id,
                     dt=today,
                     asset=trade.asset,
                     shares=trade.shares,
-                    price=trade.price,
+                    price=(trade.amount + trade.fee) / trade.shares,
                     avail=0, # T+1
                     mv=trade.amount, # 此时成交额即为市值
-                    profit= 0
+                    profit=0.0,
                 )
                 self._positions[trade.asset] = pos
         else:

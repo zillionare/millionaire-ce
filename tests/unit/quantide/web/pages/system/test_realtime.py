@@ -102,17 +102,6 @@ def test_realtime_breadcrumb_is_left_aligned():
     assert "w-fit" in html
 
 
-def test_realtime_content_shows_trade_link(monkeypatch):
-    now = datetime.datetime(2024, 1, 3, 10, 0)
-    monkeypatch.setattr(realtime, "_is_session", lambda current: True)
-    monkeypatch.setattr(realtime, "quote_monitor", _FakeQuotes(rows=[], last=None))
-    html = to_xml(
-        realtime._render_content(now, "", "/trade?account_id=sim_1")
-    )
-    assert "去交易" in html
-    assert "/trade?account_id=sim_1" in html
-
-
 def test_realtime_limit_badge_uses_clear_text(monkeypatch):
     now = datetime.datetime(2024, 1, 3, 10, 0)
     monkeypatch.setattr(realtime, "_is_session", lambda current: True)
@@ -120,11 +109,14 @@ def test_realtime_limit_badge_uses_clear_text(monkeypatch):
 
     class _Limits:
         def limits_map(self, _dt):
-            return {"600519.SH": (100.0, 120.0)}
+            return {"600519.SH": (100.0, 120.0), "000001.SZ": (10.0, 12.0)}
+
+    class _Stocks:
+        size = 4
 
     monkeypatch.setattr(
         "quantide.data.get_limit_price_store", lambda: _Limits()
     )
+    monkeypatch.setattr(realtime, "stock_list", _Stocks())
     html = to_xml(realtime._render_content(now, ""))
-    assert "涨跌停价已获取" in html
-    assert "5654/5919" not in html
+    assert "涨跌停价已获取：2/4（50%）" in html

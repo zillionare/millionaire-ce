@@ -198,17 +198,17 @@ def _build_market_table(data: list, page: int = 1, per_page: int = 20, total: in
             Div(
                 Span("每页: ", cls="text-sm text-gray-600 mr-1"),
                 A("20", href=page_url(1).replace(f"per_page={per_page}", "per_page=20"),
-                  cls=f"btn btn-sm {'btn-primary' if per_page == 20 else 'btn-outline'} mx-0.5"),
+                  cls=f"q-btn q-btn--sm mx-0.5{' border-gray-900 bg-gray-900 text-white' if per_page == 20 else ''}"),
                 A("50", href=page_url(1).replace(f"per_page={per_page}", "per_page=50"),
-                  cls=f"btn btn-sm {'btn-primary' if per_page == 50 else 'btn-outline'} mx-0.5"),
+                  cls=f"q-btn q-btn--sm mx-0.5{' border-gray-900 bg-gray-900 text-white' if per_page == 50 else ''}"),
                 A("100", href=page_url(1).replace(f"per_page={per_page}", "per_page=100"),
-                  cls=f"btn btn-sm {'btn-primary' if per_page == 100 else 'btn-outline'} mx-0.5"),
+                  cls=f"q-btn q-btn--sm mx-0.5{' border-gray-900 bg-gray-900 text-white' if per_page == 100 else ''}"),
                 cls="flex items-center ml-4"
             ),
             Div(
                 *[
                     A(str(p), href=page_url(p),
-                      cls=f"btn btn-sm {'btn-primary' if p == page else 'btn-outline'} mx-0.5")
+                      cls=f"q-btn q-btn--sm mx-0.5{' border-gray-900 bg-gray-900 text-white' if p == page else ''}")
                     for p in range(max(1, page - 2), min(total_pages + 1, page + 3))
                 ],
                 cls="flex items-center ml-4"
@@ -239,8 +239,12 @@ async def index(req, code: str = "", start_date: str = "", end_date: str = "",
 
     def adjust_btn(label: str, value: str) -> A:
         url = f"/system/market/?code={code}&start_date={start_date}&end_date={end_date}&adjust={value}&page=1&per_page={per_page}"
-        return A(label, href=url,
-                 cls=f"btn btn-sm {'btn-primary' if adjust == value else 'btn-outline'} mx-0.5")
+        active_cls = (
+            " border-gray-900 bg-gray-900 text-white"
+            if adjust == value
+            else ""
+        )
+        return A(label, href=url, cls=f"q-btn q-btn--sm whitespace-nowrap{active_cls}")
 
     page_content = Div(
         Div(
@@ -255,31 +259,31 @@ async def index(req, code: str = "", start_date: str = "", end_date: str = "",
             Form(
                 Div(
                     Div(
-                        _Label("证券代码", cls="block text-sm font-medium text-gray-700 mb-1"),
+                        _Label("证券代码", cls="q-label"),
                         Input(type="text", name="code", value=code, placeholder="输入股票代码",
-                              cls="input input-bordered w-full"),
-                        cls="mb-2"
+                              cls="q-input w-full"),
+                        cls="min-w-0"
                     ),
                     Div(
-                        _Label("起始日期", cls="block text-sm font-medium text-gray-700 mb-1"),
+                        _Label("起始日期", cls="q-label"),
                         Input(type="date", name="start_date", value=start_date,
-                              cls="input input-bordered w-full"),
-                        cls="mb-2"
+                              cls="q-input w-full"),
+                        cls="min-w-0"
                     ),
                     Div(
-                        _Label("结束日期", cls="block text-sm font-medium text-gray-700 mb-1"),
+                        _Label("结束日期", cls="q-label"),
                         Input(type="date", name="end_date", value=end_date,
-                              cls="input input-bordered w-full"),
-                        cls="mb-2"
+                              cls="q-input w-full"),
+                        cls="min-w-0"
                     ),
                     Div(
-                        Div(cls="block mb-1"),
-                        Button("查询", type="submit", cls="btn btn-primary w-full"),
+                        Button("查询", type="submit",
+                               cls="q-btn min-w-[72px] whitespace-nowrap"),
                         cls="flex items-end"
                     ),
-                    cls="grid grid-cols-1 md:grid-cols-4 gap-4"
+                    cls="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
                 ),
-                cls="bg-white p-4 rounded-lg shadow mb-3"
+                cls="card p-4 mb-3"
             ),
             cls="mb-4"
         ),
@@ -289,19 +293,22 @@ async def index(req, code: str = "", start_date: str = "", end_date: str = "",
         ),
         Div(
             Div(
-                Span("复权方式：", cls="text-sm font-medium text-gray-700"),
-                adjust_btn("不复权", "none"),
-                adjust_btn("前复权", "qfq"),
-                cls="flex items-center"
+                Span("复权方式", cls="whitespace-nowrap text-sm font-medium text-gray-700"),
+                Div(
+                    adjust_btn("不复权", "none"),
+                    adjust_btn("前复权", "qfq"),
+                    cls="flex flex-wrap items-center gap-1.5",
+                ),
+                cls="flex min-w-0 flex-wrap items-center gap-2",
             ),
             Button(
-                "立即更新",
+                "立即刷新",
                 hx_post="/system/market/sync",
                 hx_target="#market-content",
                 hx_swap="innerHTML",
-                cls="btn btn-sm btn-secondary"
+                cls="q-btn q-btn--sm shrink-0 whitespace-nowrap",
             ),
-            cls="bg-white p-3 rounded-lg shadow flex justify-between items-center mb-4"
+            cls="card mb-4 flex flex-wrap items-center justify-between gap-3 p-3"
         ),
         Div(
             _build_market_table(data, page, per_page, total, code, start_date, end_date, adjust),
@@ -320,6 +327,15 @@ async def sync_market(req):
     try:
         await asyncio.to_thread(daily_bars.store.update)
         logger.info("行情数据同步完成")
+        try:
+            from quantide.service.data_readiness import data_readiness_monitor
+
+            if datetime.datetime.now().time() >= datetime.time(18, 30):
+                data_readiness_monitor.check_end_of_day()
+            else:
+                data_readiness_monitor.check_morning()
+        except Exception:
+            pass
 
         code = req.query_params.get("code", "")
         start_date = req.query_params.get("start_date", "")

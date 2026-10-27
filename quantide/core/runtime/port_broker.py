@@ -89,17 +89,31 @@ class PortBackedBroker:
 
     @property
     def positions(self) -> dict[str, Position]:
+        views = list(self._port.query_positions())
+        prices: dict[str, float] = {}
+        if views:
+            try:
+                raw_prices = self.get_prices([view.asset for view in views])
+                if isinstance(raw_prices, dict):
+                    prices = raw_prices
+            except Exception:
+                prices = {}
         result: dict[str, Position] = {}
-        for view in self._port.query_positions():
+        for view in views:
+            shares = float(view.shares)
+            cost = shares * float(view.price)
+            price = float(prices.get(view.asset) or 0)
+            mv = shares * price if price > 0 else float(view.mv)
+            profit = mv - cost if shares > 0 else 0.0
             result[view.asset] = Position(
                 portfolio_id=self._portfolio_id,
                 dt=view.dt,
                 asset=view.asset,
-                shares=view.shares,
+                shares=shares,
                 avail=view.avail,
                 price=view.price,
-                profit=0.0,
-                mv=view.mv,
+                profit=profit,
+                mv=mv,
             )
         return result
 

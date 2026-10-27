@@ -228,6 +228,41 @@ def test_build_risk_event_center_with_events():
     assert "E1" in text
 
 
+def test_build_risk_event_center_prioritizes_blocked_events():
+    """未恢复告警应排在普通信息事件之前。"""
+    events = [
+        {
+            "severity": "info",
+            "title": "NEW-INFO",
+            "message": "",
+            "scope": "system",
+            "created_at": "2024-01-03",
+            "blocked": False,
+        },
+        {
+            "severity": "critical",
+            "title": "OLD-ALERT",
+            "message": "",
+            "scope": "system",
+            "created_at": "2024-01-01",
+            "blocked": True,
+        },
+    ]
+    with patch(
+        "quantide.web.pages.system.runtime_support.strategy_runtime_manager"
+    ) as mock_mgr:
+        mock_mgr.risk_summary.return_value = {
+            "blocked_accounts": 0,
+            "blocked_strategies": 0,
+            "open_events": 1,
+            "event_count": 2,
+        }
+        mock_mgr.list_risk_events.return_value = events
+        content = build_risk_event_center_content(limit=2)
+    text = str(content)
+    assert text.index("OLD-ALERT") < text.index("NEW-INFO")
+
+
 def test_build_risk_event_center_card_renders_div():
     card = build_risk_event_center_card("/refresh", limit=5)
     text = str(card)

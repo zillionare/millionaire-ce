@@ -64,7 +64,7 @@ from quantide.web.pages.system.alpha_ledger import system_alpha_ledger_app
 from quantide.web.pages.system.calendar import system_calendar_app
 from quantide.web.pages.system.datasource import system_datasource_app
 from quantide.web.pages.system.gateway import system_gateway_app
-from quantide.web.pages.system.jobs import system_jobs_app
+from quantide.web.pages.system.jobs import _init_scheduler_jobs, system_jobs_app
 from quantide.web.pages.system.market import system_market_app
 from quantide.web.pages.system.realtime import system_realtime_app
 from quantide.web.pages.system.risk_events import system_risk_events_app
@@ -252,6 +252,10 @@ def create_app(
             from quantide.service.data_readiness import data_readiness_monitor
 
             data_readiness_monitor.start()
+            try:
+                _init_scheduler_jobs()
+            except Exception as exc:
+                logger.warning(f"定时任务注册失败: {exc}")
     except Exception as exc:
         logger.warning(f"应用运行时初始化失败，将进入初始化向导模式: {exc}")
 

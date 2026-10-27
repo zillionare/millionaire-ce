@@ -101,6 +101,8 @@ async def test_paper_broker_buy_and_sell_with_mock_market_data(paper_broker):
     assert len(buy_result.trades or []) == 1
     assert paper_broker._positions[asset].shares == 100
     assert paper_broker._positions[asset].avail == 0
+    # 成本价含买入手续费：1000 元成交 + 5 元佣金 → 1005 / 100
+    assert paper_broker._positions[asset].price == pytest.approx(10.05)
 
     orders = db.orders_all(portfolio_id="paper-unit")
     trades = db.trades_all(portfolio_id="paper-unit")
@@ -120,6 +122,24 @@ async def test_paper_broker_buy_and_sell_with_mock_market_data(paper_broker):
     all_trades = db.trades_all(portfolio_id="paper-unit")
     assert all_trades.height == 2
     assert all_trades["side"].to_list() == [1, -1]
+
+
+@pytest.mark.asyncio
+async def test_paper_broker_average_cost_includes_fees(paper_broker):
+    asset = "000002.SZ"
+    await publish_market(paper_broker, asset, 10.0, up_limit=13.0, down_limit=8.0)
+    first = asyncio.create_task(paper_broker.buy(asset, 100, price=10.0, timeout=1.0))
+    await asyncio.sleep(0)
+    await publish_market(paper_broker, asset, 10.0, volume=1000)
+    await first
+    assert paper_broker._positions[asset].price == pytest.approx(10.05)
+
+    second = asyncio.create_task(paper_broker.buy(asset, 100, price=12.0, timeout=1.0))
+    await asyncio.sleep(0)
+    await publish_market(paper_broker, asset, 12.0, volume=1000)
+    await second
+    # 100*10.05 + 1200 + 5 = 2210; 2210 / 200 = 11.05
+    assert paper_broker._positions[asset].price == pytest.approx(11.05)
 
 
 @pytest.mark.asyncio

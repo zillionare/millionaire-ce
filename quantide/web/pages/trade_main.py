@@ -1591,6 +1591,9 @@ def PositionTable(positions: list[Position], hx_swap_oob: bool = False):
         ),
         id="position-table",
         cls="bg-white dark:bg-gray-800 rounded-lg shadow mb-6 overflow-hidden",
+        hx_get="/trade/positions",
+        hx_trigger="every 3s [document.visibilityState === 'visible']",
+        hx_swap="outerHTML",
         **({"hx_swap_oob": "true"} if hx_swap_oob else {}),
     )
 

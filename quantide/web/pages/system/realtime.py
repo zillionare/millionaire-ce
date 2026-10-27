@@ -25,7 +25,7 @@ from fasthtml.common import (
 )
 
 from quantide.data.models.calendar import calendar
-from quantide.data.models.daily_bars import daily_bars
+from quantide.data.models.stocks import stock_list
 from quantide.service.quote_monitor import quote_monitor
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import AppTheme
@@ -165,43 +165,24 @@ def _render_rows(now: datetime.datetime, query: str) -> list[Any]:
 def _data_health(now: datetime.datetime) -> list[Any]:
     items: list[Any] = []
     try:
-        daily_end = daily_bars.end
-        prev = calendar.day_shift(now.date(), -1)
-        stale = daily_end is None or daily_end < prev
-        items.append(
-            Span(
-                f"日线：{daily_end or '无数据'}"
-                + (" ⚠ 未更新到上一交易日" if stale else " ✓"),
-                cls=(
-                    "rounded-full px-2.5 py-1 text-xs "
-                    + (
-                        "bg-red-50 text-red-600"
-                        if stale
-                        else "bg-green-50 text-green-700"
-                    )
-                ),
-            )
-        )
-    except Exception:
-        items.append(Span("日线：数据层未就绪", cls="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500"))
-    try:
         from quantide.data import get_limit_price_store
 
         limits = get_limit_price_store().limits_map(now.date())
-        if limits:
-            items.append(
-                Span(
-                    "涨跌停价已获取",
-                    cls="rounded-full bg-green-50 px-2.5 py-1 text-xs text-green-700",
-                )
+        expected = int(stock_list.size or 0)
+        count = len(limits)
+        coverage = count / expected if expected else (1.0 if count else 0.0)
+        tone = (
+            "bg-green-50 text-green-700"
+            if coverage >= 0.9
+            else ("bg-gray-100 text-gray-700" if coverage >= 0.5 else "bg-red-50 text-red-600")
+        )
+        label = "涨跌停价已获取" if count else "涨跌停价未获取"
+        items.append(
+            Span(
+                f"{label}：{count}/{expected or '?'}（{coverage * 100:.0f}%）",
+                cls=f"rounded-full px-2.5 py-1 text-xs {tone}",
             )
-        else:
-            items.append(
-                Span(
-                    "涨跌停价未获取",
-                    cls="rounded-full bg-red-50 px-2.5 py-1 text-xs text-red-600",
-                )
-            )
+        )
     except Exception:
         items.append(Span("涨跌停价未获取", cls="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500"))
     items.append(
@@ -214,12 +195,7 @@ def _data_health(now: datetime.datetime) -> list[Any]:
     return items
 
 
-def _trade_url(session: dict) -> str:
-    account_id = str(session.get("active_account_id") or "").strip()
-    return f"/trade?account_id={account_id}" if account_id else "/trade"
-
-
-def _render_content(now: datetime.datetime, query: str, trade_url: str = "/trade") -> Div:
+def _render_content(now: datetime.datetime, query: str) -> Div:
     status = quote_monitor.status()
     last_received = status.get("last_received_at")
     freshness, tone, hint = _freshness(now, last_received)
@@ -236,15 +212,7 @@ def _render_content(now: datetime.datetime, query: str, trade_url: str = "/trade
     panel_url = "/system/realtime/panel"
     return Div(
         Div(
-            Div(
-                H2("实时行情", cls="text-lg font-semibold text-gray-900"),
-                A(
-                    "去交易 →",
-                    href=trade_url,
-                    cls="text-xs font-medium text-[#e41815] hover:text-[#c91412]",
-                ),
-                cls="flex items-center gap-3",
-            ),
+            H2("实时行情", cls="text-lg font-semibold text-gray-900"),
             Span(
                 "行情源 → MessageHub → 本页；用于确认系统正在接收实时数据",
                 cls="text-xs text-gray-500",
@@ -279,9 +247,9 @@ def _render_content(now: datetime.datetime, query: str, trade_url: str = "/trade
                     type="submit",
                     style="height:2rem;min-height:2rem;box-sizing:border-box;",
                     cls=(
-                        "inline-flex h-8 items-center justify-center rounded-lg border "
-                        "border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 "
-                        "transition hover:bg-gray-50 hover:text-gray-900"
+                        "inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap "
+                        "rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium "
+                        "text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
                     ),
                 ),
                 hx_get="/system/realtime/panel",
@@ -339,7 +307,6 @@ def index(req, session):
             _render_content(
                 datetime.datetime.now(),
                 req.query_params.get("q", ""),
-                _trade_url(session),
             ),
             cls="max-w-[1400px] mx-auto w-full",
         ),
@@ -349,9 +316,8 @@ def index(req, session):
 
 
 @rt("/panel")
-def panel(req, session):
+def panel(req):
     return _render_content(
         datetime.datetime.now(),
         req.query_params.get("q", ""),
-        _trade_url(session),
     )

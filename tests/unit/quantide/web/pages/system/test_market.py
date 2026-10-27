@@ -49,6 +49,17 @@ class TestMarketPage:
         assert "不复权" in resp.text
         assert "前复权" in resp.text
 
+    def test_market_controls_use_neutral_sizes(self, client):
+        """查询/复权/刷新控件使用中性小尺寸，布局不再被挤坏。"""
+        resp = client.get("/system/market/", follow_redirects=True)
+        text = resp.text
+        assert "q-btn min-w-[72px] whitespace-nowrap" in text
+        assert "btn btn-primary w-full" not in text
+        assert "复权方式" in text
+        assert "立即刷新" in text
+        assert "立即更新" not in text
+        assert "q-btn q-btn--sm shrink-0 whitespace-nowrap" in text
+
 
 def test_market_defaults_to_latest_page_data(monkeypatch):
     """无筛选条件时默认返回最近一个交易日首页数据"""

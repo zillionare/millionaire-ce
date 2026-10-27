@@ -180,6 +180,19 @@ def test_positions_empty_when_no_views():
     assert b.positions == {}
 
 
+def test_positions_use_live_price_for_mv_and_profit():
+    view = _make_position_view("000001.SZ")
+    view.shares = 100.0
+    view.price = 13.87
+    view.mv = 1389.0
+    port = _make_broker_port(position_view=[view])
+    port.get_prices.return_value = {"000001.SZ": 13.84}
+    b = PortBackedBroker(port, "p", BrokerKind.SIMULATION)
+    pos = b.positions["000001.SZ"]
+    assert pos.mv == pytest.approx(1384.0)
+    assert pos.profit == pytest.approx(1384.0 - 1387.0)
+
+
 # ---------------------------------------------------------------------------
 # orders
 # ---------------------------------------------------------------------------

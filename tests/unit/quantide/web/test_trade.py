@@ -1581,6 +1581,16 @@ class TestLoginRoutes:
         assert "buyStar.classList.add('hidden');" in text
         assert "sellStar.classList.add('hidden');" in text
 
+    def test_trade_panel_positions_poll_for_live_pnl(self, test_client):
+        """持仓表每 3 秒刷新，盈亏跟随最新行情。"""
+        response = test_client.get("/trade?tab=positions")
+        text = response.text
+        assert response.status_code == 200
+        assert 'hx-get="/trade/positions"' in text
+        assert "every 3s" in text
+        assert "visibilityState" in text
+        assert 'hx-swap="outerHTML"' in text
+
     def test_trade_panel_supports_position_sell_prefill_markup(self):
         """验证持仓行暴露卖出预填所需的 DOM 标记。"""
         from quantide.data.models import Position

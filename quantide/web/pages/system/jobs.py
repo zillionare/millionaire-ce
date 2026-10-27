@@ -29,8 +29,8 @@ system_jobs_app, rt = fast_app(hdrs=AppTheme.headers())
 PREDEFINED_JOBS = {
     "daily_bars_sync": {
         "name": "日线数据同步",
-        "cron": "35 15 * * 1-5",  # 每天 15:35，周一到周五
-        "description": "从数据源下载当交易日行情数据",
+        "cron": "35 17,18 * * 1-5",  # 收盘后 17:35/18:35，周一到周五
+        "description": "从数据源下载当交易日行情数据（17:35 主跑，18:35 兜底重试）",
         "enabled": True,
     },
     "stock_list_sync": {
@@ -214,8 +214,32 @@ def _run_daily_bars_sync():
 
     logger.info("Running daily bars sync job")
     try:
+        from quantide.core.enums import FrameType
+        from quantide.data.models.calendar import calendar
+
+        try:
+            expected = calendar.floor(datetime.datetime.now(), FrameType.DAY)
+        except Exception:
+            expected = None
         daily_bars.store.update()
-        _save_job_history("daily_bars_sync", "日线数据同步", "success", "下载完成")
+        actual = daily_bars.end
+        if isinstance(actual, datetime.datetime):
+            actual = actual.date()
+        if expected is not None:
+            if actual is None:
+                raise RuntimeError(f"日线未更新，期望至少 {expected}")
+            if isinstance(actual, datetime.date) and actual < expected:
+                raise RuntimeError(f"日线仅更新到 {actual}，期望至少 {expected}")
+        _save_job_history("daily_bars_sync", "日线数据同步", "success", f"已更新到 {actual}")
+        try:
+            from quantide.service.data_readiness import data_readiness_monitor
+
+            if datetime.datetime.now().time() >= datetime.time(18, 30):
+                data_readiness_monitor.check_end_of_day()
+            else:
+                data_readiness_monitor.check_morning()
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"Daily bars sync failed: {e}")
         _save_job_history("daily_bars_sync", "日线数据同步", "error", str(e))
