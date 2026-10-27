@@ -247,8 +247,8 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
                     type="submit",
                     style="height:2rem;min-height:2rem;box-sizing:border-box;",
                     cls=(
-                        "inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap "
-                        "rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium "
+                        "inline-flex h-8 w-16 flex-none items-center justify-center whitespace-nowrap "
+                        "rounded-lg border border-gray-200 bg-white px-0 text-sm font-medium "
                         "text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
                     ),
                 ),
