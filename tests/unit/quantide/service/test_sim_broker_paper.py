@@ -141,6 +141,11 @@ async def test_paper_broker_average_cost_includes_fees(paper_broker):
     # 100*10.05 + 1200 + 5 = 2210; 2210 / 200 = 11.05
     assert paper_broker._positions[asset].price == pytest.approx(11.05)
 
+    # 重启后从成交流水恢复成本价时，同样包含手续费
+    paper_broker._positions.clear()
+    paper_broker._init_or_sync_state()
+    assert paper_broker._positions[asset].price == pytest.approx(11.05)
+
 
 @pytest.mark.asyncio
 async def test_paper_broker_error_and_cancel_paths(paper_broker):

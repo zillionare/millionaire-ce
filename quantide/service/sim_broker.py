@@ -671,6 +671,73 @@ class PaperBroker(AbstractBroker):
                 pos = Position(**row)
                 self._positions[pos.asset] = pos
 
+        self._reconcile_position_costs_from_trades()
+
+    def _reconcile_position_costs_from_trades(self) -> None:
+        """按成交历史重算持仓成本价（含买入手续费）。
+
+        仅当按成交推算的股数与当前持仓一致时才覆盖，避免历史成交不完整
+        的账户被错误改写。
+        """
+        if not self._positions:
+            return
+        try:
+            trades = db.trades_all(portfolio_id=self.portfolio_id)
+        except Exception:
+            return
+        if trades is None or trades.is_empty():
+            return
+        try:
+            trades = trades.sort("tm")
+        except Exception:
+            pass
+
+        state: dict[str, tuple[float, float]] = {}
+        for row in trades.iter_rows(named=True):
+            asset = str(row.get("asset") or "")
+            if not asset:
+                continue
+            raw_side = row.get("side")
+            if isinstance(raw_side, OrderSide):
+                side = raw_side
+            else:
+                try:
+                    side = OrderSide(int(raw_side))
+                except Exception:
+                    text = str(raw_side).strip().upper()
+                    side = (
+                        OrderSide.BUY
+                        if text in {"BUY", "1"}
+                        else (OrderSide.SELL if text in {"SELL", "-1"} else OrderSide.UNKNOWN)
+                    )
+            shares, avg_cost = state.get(asset, (0.0, 0.0))
+            qty = float(row.get("shares") or 0)
+            if qty <= 0:
+                continue
+            if side == OrderSide.BUY:
+                total_cost = (
+                    shares * avg_cost
+                    + float(row.get("amount") or 0)
+                    + float(row.get("fee") or 0)
+                )
+                shares += qty
+                avg_cost = total_cost / shares if shares > 0 else 0.0
+            elif side == OrderSide.SELL:
+                shares -= qty
+                if shares <= 0:
+                    shares = 0.0
+                    avg_cost = 0.0
+            state[asset] = (shares, avg_cost)
+
+        for asset, pos in self._positions.items():
+            shares, avg_cost = state.get(asset, (0.0, 0.0))
+            if (
+                shares > 0
+                and avg_cost > 0
+                and abs(shares - float(pos.shares)) <= 1e-6
+            ):
+                pos.price = avg_cost
+
     @property
     def total_assets(self) -> float:
         """计算当前总资产（现金 + 持仓市值）。

@@ -245,7 +245,7 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
                 Button(
                     "筛选",
                     type="submit",
-                    style="height:2rem;min-height:2rem;box-sizing:border-box;",
+                    style="height:2rem;min-height:2rem;width:64px;flex:none;box-sizing:border-box;",
                     cls=(
                         "inline-flex h-8 w-16 flex-none items-center justify-center whitespace-nowrap "
                         "rounded-lg border border-gray-200 bg-white px-0 text-sm font-medium "
