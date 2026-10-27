@@ -262,7 +262,7 @@ def _resolve_trade_reference_close(asset: str) -> float:
     """
     if not asset:
         return 0.0
-    bars = _load_trade_reference_bars(asset, datetime.date.today(), 1)
+    bars = _load_trade_reference_bars(asset, datetime.date.today(), 5)
     if bars.is_empty():
         return 0.0
     try:
@@ -1984,7 +1984,7 @@ async def search_trade_assets(req):
         )))
 
     # 只返回代码/名称/拼音，避免逐条查询行情阻塞事件循环。
-    result_df = result_df.head(20)
+    result_df = result_df.sort_values("asset").head(20)
     items = []
     for _, row in result_df.iterrows():
         asset = row.get("asset", "")
