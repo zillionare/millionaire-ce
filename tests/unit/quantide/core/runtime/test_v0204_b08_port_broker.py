@@ -434,6 +434,15 @@ def test_to_status_unknown_string_returns_unknown():
     assert b._to_status("bogus-status") == OrderStatus.UNKNOWN
 
 
+def test_to_status_numeric_string_and_enum_name():
+    port = _make_broker_port()
+    b = PortBackedBroker(port, "p", BrokerKind.SIMULATION)
+    assert b._to_status("48") == OrderStatus.UNREPORTED
+    assert b._to_status("50") == OrderStatus.REPORTED
+    assert b._to_status("UNREPORTED") == OrderStatus.UNREPORTED
+    assert b._to_status("OrderStatus.REPORTED") == OrderStatus.REPORTED
+
+
 def test_to_order_converts_view():
     """_to_order uses _to_side and _to_status correctly."""
     port = _make_broker_port()

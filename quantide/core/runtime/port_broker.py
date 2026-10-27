@@ -259,6 +259,13 @@ class PortBackedBroker:
             except ValueError:
                 return OrderStatus.UNKNOWN
         text = str(value).strip().upper()
+        if text.startswith("ORDERSTATUS."):
+            text = text.split(".", 1)[1]
+        if text.isdigit():
+            try:
+                return OrderStatus(int(text))
+            except ValueError:
+                return OrderStatus.UNKNOWN
         aliases = {
             "SUBMITTED": OrderStatus.REPORTED,
             "REJECTED": OrderStatus.JUNK,
@@ -268,5 +275,13 @@ class PortBackedBroker:
             "FILLED": OrderStatus.SUCCEEDED,
             "SUCCEEDED": OrderStatus.SUCCEEDED,
             "REPORTED": OrderStatus.REPORTED,
+            "UNREPORTED": OrderStatus.UNREPORTED,
+            "WAIT_REPORTING": OrderStatus.WAIT_REPORTING,
+            "REPORTED_CANCEL": OrderStatus.REPORTED_CANCEL,
+            "PARTSUCC_CANCEL": OrderStatus.PARTSUCC_CANCEL,
+            "PART_CANCEL": OrderStatus.PART_CANCEL,
+            "PART_SUCC": OrderStatus.PART_SUCC,
+            "JUNK": OrderStatus.JUNK,
+            "UNKNOWN": OrderStatus.UNKNOWN,
         }
         return aliases.get(text, OrderStatus.UNKNOWN)
