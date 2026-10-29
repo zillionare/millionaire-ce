@@ -3,14 +3,14 @@
 [tool.poetry]
 name = "millionaire"
 version = "0.1.0"
-description = "Millionaire Community Edition quantitative trading platform."
+description = "Millionaire — Zillionare's flagship quantitative trading platform."
 authors = ["Aaron Yang <aaron_yang@jieyu.ai>"]
 readme = "README.md"
-license = "MIT"
+license = "Other/Proprietary License"
 classifiers=[
     'Development Status :: 2 - Pre-Alpha',
     'Intended Audience :: Developers',
-    'License :: OSI Approved :: MIT License',
+    'License :: Other/Proprietary License',
     'Natural Language :: English',
     'Programming Language :: Python :: 3',
     'Programming Language :: Python :: 3.13'
@@ -21,9 +21,8 @@ packages = [
 ]
 
 # Tests, notebooks, coverage output, and repository-only engineering notes are
-# useful in the source tree but are not part of the CE release artifacts. In
-# particular, this prevents old private risk IDs in historical tests from
-# entering an sdist while keeping those tests available to repository users.
+# useful in the source tree but are not part of release artifacts. This also
+# keeps historical test fixtures with private risk IDs out of the sdist.
 exclude = [
     "tests/**",
     "notebooks/**",

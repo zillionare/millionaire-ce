@@ -1,22 +1,21 @@
 # Millionaire
 
-Millionaire is a Community Edition quantitative trading platform released
-under the MIT License.
+Millionaire is Zillionare's flagship quantitative trading platform.
 
 The published package name is `millionaire`. The Python import namespace
 is `quantide` — this is an internal name, not a brand; if you fork and
 rename, you can rename the import namespace to match.
 
-This repository is in active architectural refactoring. CE supports
-backtesting, paper trading, simulation, and generic risk-program extension
-points. Production/live trading and private risk-program implementations are
-not included in CE.
+This repository is in active architectural refactoring. It supports
+backtesting, paper trading, simulation, live trading, and the
+built-in triple-barrier / pullback / cost-stop risk programs. The future
+`millionaire-ce` branch removes private strategies and risk programs and
+hides live trading.
 
 Current status:
 
 - the project is not using FastAPI + Vue as its target stack
 - the application stack is being consolidated around FastHTML + MonsterUI
-- live trading is intentionally hidden and unavailable in CE
 - development-stage notes are stored under `.dev/`
 
 Until the refactor settles, treat `.dev/` as draft engineering notes rather than release documentation.

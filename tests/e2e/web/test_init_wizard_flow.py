@@ -14,6 +14,7 @@ from quantide.config.dev_stubs import (
     reset_dev_stub_runtime_for_tests,
 )
 from quantide.service.init_wizard import init_wizard
+from tests.e2e.support.gateway_stub import running_gateway_stub
 from tests.e2e.support.init_wizard_session import init_wizard_e2e_session
 from tests.e2e.support.tushare_stub import patched_tushare_fetcher
 
@@ -30,7 +31,7 @@ def _parse_sync_progress_payload(response_text: str) -> dict:
     return json.loads(lines[-1][6:])
 
 
-def _advance_to_runtime_step(client, market_home) -> None:
+def _advance_to_gateway_step(client, market_home) -> None:
     response = client.get("/init-wizard/", follow_redirects=False)
     assert response.status_code == 200
     assert "欢迎使用 Millionaire!" in response.text
@@ -59,19 +60,41 @@ def _advance_to_runtime_step(client, market_home) -> None:
         admin_password_confirm="StrongPass!123",
     )
     assert response.status_code == 200
-    assert "CE 使用 MarketDataHub" in response.text
+    assert "启用 gateway" in response.text
 
 
 @pytest.mark.e2e
 @pytest.mark.release_gate
-def test_init_wizard_happy_path_uses_market_data_hub_in_ce():
-    with init_wizard_e2e_session() as session, patched_tushare_fetcher():
-        _advance_to_runtime_step(session.client, session.market_home)
+def test_init_wizard_happy_path_uses_gateway_ping(
+):
+    with init_wizard_e2e_session() as session, running_gateway_stub(
+        prefix="/qmt", api_key="gateway-key"
+    ) as gateway_stub, patched_tushare_fetcher():
+        _advance_to_gateway_step(session.client, session.market_home)
+
+        response = session.client.post(
+            "/init-wizard/gateway-test",
+            data={
+                "gateway_enabled": "true",
+                "gateway_server": gateway_stub.host,
+                "gateway_port": str(gateway_stub.port),
+                "gateway_api_key": "gateway-key",
+                "gateway_prefix": gateway_stub.prefix,
+            },
+        )
+        assert response.status_code == 200
+        assert "连通性测试正确" in response.text
+        assert f"{gateway_stub.prefix}/api/ping" in response.text
 
         response = _next_step(
             session.client,
             5,
             4,
+            gateway_enabled="true",
+            gateway_server=gateway_stub.host,
+            gateway_port=str(gateway_stub.port),
+            gateway_api_key="gateway-key",
+            gateway_prefix=gateway_stub.prefix,
         )
         assert response.status_code == 200
         assert "当前数据源" in response.text
@@ -79,7 +102,10 @@ def test_init_wizard_happy_path_uses_market_data_hub_in_ce():
 
         state = init_wizard.get_state(force_refresh=True)
         assert state.app_home == str(session.market_home)
-        assert state.gateway_enabled is False
+        assert state.gateway_enabled is True
+        assert state.gateway_server == gateway_stub.host
+        assert state.gateway_port == gateway_stub.port
+        assert state.gateway_base_url == gateway_stub.prefix
 
         response = _next_step(
             session.client,
@@ -115,7 +141,7 @@ def test_init_wizard_happy_path_uses_market_data_hub_in_ce():
 def test_init_wizard_download_validation_stays_on_data_setup(
 ):
     with init_wizard_e2e_session() as session:
-        _advance_to_runtime_step(session.client, session.market_home)
+        _advance_to_gateway_step(session.client, session.market_home)
 
         response = _next_step(session.client, 5, 4)
         assert response.status_code == 200
@@ -198,8 +224,10 @@ def test_init_wizard_dev_stub_step_five_imports_samples_without_download_dialog(
             assert login_response.status_code == 303
 
             live_response = session.client.get("/trade/live/", follow_redirects=False)
-            assert live_response.status_code == 503
-            assert "CE edition 暂不支持实盘交易" in live_response.text
+            assert live_response.status_code == 200
+            assert "Gateway 已连接" in live_response.text
+            assert "Gateway 未连接" not in live_response.text
+            assert "实盘网关" in live_response.text
     finally:
         reset_dev_stub_runtime_for_tests()
 
@@ -223,7 +251,7 @@ def test_init_wizard_download_success_reports_completed_progress():
     ), patch(
         "quantide.web.pages.init_wizard.msg_hub.unsubscribe", lambda *args, **kwargs: None
     ):
-        _advance_to_runtime_step(session.client, session.market_home)
+        _advance_to_gateway_step(session.client, session.market_home)
 
         response = _next_step(session.client, 5, 4)
         assert response.status_code == 200

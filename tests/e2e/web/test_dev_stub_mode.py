@@ -26,15 +26,15 @@ def test_dev_stub_switch_starts_gateway_and_tushare(monkeypatch) -> None:
     try:
         with system_settings_e2e_session() as session:
             response = session.client.get("/strategy/live", follow_redirects=False)
-            assert response.status_code == 503
-            assert "CE edition 暂不支持实盘交易" in response.text
+            assert response.status_code == 303
+            assert response.headers["location"] == "/trade/live/"
 
             response = session.client.get("/papertrade", follow_redirects=False)
             assert response.status_code == 303
             assert response.headers["location"] == "/trade/paper/"
 
             response = session.client.get("/trade/live/", follow_redirects=False)
-            assert response.status_code == 503
+            assert response.status_code != 403
 
             strategy_runtime_manager.create_backtest_runtime(
                 portfolio_id=portfolio_id,
@@ -66,16 +66,17 @@ def test_dev_stub_switch_starts_gateway_and_tushare(monkeypatch) -> None:
                 assert "已转入仿真" in paper_response.text
 
                 live_modal = session.client.get(f"/strategy/backtest/{portfolio_id}/deploy/live/modal")
-                assert live_modal.status_code == 503
-                assert "CE edition 暂不支持实盘交易" in live_modal.text
+                assert live_modal.status_code == 200
+                assert "确认转入实盘" in live_modal.text
+                assert "gateway:default" in live_modal.text
 
                 live_response = session.client.post(
                     f"/strategy/backtest/{portfolio_id}/deploy/live",
                     data={"live_account_id": "gateway:default"},
                     follow_redirects=True,
                 )
-                assert live_response.status_code == 503
-                assert "CE edition 暂不支持实盘交易" in live_response.text
+                assert live_response.status_code == 200
+                assert "已转入实盘" in live_response.text
             finally:
                 with strategy_runtime_manager._lock:
                     paper_portfolio_ids = [
@@ -102,7 +103,7 @@ def test_dev_stub_switch_starts_gateway_and_tushare(monkeypatch) -> None:
             features = get_feature_status()
             assert features["backtest"]["available"] is True
             assert features["simulation"]["available"] is True
-            assert features["live_trading"]["available"] is False
+            assert features["live_trading"]["available"] is True
 
             adapter = GatewayBrokerAdapter(
                 GatewayClient(
