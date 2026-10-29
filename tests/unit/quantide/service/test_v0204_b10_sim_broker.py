@@ -191,7 +191,7 @@ def test_concat_with_forming_drops_col_on_cast_exception():
         "volume": 500.0,
         "amount": 5400.0,
     }
-    with patch.object(sb_mod.live_quote, "_limits", {}):
+    with patch.object(sb_mod.market_data_hub, "_limits", {}):
         # Lines 416-417 (drop on cast exception) are exercised; the subsequent
         # select(hist.columns) propagates ColumnNotFoundError due to the drop.
         with pytest.raises(pl.exceptions.ColumnNotFoundError):
@@ -215,7 +215,7 @@ def test_concat_with_forming_returns_hist_when_empty():
         "dt": dt.datetime(2024, 1, 2, 10, 0),
         "close": 10.8,
     }
-    with patch.object(sb_mod.live_quote, "_limits", {}):
+    with patch.object(sb_mod.market_data_hub, "_limits", {}):
         result = PaperBroker._concat_with_forming(empty_hist, forming, count=5)
     # When hist is empty, returns hist directly
     assert result is empty_hist

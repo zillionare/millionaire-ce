@@ -9,10 +9,10 @@ v0.2-002-ui spec FR-0460 AC-2 定义的 10 步流程, 与现有
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class WizardStepKind(str, Enum):
+class WizardStepKind(StrEnum):
     """步骤类别.
 
     REQUIRED: 必选步骤, 不允许跳过, 必须填写并通过校验.

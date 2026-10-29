@@ -16,6 +16,10 @@ from quantide.web.pages.accounts import (
 )
 
 
+@pytest.fixture(autouse=True)
+def private_edition_account_cases(monkeypatch):
+    monkeypatch.setattr(accounts_mod, "supports_live_trading", lambda: True)
+
 # ---------------------------------------------------------------------------
 # ConfirmDialogModal — pure render
 # ---------------------------------------------------------------------------

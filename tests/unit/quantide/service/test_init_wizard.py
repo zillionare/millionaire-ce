@@ -81,6 +81,13 @@ def test_get_state_loads_defaults_from_config(db, monkeypatch):
     assert state.notify_mail_to == "to@example.com"
 
 
+def test_get_state_defaults_to_localhost_bind(db):
+    service = InitWizardService()
+    state = service.get_state(force_refresh=True)
+
+    assert state.app_host == "127.0.0.1"
+
+
 def test_feature_status_and_redirect_follow_gateway_state(db, monkeypatch):
     service = InitWizardService()
 
@@ -96,7 +103,7 @@ def test_feature_status_and_redirect_follow_gateway_state(db, monkeypatch):
 
     status = service.get_feature_status()
     assert status["backtest"] is True
-    assert status["simulation"] is False
+    assert status["simulation"] is True
     assert status["live_trading"] is False
     assert service.get_completion_redirect() == "/"
 
@@ -143,7 +150,7 @@ def test_feature_status_treats_unreachable_gateway_as_unavailable(db, monkeypatc
     status = service.get_feature_status()
 
     assert status["backtest"] is True
-    assert status["simulation"] is False
+    assert status["simulation"] is True
     assert status["live_trading"] is False
 
 
@@ -253,7 +260,7 @@ def test_get_progress_uses_new_step_labels(db):
         "欢迎",
         "运行环境",
         "管理员密码",
-        "行情与交易网关",
+        "行情与交易",
         "数据源设置及下载",
         "完成",
     ]

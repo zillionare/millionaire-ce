@@ -11,10 +11,10 @@ AC-FR0060-4: 运行时实例状态机 (idle/running/paused/stopped), 停止后�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class RuntimeMode(str, Enum):
+class RuntimeMode(StrEnum):
     """运行模式."""
 
     BACKTEST = "backtest"
@@ -23,14 +23,14 @@ class RuntimeMode(str, Enum):
     TOTAL_LIVE = "total_live"
 
 
-class PromoteMode(str, Enum):
+class PromoteMode(StrEnum):
     """转入模式 (从回测转仿真/实盘)."""
 
     PAPER = "paper"
     LIVE = "live"
 
 
-class RuntimeInstanceStatus(str, Enum):
+class RuntimeInstanceStatus(StrEnum):
     """运行时实例状态 (AC-FR0060-4).
 
     IDLE: 已创建, 未启动.

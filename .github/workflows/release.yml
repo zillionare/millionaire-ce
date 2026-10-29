@@ -72,6 +72,7 @@ jobs:
         run: |
           poetry lock
           poetry build
+          python scripts/validate_release_artifacts.py dist
 
       - name: Create Release
         id: create_release

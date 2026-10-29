@@ -12,10 +12,8 @@ Output:
 from __future__ import annotations
 
 import json
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 SPEC_DIR = Path(".louke/project/specs/v0.2-004-coverage-recovery")
 SHARD_DIR = SPEC_DIR / "recovery" / "production-contracts"
@@ -114,7 +112,7 @@ def build_classification() -> dict:
     return {
         "schema_version": 1,
         "spec_id": "v0.2-004-coverage-recovery",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "coverage_source": str(COVERAGE_JSON),
         "thresholds": {
             "v0.2_added": V02_THRESHOLD,

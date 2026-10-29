@@ -18,6 +18,7 @@ from loguru import logger
 from monsterui.all import *
 
 from quantide.config.dev_stubs import dev_stubs_enabled
+from quantide.config.features import supports_live_trading
 from quantide.config.settings import get_settings
 from quantide.data.models.app_state import AppState
 from quantide.data.sqlite import db
@@ -27,6 +28,17 @@ from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
 # 定义子路由应用
 system_gateway_app, rt = fast_app(hdrs=AppTheme.headers())
+
+
+def _live_settings_unavailable(req):
+    """Return the same clear response used by the HTTP feature boundary."""
+    from quantide.web.middleware_feature import _feature_disabled_response
+
+    headers = getattr(req, "headers", {}) or {}
+    return _feature_disabled_response(
+        "实盘设置",
+        htmx=str(headers.get("HX-Request", "")).lower() == "true",
+    )
 
 
 def _normalize_prefix(prefix: str) -> str:
@@ -446,6 +458,8 @@ def _render_page(
 @rt("/")
 async def index(req):
     """交易网关页面"""
+    if not supports_live_trading():
+        return _live_settings_unavailable(req)
     config = _load_gateway_config()
     return _render_page(req, config)
 
@@ -453,6 +467,8 @@ async def index(req):
 @rt("/test", methods=["GET", "POST"])
 async def test_connection(req):
     """测试网关连接"""
+    if not supports_live_trading():
+        return _live_settings_unavailable(req)
     if req.method == "POST":
         form = await req.form()
         try:
@@ -484,6 +500,8 @@ async def test_connection(req):
 @rt("/save", methods=["POST"])
 async def save_config(req):
     """保存网关配置"""
+    if not supports_live_trading():
+        return _live_settings_unavailable(req)
     form = await req.form()
     try:
         config = _coerce_gateway_form(form)

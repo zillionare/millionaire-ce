@@ -14,7 +14,7 @@
     - asset: str
     - trigger_price: float
     - cost_basis: float | None
-    - reason: str (pullback/cost_stop/stop_loss/...)
+    - reason: str (adapter-defined exit reason)
     - trigger_ts: datetime
     - barrier_hit: up/down/expire (default expire, F-TB-1/2 触发时为 up/down)
   risk.excess_return.finalized:
@@ -32,17 +32,16 @@ from __future__ import annotations
 import datetime
 import uuid
 from dataclasses import asdict, dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from quantide.core.message import msg_hub
-
 
 RISK_TRIGGERED_TOPIC = "risk.triggered"
 RISK_EXCESS_FINALIZED_TOPIC = "risk.excess_return.finalized"
 
 
-class BarrierHit(str, Enum):
+class BarrierHit(StrEnum):
     """屏障触发类型 (F-TB-1/2/3)."""
 
     UP = "up"

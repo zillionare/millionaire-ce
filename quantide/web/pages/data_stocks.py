@@ -170,7 +170,7 @@ async def index(req):
     )
 
     layout.main_block = page_content
-    return layout.render()
+    return layout.render(req)
 
 # ========== SSE 更新逻辑 ==========
 
@@ -240,6 +240,7 @@ async def sync_progress():
     async def event_generator():
         while True:
             yield f"data: {json.dumps(_sync_status)}\n\n"
-            if _sync_status["completed"] or _sync_status["error"]: break
+            if _sync_status["completed"] or _sync_status["error"]:
+                break
             await asyncio.sleep(0.5)
     return StreamingResponse(event_generator(), media_type="text/event-stream")

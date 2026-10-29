@@ -63,6 +63,9 @@ def test_non_blocking_error_does_not_freeze():
 
 def test_fetch_minute_bars_normalizes_fields():
     """抓取结果字段归一化。"""
+    baostock = pytest.importorskip(
+        "baostock", reason="BaoStock is installed only with the optional ml30m extra"
+    )
     fetcher = BaostockMinuteFetcher()
     raw = MagicMock()
     raw.error_code = "0"
@@ -108,8 +111,8 @@ def test_fetch_minute_bars_normalizes_fields():
         ],
     ]
 
-    with patch("baostock.login") as mock_login, patch(
-        "baostock.query_history_k_data_plus", return_value=raw
+    with patch.object(baostock, "login") as mock_login, patch.object(
+        baostock, "query_history_k_data_plus", return_value=raw
     ):
         mock_login.return_value = MagicMock(error_code="0", error_msg="success")
         frame = fetcher.fetch_minute_bars(
@@ -125,6 +128,9 @@ def test_fetch_minute_bars_normalizes_fields():
 
 def test_min_history_date_is_clamped():
     """早于分钟线可用起点的时间会被收敛。"""
+    baostock = pytest.importorskip(
+        "baostock", reason="BaoStock is installed only with the optional ml30m extra"
+    )
     fetcher = BaostockMinuteFetcher(min_history_date=datetime.date(2020, 1, 2))
     captured: dict = {}
 
@@ -139,8 +145,8 @@ def test_min_history_date_is_clamped():
         captured["start"] = start_date
         return raw
 
-    with patch("baostock.login") as mock_login, patch(
-        "baostock.query_history_k_data_plus", side_effect=_capture
+    with patch.object(baostock, "login") as mock_login, patch.object(
+        baostock, "query_history_k_data_plus", side_effect=_capture
     ):
         mock_login.return_value = MagicMock(error_code="0", error_msg="success")
         fetcher.fetch_minute_bars(

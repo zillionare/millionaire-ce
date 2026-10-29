@@ -51,10 +51,14 @@ class HistBarView:
     - `get_bars_range`：多只股票的日期区间日线（策略面板选股/预取走此路径）。
     """
 
-    def __init__(self, bars=None):
+    def __init__(self, bars=None, minute_bars=None):
         from quantide.data.models.daily_bars import daily_bars
+        from quantide.data.models.minute_bars import minute_bars as default_minute_bars
 
         self._bars = bars if bars is not None else daily_bars
+        self._minute_bars = (
+            minute_bars if minute_bars is not None else default_minute_bars
+        )
 
     def _resolve_end_date(self, end_dt):
         end_date = end_dt.date() if isinstance(end_dt, datetime.datetime) else end_dt
@@ -144,9 +148,7 @@ class HistBarView:
             end_dt = datetime.datetime.now()
         if end_dt.tzinfo is not None:
             end_dt = end_dt.replace(tzinfo=None)
-        from quantide.data.models.minute_bars import minute_bars
-
-        return minute_bars.get_bars(
+        return self._minute_bars.get_bars(
             count, end=end_dt, assets=[asset], adjust="qfq"
         )
 
@@ -196,8 +198,7 @@ class HistBarView:
 class LiveBarView(HistBarView):
     """带“收盘集合竞价 forming bar”的日线视图，用于 Paper 实盘。
 
-    形成 bar 来自行情订阅中心（`market_data.snapshot`），没有订阅中心时
-    回落 `live_quote.get_daily_bar`（网关/直连行情）。
+    forming bar 来自唯一的行情订阅中心 `MarketDataHub`。
     """
 
     def __init__(
@@ -357,9 +358,9 @@ class LiveBarView(HistBarView):
                     )
                 }
         if snapshot is None:
-            from quantide.service.livequote import live_quote
+            from quantide.service.market_data_hub import market_data_hub
 
-            bar = live_quote.get_daily_bar(asset)
+            bar = market_data_hub.get_daily_bar(asset)
             if bar is None:
                 return None
             snapshot = bar
@@ -377,7 +378,7 @@ class LiveBarView(HistBarView):
                 ts_date = ts_date.date()
             if ts_date != self._today():
                 return None
-        up_limit, down_limit = self._limits(asset)
+        down_limit, up_limit = self._limits(asset)
         return {
             "date": self._today(),
             "asset": asset,
@@ -488,7 +489,7 @@ class LiveBarView(HistBarView):
             rows = [row for row in rows if row["date"] not in existing]
         if not rows:
             return completed
-        up_limit, down_limit = self._limits(asset)
+        down_limit, up_limit = self._limits(asset)
         is_st = self._is_st(asset)
         today = pl.DataFrame(rows).with_columns(
             pl.col("date").cast(pl.Datetime("ms")),
@@ -516,7 +517,7 @@ class LiveBarView(HistBarView):
             return completed
         if row is None:
             return completed
-        up_limit, down_limit = self._limits(asset)
+        down_limit, up_limit = self._limits(asset)
         row = {
             **row,
             "adjust": 1.0,

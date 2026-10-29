@@ -70,6 +70,8 @@ class SQLiteDB:
     def __init__(self):
         # 每个线程都有自己的数据库连接
         self._thread_local = threading.local()
+        self._lock = threading.RLock()
+        self._connection_generation = 0
         self.db_path: str = ""
         self._initialized = False
 
@@ -79,38 +81,74 @@ class SQLiteDB:
 
     def init(self, db_path: str | Path):
         next_path = str(Path(db_path).expanduser())
-        if self.is_initialized_for(next_path):
-            return
+        with self._lock:
+            if self.is_initialized_for(next_path):
+                return
 
-        # 强制重置连接，特别是对于 :memory: 或者路径改变的情况
-        self._thread_local = threading.local()
-        self._initialized = False
+            # A connection may have been opened by this thread before the
+            # application was rebound to another config directory.  Close it
+            # before changing generations; connections owned by other threads
+            # are retired lazily by ``db`` below, in their owning threads.
+            self._close_thread_connection()
+            self._connection_generation += 1
+            self._initialized = False
 
-        # 初始化数据库连接
-        self.db_path = next_path
+            # 初始化数据库连接
+            self.db_path = next_path
 
-        conn = sqlite3.connect(self.db_path)
-        db = su.Database(conn)
+            conn = sqlite3.connect(self.db_path)
+            db = su.Database(conn)
 
-        # 启用 WAL 模式提高并发读性能
-        if db_path != ":memory:":
-            db.enable_wal()
+            # 启用 WAL 模式提高并发读性能
+            if db_path != ":memory:":
+                db.enable_wal()
 
-        # 初始化表结构
-        self._init_tables(db)
-        conn.commit()
-        conn.close()
-        self._initialized = True
+            # 初始化表结构
+            self._init_tables(db)
+            conn.commit()
+            conn.close()
+            self._initialized = True
+
+    def _close_thread_connection(self) -> None:
+        """Close the current thread's connection, if one is open."""
+        conn = getattr(self._thread_local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            finally:
+                del self._thread_local.conn
+                if hasattr(self._thread_local, "db"):
+                    del self._thread_local.db
+                if hasattr(self._thread_local, "generation"):
+                    del self._thread_local.generation
+        # ``conn`` is normally resolved by ``__getattr__`` from the current
+        # thread-local Database.  Remove any instance-level shadow so a
+        # retired connection cannot bypass that proxy after a rebind.
+        self.__dict__.pop("conn", None)
 
     @property
     def db(self) -> su.Database:
         """获取当前线程的数据库连接"""
-        if not self._initialized:
-            raise RuntimeError(
-                "SQLiteDB has not been initialized. Call init(db_path) first."
-            )
+        with self._lock:
+            if not self._initialized:
+                raise RuntimeError(
+                    "SQLiteDB has not been initialized. Call init(db_path) first."
+                )
 
-        if not hasattr(self._thread_local, "conn"):
+            generation = self._connection_generation
+            conn = getattr(self._thread_local, "conn", None)
+            if (
+                conn is not None
+                and getattr(self._thread_local, "generation", None) == generation
+                and self._connection_is_alive(conn)
+            ):
+                return self._thread_local.db
+
+            # A TestClient (and production ASGI servers) may handle a request
+            # on a different thread from the one that initialized the app.
+            # Rebind stale thread-local state instead of allowing a connection
+            # from a previous app/config generation to leak into the request.
+            self._close_thread_connection()
             conn = sqlite3.connect(self.db_path, check_same_thread=True)
 
             # 启用外键约束
@@ -118,8 +156,28 @@ class SQLiteDB:
 
             self._thread_local.conn = conn
             self._thread_local.db = su.Database(conn)
+            self._thread_local.generation = generation
 
-        return self._thread_local.db
+            return self._thread_local.db
+
+    @staticmethod
+    def _connection_is_alive(conn: sqlite3.Connection) -> bool:
+        """Return whether a cached SQLite connection is still usable."""
+        try:
+            conn.execute("SELECT 1")
+        except sqlite3.ProgrammingError:
+            return False
+        return True
+
+    def close(self) -> None:
+        """Close the current thread's connection.
+
+        Other thread-owned connections are closed when those threads next
+        access the database after a rebind.  SQLite connections must be closed
+        by the thread that owns them.
+        """
+        with self._lock:
+            self._close_thread_connection()
 
     def _init_tables(self, db: su.Database):
         """初始化表结构

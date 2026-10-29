@@ -5,8 +5,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from loguru import logger
-
+from quantide.config.features import supports_live_trading
 from quantide.config.settings import get_settings
 from quantide.core.enums import BrokerKind
 from quantide.core.ports import MarketDataPort
@@ -18,7 +17,6 @@ from quantide.core.runtime.gateway_client import GatewayClient
 from quantide.core.runtime.registration import register_port_backed_broker
 from quantide.core.scheduler import scheduler
 from quantide.data import db
-from quantide.service.livequote import live_quote
 from quantide.service.market_data_hub import market_data_hub
 from quantide.service.registry import BrokerRegistry
 from quantide.service.sim_broker import PaperBroker
@@ -75,7 +73,12 @@ class RuntimeBootstrap:
             clock: 时钟端口 (NFR-060), 不传则默认注入 `SystemClockAdapter` (生产语义: 返回墙钟).
                   测试侧可传入 `VirtualClock` (见 tests/e2e/support/virtual_clock.py) 替换时间.
         """
-        self._mode = mode or self._resolve_mode()
+        requested_mode = mode or self._resolve_mode()
+        self._mode = (
+            "paper"
+            if requested_mode == "live" and not supports_live_trading()
+            else requested_mode
+        )
         self._clock = clock if clock is not None else SystemClockAdapter()
 
     def bootstrap(self) -> RuntimeContext:
@@ -100,9 +103,14 @@ class RuntimeBootstrap:
         """解析运行模式."""
         runtime = get_settings()
         raw = runtime.runtime_mode
+        if raw == "live" and not supports_live_trading():
+            # Older CE state files used ``live`` as their default.  Coerce
+            # those files to the safe paper runtime instead of allowing a
+            # restart to create a live gateway runtime.
+            return "paper"
         if raw in {"live", "paper", "backtest"}:
             return raw  # type: ignore
-        if runtime.livequote_mode == "none" or not runtime.gateway_enabled:
+        if not runtime.gateway_enabled:
             return "backtest"
         return "live"
 
@@ -113,9 +121,8 @@ class RuntimeBootstrap:
         pytdx/QMT 服务）把快照发布到消息总线 ``quotes.all``，
         这里统一由 :class:`MarketDataHub` 订阅并提供给 Paper 撮合与风控。
 
-        gateway 模式仍可用（``live_quote``），此时额外订阅其推送。
+         所有实时消费者统一使用 ``MarketDataHub``。
         """
-        runtime = get_settings()
         market_data_hub.start()
         from quantide.service.limit_price_refresher import limit_price_refresher
         from quantide.service.minute_bar_aggregator import minute_bar_aggregator
@@ -126,17 +133,6 @@ class RuntimeBootstrap:
         quote_monitor.start()
         self._start_embedded_publisher(adapters)
         adapters.register("market_data", "market_data_hub", market_data_hub)
-        gateway_url = str(getattr(runtime, "gateway_base_url", "") or "").strip()
-        if (
-            runtime.livequote_mode == "gateway" or runtime.gateway_enabled
-        ) and gateway_url:
-            live_quote.start()
-            adapters.register("market_data", "live_quote", live_quote)
-            return live_quote
-        if runtime.livequote_mode == "gateway" or runtime.gateway_enabled:
-            logger.warning(
-                "交易网关地址为空，live_quote 不启动；实时行情改用 MarketDataHub"
-            )
         return market_data_hub
 
     def _start_embedded_publisher(self, adapters: AdapterRegistry) -> None:
@@ -224,9 +220,11 @@ class RuntimeBootstrap:
         market_data: MarketDataPort,
     ) -> None:
         """注册 gateway 交易适配器."""
+        if not supports_live_trading():
+            return
         runtime = get_settings()
         broker_name = runtime.runtime_broker_adapter
-        mode_name = runtime.livequote_mode
+        mode_name = "gateway"
         gateway_url = str(getattr(runtime, "gateway_base_url", "") or "").strip()
         use_gateway = runtime.gateway_enabled and bool(gateway_url) and (
             broker_name == "gateway" or mode_name == "gateway"

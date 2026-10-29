@@ -23,7 +23,7 @@ story: 作为用户，我希望使用三种内置策略：双均线（日线）�
 priority: P0
 
 ### US-050
-story: 作为用户，我编写使用 30m 等 live-only 数据粒度的独立策略（如 30 分钟隔夜策略）时，框架通过 on_day_open / on_bar 驱动，调用 get_bars(frame_type="30m") 的策略不可回测，BacktestRunner 会抛 UnsupportedFrameTypeForBacktest
+story: 作为用户，我编写使用 1d/30m 周期的独立策略（如 30 分钟隔夜策略）时，框架通过 on_day_open / on_bar 驱动，两种周期均可回测；fill_timing 支持 cheat_on_close/next_open
 priority: P0
 
 ### US-060
@@ -39,7 +39,7 @@ story: 作为用户，我可以为每次运行单独设置运行时参数（本�
 priority: P0
 
 ### US-090
-story: 作为用户，我希望在 dry-run 暂停实盘时，并行仿真继续跑，便于我决定何时重启
+story: 作为用户，我希望 dry-run 作为陪跑影子与实际策略并行运行并对比净值，以便判断策略表现
 priority: P1
 
 ### US-100
@@ -62,15 +62,15 @@ priority: P0
 
 ### scenario-020 独立策略（30 分钟隔夜）上实盘
 
-编写 `OvernightStrategy(BaseStrategy)`（直接继承 BaseStrategy，使用 `frame_type="30m"` 数据），在仿真界面运行 1 周 → 切到实盘 → 系统当日停止原仿真 → 自动创建并行仿真 → 策略在实盘正常发单。期间如需暂停，点 "dry-run"，策略继续运行不实际下单，可观察并行仿真曲线。
+编写 `OvernightStrategy(BaseStrategy)`（直接继承 BaseStrategy，使用 `frame_type="30m"` 数据），可先回测，再在仿真界面运行 1 周 → 切到实盘 → 自动创建并行仿真 → 策略在实盘正常发单。dry-run 默认开启，作为陪跑影子与实盘净值对照，不暂停实际策略。
 
 ### scenario-030 风控策略叠加
 
-独立策略"双均线"进入实盘时，其绑定的"成本止损"风控策略自动激活。持仓跌破买入价 5% 时风控策略发卖出单，成交归属宿主策略的虚拟账本，不影响宿主收益计算，但贡献一条超额收益记录（按 Triple Barrier 计算：从卖出日起监控 N 日，期间若标的价格上涨到 `P_sell * (1 + up_threshold)` / 下跌到 `P_sell * (1 - down_threshold)` / N 日内未触发则按收盘价退出，分别记 `−up_threshold` / `+down_threshold` / `P_sell/Close_N − 1`，N=0 即当日收盘）。此条贡献属于"双均线进入实盘 → 停止"这一开启区间；风控若被重新开启，则另起新开启区间独立计算。
+独立策略进入实盘时，宿主可挂载由当前宿主显式注册的 `RiskStrategy` 风控程序。成交归属宿主策略的虚拟账本；风险事件与超额收益仍遵循通用 `RiskStrategy` 接口。CE 不内置或自动导入任何私有风险程序，未安装程序时保持空选择。
 
 ### scenario-031 回测中的 Broker 层风控 Overlay
 
-独立策略在日线回测中声明 `RISK_OVERLAY="triple_barrier"` 并开启 `use_broker_barriers`。每个交易日开盘先检查 T 日 open 的 gap/时间屏障；宿主 `on_bar` 结束后再用 T 日 OHLC 模拟盘中屏障。T0 触发的 barrier 延到 T1 开盘卖出；宿主保留 alpha 退出。overlay 与宿主共用 `portfolio_id`，不创建 `RiskStrategy` 实例，也不产生超额收益指标。公司行为按拆股假设处理：`shares×r`、`cost÷r`、`cash` 不变；回测不扣红利税。
+用户在 1d 或 30m 宿主回测中选择已注册的兼容风控及参数；每个 bar 先按可用历史数据执行有序 overlay composite，再执行宿主。`allow_same_bar_repurchase` 明确控制同 bar 重买，T+1 仍适用。overlay 与宿主共用 `portfolio_id`，回测不产生风控超额收益指标；旧的未注册 ID 显示不可用/阻止。公司行为按拆股假设处理：`shares×r`、`cost÷r`、`cash` 不变；回测不扣红利税。
 
 
 ## 索引
@@ -83,7 +83,7 @@ priority: P0
 | FR-090 ~ FR-110 | [spec-strategy.md](./spec-strategy.md) | 内置策略(双均线/回落卖出/成本止损) |
 | FR-115 ~ FR-130 | [spec-strategy.md](./spec-strategy.md) | 驱动契约 + 风控契约 |
 | FR-140 ~ FR-180 | [spec-trading.md](./spec-trading.md) | 交易规则(涨跌停/数量/时间/特殊状态/资金) |
-| FR-185 | [spec-strategy.md](./spec-strategy.md) | 持仓成本基准(加权均价算法) |
+| FR-185 | [spec-strategy.md](./spec-strategy.md) | 持仓成本基准(含交易费用的加权均价算法) |
 | FR-190 | [spec-trading.md](./spec-trading.md) | 回测 vs 实盘差异 |
 | FR-200 | [spec-strategy.md](./spec-strategy.md) | 运行时参数(策略层) |
 | FR-210 ~ FR-220 | [spec-trading.md](./spec-trading.md) | 虚拟账本 + 手工交易归属 |
@@ -114,6 +114,7 @@ priority: P0
 | [FR-030](./spec-strategy.md#fr-030) | 策略参数跨模式透传 | spec-strategy.md#fr-030 | [#60](https://github.com/zillionare/millionaire/issues/60) |
 | [FR-040](./spec-strategy.md#fr-040) | 一次开发四模式无感迁移 | spec-strategy.md#fr-040 | [#61](https://github.com/zillionare/millionaire/issues/61) |
 | [FR-050](./spec-strategy.md#fr-050) | 下单方式 — cheat-on-close | spec-strategy.md#fr-050 | [#62](https://github.com/zillionare/millionaire/issues/62) |
+| [FR-055](./spec-strategy.md#fr-055) | 运行周期、决策与成交时点 | spec-strategy.md#fr-055 | 本 FR 新增，issue 待建 |
 | [FR-060](./spec-strategy.md#fr-060) | 下单方式 — 次日开盘（正常模式） | spec-strategy.md#fr-060 | [#63](https://github.com/zillionare/millionaire/issues/63) |
 | [FR-070](./spec-strategy.md#fr-070) | 下单方式 — 次日限价 | spec-strategy.md#fr-070 | [#64](https://github.com/zillionare/millionaire/issues/64) |
 | [FR-080](./spec-strategy.md#fr-080) | 跨模式回测-实盘差异（声明性） | spec-strategy.md#fr-080 | [#65](https://github.com/zillionare/millionaire/issues/65) |
@@ -122,14 +123,14 @@ priority: P0
 | [FR-110](./spec-strategy.md#fr-110) | 内置策略 — 成本止损（风控） | spec-strategy.md#fr-110 | [#68](https://github.com/zillionare/millionaire/issues/68) |
 | [FR-115](./spec-strategy.md#fr-115) | BaseStrategy 驱动契约（独立策略默认） | spec-strategy.md#fr-115 | [#69](https://github.com/zillionare/millionaire/issues/69) |
 | [FR-125](./spec-strategy.md#fr-125) | 风控策略驱动契约 | spec-strategy.md#fr-125 | [#70](https://github.com/zillionare/millionaire/issues/70) |
-| [FR-130](./spec-strategy.md#fr-130) | 风控策略契约（生命周期 + 不可回测） | spec-strategy.md#fr-130 | [#71](https://github.com/zillionare/millionaire/issues/71) |
+| [FR-130](./spec-strategy.md#fr-130) | 风控策略契约（生命周期 + 宿主回测） | spec-strategy.md#fr-130 | [#71](https://github.com/zillionare/millionaire/issues/71) |
 | [FR-135](./spec-strategy.md#fr-135) | 可回测的 Broker 层风控 Overlay | spec-strategy.md#fr-135 | 本 FR 新增，issue 待建 |
 | [FR-140](./spec-trading.md#fr-140) | 交易规则 — 价格（涨跌停） | spec-trading.md#fr-140 | [#72](https://github.com/zillionare/millionaire/issues/72) |
 | [FR-150](./spec-trading.md#fr-150) | 交易规则 — 数量 | spec-trading.md#fr-150 | [#73](https://github.com/zillionare/millionaire/issues/73) |
 | [FR-160](./spec-trading.md#fr-160) | 交易规则 — 时间 | spec-trading.md#fr-160 | [#74](https://github.com/zillionare/millionaire/issues/74) |
 | [FR-170](./spec-trading.md#fr-170) | 交易规则 — 特殊状态（停牌） | spec-trading.md#fr-170 | [#75](https://github.com/zillionare/millionaire/issues/75) |
 | [FR-180](./spec-trading.md#fr-180) | 交易规则 — 资金 | spec-trading.md#fr-180 | [#76](https://github.com/zillionare/millionaire/issues/76) |
-| [FR-185](./spec-strategy.md#fr-185) | 持仓成本基准（加权均价 — 经典方案 A, P1 已解） | spec-strategy.md#fr-185 | [#77](https://github.com/zillionare/millionaire/issues/77) |
+| [FR-185](./spec-strategy.md#fr-185) | 持仓成本基准（含交易费用的加权均价 — 经典方案 A, P1 已解） | spec-strategy.md#fr-185 | [#77](https://github.com/zillionare/millionaire/issues/77) |
 | [FR-190](./spec-trading.md#fr-190) | 交易规则 — 回测 vs 实盘的差异 | spec-trading.md#fr-190 | [#78](https://github.com/zillionare/millionaire/issues/78) |
 | [FR-200](./spec-strategy.md#fr-200) | 运行时参数（框架管理，策略不可见） | spec-strategy.md#fr-200 | [#79](https://github.com/zillionare/millionaire/issues/79) |
 | [FR-210](./spec-strategy.md#fr-210) | 虚拟账本（按 qtoid 归因） | spec-strategy.md#fr-210 | [#80](https://github.com/zillionare/millionaire/issues/80) |
@@ -138,7 +139,7 @@ priority: P0
 | [FR-240](./spec-strategy.md#fr-240) | 独立策略的无回测启动路径 | spec-strategy.md#fr-240 | [#83](https://github.com/zillionare/millionaire/issues/83) |
 | [FR-250](./spec-strategy.md#fr-250) | 风控策略调度 | spec-strategy.md#fr-250 | [#84](https://github.com/zillionare/millionaire/issues/84) |
 | [FR-360](./spec-trading.md#fr-360) | 评估指标 — 风控策略（Triple Barrier） | spec-trading.md#fr-360 | [#85](https://github.com/zillionare/millionaire/issues/85) |
-| [FR-440](./spec-strategy.md#fr-440) | dry-run 模式 | spec-strategy.md#fr-440 | [#86](https://github.com/zillionare/millionaire/issues/86) |
+| [FR-440](./spec-trading.md#fr-440) | dry-run 陪跑影子 | spec-trading.md#fr-440 | [#86](https://github.com/zillionare/millionaire/issues/86) |
 | [FR-450](./spec-strategy.md#fr-450) | 消息通知（微信）— 事件定义 | spec-strategy.md#fr-450 | [#87](https://github.com/zillionare/millionaire/issues/87) |
 
 > **Issue 格式** (Sage cycle 1 决策, 2026-06-17; cycle 2 调整, 2026-06-22):

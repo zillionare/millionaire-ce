@@ -12,24 +12,24 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class OrderSide(str, Enum):
+class OrderSide(StrEnum):
     """委托方向."""
 
     BUY = "buy"
     SELL = "sell"
 
 
-class OrderType(str, Enum):
+class OrderType(StrEnum):
     """委托方式."""
 
     LIMIT = "limit"
     MARKET = "market"
 
 
-class PriceSource(str, Enum):
+class PriceSource(StrEnum):
     """价格来源 (interfaces.md §4.3)."""
 
     PREV_CLOSE = "prev_close"

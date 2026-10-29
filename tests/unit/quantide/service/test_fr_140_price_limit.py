@@ -184,6 +184,7 @@ def test_get_price_limits_falls_back_to_limit_store(paper_broker, monkeypatch):
             return 9.0, 11.0
 
     monkeypatch.setattr("quantide.data.get_limit_price_store", lambda: _Store())
+    paper_broker._market_data = None
     assert paper_broker._get_price_limits("000001.SZ") == (9.0, 11.0)
 
 

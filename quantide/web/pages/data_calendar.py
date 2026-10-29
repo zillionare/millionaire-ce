@@ -137,7 +137,7 @@ def _CalendarTab(req):
     try:
         year = int(req.query_params.get("year", curr_year))
         month = int(req.query_params.get("month", curr_month))
-    except:
+    except (TypeError, ValueError):
         year, month = curr_year, curr_month
 
     # 计算上个月和下个月
@@ -217,7 +217,7 @@ async def index(req):
     )
 
     layout.main_block = page_content
-    return layout.render()
+    return layout.render(req)
 
 @rt("/do-update", methods="post")
 async def do_update():

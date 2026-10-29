@@ -7,10 +7,10 @@ settings view that business code should read from.
 from __future__ import annotations
 
 import datetime
-from zoneinfo import ZoneInfo
 import urllib.parse
 from dataclasses import dataclass, replace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -20,6 +20,7 @@ from quantide.config.dev_stubs import (
     dev_stubs_enabled,
     ensure_dev_stubs_started,
 )
+from quantide.config.features import supports_live_trading
 from quantide.config.paths import normalize_data_home
 
 DEFAULT_TIMEZONE = ZoneInfo("Asia/Shanghai")
@@ -57,8 +58,10 @@ def parse_cheat_on_close_time(value: Any) -> datetime.time:
         raise ValueError(f"cheat_on_close_time must be HH:MM, got {value!r}")
     try:
         h, m = int(parts[0]), int(parts[1])
-    except ValueError:
-        raise ValueError(f"cheat_on_close_time parts must be integers, got {value!r}")
+    except ValueError as err:
+        raise ValueError(
+            f"cheat_on_close_time parts must be integers, got {value!r}"
+        ) from err
     if not (0 <= h <= 23 and 0 <= m <= 59):
         raise ValueError(f"cheat_on_close_time out of clock range: {value!r}")
     if not (9 <= h <= 15) or (h == 15 and m > 0):
@@ -163,8 +166,10 @@ def _apply_dev_stub_overrides(settings: Settings) -> Settings:
         gateway_scheme=runtime.gateway_scheme,
         gateway_server=runtime.gateway_server,
         gateway_port=runtime.gateway_port,
-        runtime_mode="live",
+        runtime_mode="live" if supports_live_trading() else "paper",
         runtime_broker_adapter="gateway",
+        # Deprecated persisted setting; runtime data always comes from
+        # MarketDataHub. Kept for loading older state files.
         livequote_mode="gateway",
         data_source="tushare",
     )
@@ -193,6 +198,7 @@ class Settings:
     gateway_port: int
     runtime_mode: str
     runtime_broker_adapter: str
+    # Deprecated compatibility field; it no longer selects a quote source.
     livequote_mode: str
     data_source: str
     epoch: datetime.date
@@ -218,6 +224,9 @@ class Settings:
             getattr(state, "gateway_port", 0) or parsed.port or fallback_port,
             fallback_port,
         )
+        runtime_mode = str(getattr(state, "runtime_mode", "") or "").strip().lower()
+        if runtime_mode == "live" and not supports_live_trading():
+            runtime_mode = "paper"
 
         return cls(
             edition=branding.edition,
@@ -225,7 +234,7 @@ class Settings:
             product_name=branding.product_name,
             release_package=branding.release_package,
             app_home=normalize_data_home(getattr(state, "app_home", "")),
-            app_host=str(getattr(state, "app_host", "") or "0.0.0.0"),
+            app_host=str(getattr(state, "app_host", "") or "127.0.0.1"),
             app_port=_as_int(getattr(state, "app_port", 8130), 8130),
             app_prefix=_normalize_path_prefix(
                 getattr(state, "app_prefix", "") or "/quantide"
@@ -241,7 +250,7 @@ class Settings:
                 getattr(state, "gateway_server", "") or parsed.hostname or ""
             ),
             gateway_port=gateway_port,
-            runtime_mode=str(getattr(state, "runtime_mode", "") or "").strip().lower(),
+            runtime_mode=runtime_mode,
             runtime_broker_adapter=str(
                 getattr(state, "runtime_broker_adapter", "") or ""
             ).strip().lower(),

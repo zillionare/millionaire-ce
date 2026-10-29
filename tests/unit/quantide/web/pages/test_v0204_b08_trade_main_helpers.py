@@ -283,7 +283,10 @@ def test_resolve_live_current_price_returns_zero_when_no_quote(monkeypatch):
         def get_quote(self, asset):
             return None
 
-    monkeypatch.setattr(tm, "live_quote", _FakeLQ())
+        def start(self):
+            return None
+
+    monkeypatch.setattr(tm, "market_data_hub", _FakeLQ())
     price = _resolve_live_current_price("000001.SZ")
     assert price == 0.0
 

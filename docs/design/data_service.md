@@ -1,8 +1,12 @@
-# 数据服务完整设计（发行版）
+# 数据服务完整设计（发行版：现状审计与目标架构）
 
 > 目标：为 Quantide 发行版提供**可插拔数据源**、**高性能本地存储**、**统一行情契约**、
 > **仅模拟交易**的执行链路，并支持**集合竞价收盘价买入**。
 > 本设计基于对现有代码的实测（Pro 机器，2026-10-22），所有数据源结论均已验证。
+>
+> 本文同时是一次**只读审计**：`现状`描述当前代码已经做什么，`目标`描述推荐的
+> 可靠替换架构。目标架构中的候选抓取、验证、来源纪元和原子提升尚未实现；本次只更新
+> 文档，不实现代码、提交或部署。
 
 ---
 
@@ -13,17 +17,17 @@
 | 因子库 | **不存在**。`quantide/factors/` 只有 `alpha.py`（因子计算）+ `catalog.py`（清单）+ `alphatest.py`（单因子检验），是**策略内部用的因子函数**，不是独立的因子库服务 | `ls quantide/factors/` |
 | 本地存储 | Parquet + polars，按 `partition_key_year` 年分区，单文件 `part-0.parquet` | `quantide/data/stores/base.py` |
 | 日线数据量 | 3,914,025 行（5678 只 × 724 交易日，2023-10-23 起） | Pro 实测 |
-| 指数行情 | **存储层已存在但数据为空**（`data/bars/index/` 空目录）；`IndexBarsStore` 已实现 | `quantide/data/stores/index_bars.py` |
-| 指数成分 | **完全不存在** | grep 无 `index_weight` |
+| 指数行情 | `IndexBarsStore` 已实现，且同步链路已落地；覆盖数据以本地实际分区为准 | `quantide/data/stores/index_bars.py` / `DataSyncService` |
+| 指数成分 | `IndexWeightStore` + Tushare PIT 逐期同步已实现；覆盖范围取决于本地快照 | `quantide/data/stores/index_weight.py` / `DataSyncService` |
 | 行情端口 | `MarketDataPort` 协议 + `QuoteSnapshot` 数据类**已定义好**（symbol/price/open/high/low/volume/amount/ts） | `quantide/core/ports/market_data.py` |
-| 行情实现 | 只有 `LiveQuote`（gateway websocket 模式），Pro 上 `ws:///ws/quotes` 无 host → **从未连通过** | Pro 日志 |
+| 行情实现 | `MarketDataHub` 是唯一实时行情端口；发布者通过 `quotes.all` 提供快照 | `quantide/service/market_data_hub.py` |
 | 模拟撮合 | `PaperBroker._try_match` 消费 `lastPrice/high/low/volume` → **行情字段需求已明确** | `quantide/service/sim_broker.py:772` |
-| 同步任务 | `data_market.py` 的 `daily_bars.fetch_with_daily_progress`（逐日拉取 + 进度 SSE）→ 同步的是**个股日线 + 市值** | `quantide/web/pages/data_market.py:313` |
+| 同步任务 | `DataSyncService` 已统一编排日历、证券列表、日线、市值、指数、成分和分钟阶段；部分旧向导路径仍是 legacy 直拉 | `quantide/service/data_sync.py` |
 | 存储性能基线 | 面板读 80 天全市场（31 万行）**0.002s**；单资产 120 天 **0.003s** | Pro 实测 |
 
 ---
 
-## 1. 分层架构
+## 1. 分层架构（目标）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -42,14 +46,14 @@
 │   · StockList        证券主数据（已有）                          │
 │   · LimitPriceStore  涨跌停价（新增：撮合必需，当前只在内存）        │
 ├─────────────────────────────────────────────────────────────┤
-│ L1 数据源层（可插拔）                                          │
-│   · TushareFetcher   日线/复权/市值/ST/涨跌停/指数/指数成分/分钟     │
-│   · 未来可插 AkShare / BaoStock / 自建                           │
+│ L1 数据源层（按数据集/周期可替换；不是全局主备）                    │
+│   · TushareFetcher   日线/复权/市值/ST/涨跌停/指数/指数成分          │
+│   · BaoStockFetcher  历史 30 分钟（目标范围内）                     │
+│   · TencentFetcher   快照/近期 K 线/指数日线补充                     │
 ├─────────────────────────────────────────────────────────────┤
 │ L0 实时层（用户自备）                                          │
-│   · MarketDataProvider 协议 → 用户实现的适配器（HTTP/WS/SDK）      │
-│   · 官方参考实现：AkshareProvider（免费、够用）                   │
-│   · 内置兜底：TencentProvider / SinaProvider（离线也能跑通 Paper）  │
+│   · 发布者（HTTP/WS/SDK） → MarketDataHub（唯一实时入口）           │
+│   · 官方/示例发布者：TencentPublisher、AkSharePublisher             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -57,6 +61,20 @@
 1. **回测/优化器只依赖 L2/L3，不直接碰 L1** → 换数据源不影响策略与回测语义。
 2. **实时行情只有一条通路**（L0 → L3 MarketDataHub → PaperBroker）→ Paper 消费的数据格式**固定统一**。
 3. **只支持模拟交易**：删除/禁用 live 交易路径（券商网关），保留 gateway 仅作"未来可选"。
+
+### 1.1 现状与目标的边界
+
+| 范围 | 现状（代码审计） | 目标（推荐设计） |
+|---|---|---|
+| 历史数据路由 | `MultiSourceDataFetcher` 按数据集列出有限的 fetcher 顺序；调用时返回第一个非空结果。 | 只选择声明具备该数据集/周期/区间能力的候选，并把候选先写入 staging。 |
+| 自动切换 | **没有可依赖的自动切换**。当前“首个非空”逻辑没有完整质量判定、重叠比对或原子提升，不能作为生产级切换策略。 | 验证通过后按数据集策略提升候选；实时与历史互不形成全局 fallback。 |
+| 同步 | `DataSyncService` 已是持久化、可恢复、互斥的统一阶段编排器。 | 继续只有一个同步编排器，并将候选验证、比对、提升纳入其阶段。 |
+| 实时行情 | `MarketDataHub` 订阅 `quotes.all` 并维护唯一快照/事件视图；`livequote` 已退役，仅保留兼容别名。 | 所有实时发布者只能进入 `MarketDataHub`，Paper/风控/UI 只读 Hub。 |
+| 事实记录 | 本地 store 主要保存规范化数据，来源、来源纪元和验证证据不是一等的读模型。 | 每个已提升数据集都有 provenance、source epoch、验证报告和可回退 manifest。 |
+
+这里的“没有自动切换”是有意的安全结论：当前的顺序尝试是 best-effort fetch fallback，
+不是经过验证的 source promotion。任何空响应、网络异常或字段缺失都不能仅凭“下一个
+provider 返回了数据”改变已经发布的数据集。
 
 ---
 
@@ -160,7 +178,7 @@ class IndexWeightStore(ParquetStorage):
 
 ---
 
-## 4. 统一行情契约（用户接入 + akshare 参考实现）
+## 4. 统一行情契约（MarketDataHub 唯一实时入口）
 
 ### 4.1 契约（已存在，直接用）
 
@@ -220,12 +238,12 @@ class AkshareProvider:
     def snapshot(self, symbols) -> dict[str, QuoteSnapshot]: ...
 ```
 
-**AkShare 覆盖的行情源**（可作为用户实现的模板）：
+**AkShare 覆盖的行情源**（可作为发布者实现的模板）：
 - `ak.stock_zh_a_spot_em()` → 全市场实时快照（东财），一次调用覆盖所有股票 → **最适合 Paper**
 - `ak.stock_zh_a_hist_min_em(symbol, period="1", ...)` → 分钟线历史
 - `ak.stock_zh_index_daily_em(symbol="sh000300")` → 指数日线
 
-### 4.4 内置兜底（让发行版"开箱可跑"）
+### 4.4 腾讯发布者（实时来源，不是第二条实时入口）
 
 实测三个免费源在 Pro 上**全部可用**（无需 token、无需付费）：
 
@@ -240,14 +258,18 @@ class AkshareProvider:
 v_sh600519: name=贵州茅台 code=600519 现价=1318.49 昨收=1309.69 今开=1303.21
              最高=1322.00 最低=1296.00 成交量(手)=42491 成交额(万)=557622 时间=20261022161500
 ```
-→ `high/low` **含当日最高最低** → 集合竞价期间可用作"竞价价" ✅（第 8 节要用）
+→ `high/low` **含当日最高最低** → 集合竞价期间可用作"竞价价" ✅（第 8 节要用）。
 
-**内置 `TencentProvider`（批量、一次请求多代码）作为默认兜底** → 用户不接任何东西也能跑 Paper ✅。
+`TencentDataFetcher`/`TencentPublisher` 是一个可选的批量发布者：它把快照写入
+`MarketDataHub` 的消息入口，不能被 Paper、风控或 UI 直接作为另一条实时通路读取。
+腾讯不可用时，Hub 不会自行切换到另一个实时源；必须由配置的发布者或操作员提供有效数据。
 
 ### 4.5 涨跌停价
 
-`PaperBroker._get_price_limits` 现在从 `live_quote` 内存取 → 换成从**本地存储**读（见 §5 `LimitPriceStore`），
-因为涨跌停价是**日频静态数据**，不需要实时源 ✅。同时支持实时源覆盖（用户源可带 limit 字段）。
+现状：`PaperBroker._get_price_limits` 可以从 `MarketDataHub` 读取发布者的实时限价；
+`LimitPriceStore` 也已经存在并由 Tushare 刷新。目标：把本地存储作为日频静态数据的
+主读路径（见 §5），实时发布者只作为明确的当日覆盖；涨跌停不应成为跨数据集的实时
+source switch。用户源仍可在快照中提供 limit 字段。
 
 ---
 
@@ -305,9 +327,18 @@ v_sh600519: name=贵州茅台 code=600519 现价=1318.49 昨收=1309.69 今开=1
 
 ---
 
-## 6. L1 数据源层（Tushare 统一出口）
+## 6. L1 数据源层（当前能力审计）
 
-### 6.1 新增 fetcher 能力（`quantide/data/fetchers/tushare.py`）
+Tushare 是当前个股日线及其辅助字段的主源，但不是所有数据集的全局主源。
+数据源必须按**数据集 + frame + 时间范围**判断能力；例如 Tushare 的日线能力不能
+自动推导出它具备全市场历史 30 分钟能力，腾讯的实时快照也不能替代 PIT 成分或复权因子。
+下面的实现清单描述当前适配器的实际边界，后文 §15 描述如何在不破坏这些边界的情况下
+可靠替换来源。
+
+### 6.1 已实现 fetcher 能力（`quantide/data/fetchers/tushare.py`）
+
+以下是当前适配器已经提供的取数能力；“已实现”不等于已经具备 §15 的候选验证和
+原子提升语义。
 
 | 方法 | tushare 接口 | 频率/耗时（实测） | 用途 |
 |---|---|---|---|
@@ -352,11 +383,15 @@ v_sh600519: name=贵州茅台 code=600519 现价=1318.49 昨收=1309.69 今开=1
 
 ## 7. 同步任务（数据服务任务）
 
-### 7.1 现状问题
+### 7.1 现状问题与遗留边界
 
-- 只有"个股日线 + 市值"一条链（`data_market.py`）→ 指数/成分/涨跌停**没有同步入口**
-- 同步是 **web 请求触发的 asyncio task**（`asyncio.create_task`）→ **进程重启就丢**、**不能并发防重入** ❗
-- 逐日拉取（`fetch_with_daily_progress`）→ 2200 天 = 2200 次 HTTP → 慢但稳；可改为**按月批量**（Tushare `daily` 支持 `start_date/end_date` 区间 → 1 次拿 1 个月 → 2200 天只需 132 次调用 ✅ 快 16 倍）
+- `DataSyncService` 已覆盖日历、证券列表、个股日线、市值、指数日线、PIT 成分和可选
+  30 分钟历史；旧初始化向导/证券列表路径仍有直接 `asyncio.create_task` 或逐日拉取的
+  legacy 入口，应该逐步收敛到统一编排器。
+- 当前编排器已经持久化任务、断点阶段和同实例互斥，但还没有 §15 的 staging、完整
+  验证、重叠比较、provenance/source epoch 和 manifest 原子提升。
+- 个别旧逐日路径仍是 2200 天 = 2200 次 HTTP；统一路径可改为**按月批量**（Tushare
+  `daily` 支持 `start_date/end_date` 区间 → 2200 天只需约 132 次调用）。
 
 ### 7.2 目标：一个统一的同步编排器
 
@@ -370,7 +405,8 @@ DataSyncService
       3. daily_bars   （个股日线 + 复权 + ST + 涨跌停）← 合并 4 个接口为按月批量
       4. daily_basic  （市值/换手）
       5. index_bars   （指数日线）★新增
-      6. index_weight （指数成分 PIT）★新增
+      6. index_weight （指数成分 PIT）
+      7. minute_bars  （BaoStock 历史 30 分钟，可选）
   · 断点续传：每个阶段记录已完成区间 → 重跑只补缺口
   · 进度：复用 `fetch_data_progress` 主题 + SSE ✅（前端已有）
   · 失败重试：现有 `failed_tasks` 表 ✅
@@ -381,6 +417,16 @@ DataSyncService
 - 按月批量 → 回补 2015-2023 从 41 分钟/接口 降到 **~3 分钟/接口**（132 次调用 × 1.3s）
 - 指数/成分纳入同一任务 → 一次点击全量对齐
 - 持久化队列 → 重启不丢
+
+### 7.4 当前实现与可靠同步目标
+
+`DataSyncService` 已经是当前唯一的同步编排器：任务持久化在 SQLite，阶段顺序固定，
+同一进程内互斥，并支持取消、恢复和进度发布。旧的 web 入口可以创建任务，但不应再
+各自直接编排 fetcher。
+
+当前编排器仍主要负责“抓取后写入规范化 store”，尚未把候选 staging、完整验证、重叠
+比较、provenance/source epoch 和 manifest 原子切换做成同步阶段。因此“任务成功”目前
+只表示抓取/写入流程完成，不表示候选源已经通过可靠替换审计；这正是 §15 的目标补齐项。
 
 ---
 
@@ -394,6 +440,10 @@ DataSyncService
 ### 8.2 目标：集合竞价（14:57-15:00）算信号 + 下单
 
 A 股收盘集合竞价：**14:57-15:00**（3 分钟）→ 15:00 以集合竞价价格成交。
+
+> 2026-10-27 更新：本节 14:57 只是 **1d + cheat_on_close** 的默认值；统一时序见
+> `spec-strategy.md` FR-055。30m 使用每个 bar 结束前 2 分钟，1d 默认提前 3 分钟；
+> `next_open` 使用下一 bar/交易日开盘，午休与收盘信号需持久化队列。
 
 **时序设计**（新增 `ExecutionClock`）：
 
@@ -442,14 +492,15 @@ A 股收盘集合竞价：**14:57-15:00**（3 分钟）→ 15:00 以集合竞价
 | 现状 | 处置 |
 |---|---|
 | `deploy_to_live` → 券商网关 | **移除/禁用**（发行版不接实盘） |
-| `GatewayBrokerAdapter` / `GatewayClient` | 保留代码但**默认不注册**（`livequote_mode=gateway` 时才启用 → 发行版默认 `none`） |
+| `GatewayBrokerAdapter` / `GatewayClient` | 保留代码但**默认不注册**；实时行情仍只由 `MarketDataHub` 提供 |
+| `LiveQuote` / `live_quote` | **已退役**：旧 websocket、独立缓存和发布逻辑已移除；模块只保留到 `MarketDataHub` 的兼容别名 |
 | `PaperBroker` | **强化为唯一执行路径** |
 | 运行时模式 | `runtime_mode` 只允许 `backtest` / `paper`（去掉 `live`） |
 | 撮合 | `PaperBroker` 消费 `MarketDataPort` 快照 ✅（已有） |
 
 **Paper 的行情从哪来**（用户自备）：
-- 默认内置 `TencentProvider`（免费、批量、够用）→ 开箱可跑 ✅
-- 用户可换 `akshare` 参考实现 / 自带插件 / HTTP 桥
+- `TencentPublisher` 可作为免费、批量的发布者；它必须把数据送入 `MarketDataHub` ✅
+- 用户可换 `AkSharePublisher`、自带发布者或 HTTP 桥，但 Paper 永远只从 `MarketDataHub` 读取
 
 ---
 
@@ -492,7 +543,7 @@ A 股收盘集合竞价：**14:57-15:00**（3 分钟）→ 15:00 以集合竞价
 | P0 | `Date`/`Datetime` 日期列归一化（`date_as_date` + `normalize_partition_schema`） | ✅ |
 | P1 | `DataSyncService`（六阶段、持久化、断点续传、互斥、取消、按月批量） | ✅ |
 | P1 | 行情管理页「手动补全」接入统一同步服务（可选指数代码、进度流） | ✅ |
-| P1 | `MarketDataHub` 发布/订阅 + `AksharePublisher`（50 支示例） | ✅ |
+| P1 | `MarketDataHub` 发布/订阅 + 发布者协议；腾讯发布者已接入，AkShare 仅保留为示例方向 | ✅ |
 | P1 | `ExecutionClock` + Paper 集合竞价下单（竞价价×(1+ε)）+ 策略按日去重 | ✅ |
 | P2 | 回测 `fill_timing="auction_close"`（14:57 决策、收盘/竞价价成交） | ✅ |
 | P2 | 指数基准 → 超额收益/Beta/Alpha/信息比率（`baseline_returns` 已存在，已接线） | ✅ |
@@ -547,11 +598,11 @@ A 股收盘集合竞价：**14:57-15:00**（3 分钟）→ 15:00 以集合竞价
 | 指数成分 PIT | Tushare | — | 是 |
 | 30 分钟历史（上一已收盘交易日及更早） | BaoStock（2020-01-02 起） | — | 是 |
 | 当日 30 分钟 | 实时快照每分钟采样，内存合成 | — | 否 |
-| 实时快照 / 当日涨跌停 | 腾讯（`qt.gtimg.cn`，约 800 支/批，全市场 7 批） | 用户自建发布者 | 否 |
+| 实时快照 / 当日涨跌停 | `MarketDataHub`（唯一实时 ingress）；当前官方发布者为腾讯（`qt.gtimg.cn`，约 800 支/批，全市场 7 批） | 用户自建发布者（同样只能发布到 Hub） | 否 |
 | 盘中 forming 30 分钟 / forming 日线 | 由实时快照在内存合成 | — | 否 |
 
 结论：**Tushare 仍是日线与辅助字段的主源；30 分钟历史只信 BaoStock，
-当日 30 分钟由实时行情合成**。腾讯 K 线不参与 30 分钟历史/增量，避免
+当日 30 分钟由 `MarketDataHub` 的实时快照合成**。腾讯 K 线不参与 30 分钟历史/增量，避免
 “历史 30 分钟 + 实时快照”同时压腾讯接口触发风控。
 
 ### 13.2 代码落点
@@ -668,11 +719,13 @@ Tushare 每个交易日早晨发布当日 `stk_limit`。运行时由
 
 读取优先级（Paper 撮合与 30 分钟线读取一致）：
 
-1. 行情发布者实时推送（`market_data_hub` / `live_quote`，腾讯快照自带当日限价）；
+1. 行情发布者实时推送到 `MarketDataHub`（腾讯快照自带当日限价）；
 2. `LimitPriceStore`（Tushare 早晨落盘，重启/发布者缺失时仍可用）；
 3. 本地日线（上一交易日兜底）。
 
-两条来源互为主备：Tushare 晚发布时实时行情可用；发布者不提供限价时 Tushare 可用。
+这是**限价数据集内部的显式读取优先级**，不是跨数据集的全局 fallback，也不是
+已实现的自动 source switching：当前实现没有对两份数据做完整候选验证、重叠比对或
+原子 promotion。缺失或冲突时，Paper 应按 §15 fail-closed，而不是猜测哪一份正确。
 
 ### 14.2 撮合规则（2026-10 修订）
 
@@ -714,3 +767,184 @@ export QUANTIDE_QUOTE_INTERVAL=3                    # 秒
 单独执行 `python -m quantide.providers.tencent_publisher` 不会把行情送给
 正在运行的服务。定时任务使用 `misfire_grace_time=None`，机器休眠后唤醒
 仍会补跑 09:00/09:20 的当日限价刷新。
+
+---
+
+## 15. 只读审计：可替换数据源的可靠架构（目标）
+
+本节是对前面实现说明的收束。它规定“换源”必须怎样被证明，而不是把当前的
+`MultiSourceDataFetcher` 顺序尝试描述成已经完成的可靠切换系统。
+
+### 15.1 数据集/frame 能力矩阵
+
+能力必须精确到数据集和周期（frame），不能只登记一个笼统的“provider 可用”。
+下表是当前适配器实际能够承担的角色：
+
+| 数据集 | frame / 时间语义 | 当前权威来源或入口 | 可替换候选与硬限制 |
+|---|---|---|---|
+| 个股行情 | `1d`，已收盘交易日 | **Tushare**：`daily`，并配合 `adj_factor`、`daily_basic`、`st_info`、`stk_limit` | 腾讯只能作为有限的日线补充，不能提供完整日期批量、复权因子、ST 或 PIT 语义；不能因为腾讯返回一行就替换整段日线。 |
+| 指数行情 | `1d`，已收盘交易日 | **Tushare**：`index_daily` | 腾讯可作为指数日线补充；仍需单独检查代码、覆盖区间和 OHLC/成交量单位。 |
+| 指数成分 | PIT 月度快照，`trade_date <= as_of` | **Tushare**：`index_weight` | 当前没有 BaoStock/腾讯候选。区间查询有 7000 行限制，必须逐快照期请求；无快照不能用当前成分替代。 |
+| 日线辅助字段 | `daily_basic`、复权因子、ST、涨跌停 | **Tushare** 落盘；实时涨跌停可由 Hub 的发布者补充 | 腾讯快照的涨跌停只覆盖其返回的标的和当前交易日；名称含 `ST` 只能是备份信号，不能替代历史 ST 记录或复权因子。 |
+| 历史分钟线 | 已完成 `30m` bar，bar 时间为收盘时刻 | **BaoStock**，自 2020-01-02 起的项目支持范围 | 单 socket 串行，不能并发；每日硬上限约 5 万请求，适配器默认 45,000 并会在限频/黑名单时冻结。成交量原为股、成交额原为元，必须转换为手/千元；它不是实时源。 |
+| 当日已完成/进行中分钟线 | `30m`，当天由采样形成 | **MarketDataHub** 快照经 `MinuteBarAggregator` 在内存合成 | 启动前已结束的桶无法恢复；盘后由 BaoStock 历史落盘并清理内存合成。腾讯 K 线近期接口是逐股请求，不作为全市场历史回补。 |
+| 实时快照 | tick / 当前 `QuoteSnapshot`，含 `ts` | **MarketDataHub 是唯一实时 ingress**；当前 TencentPublisher 是一个发布者 | Hub 不是外部 provider，也不负责跨源切换；腾讯约 800 支/批、全市场约 7 批，受 HTTP 可用性和字段口径影响。 |
+| 当日 forming 日线 | `1d` forming，内存 | MarketDataHub 快照 | 不等同于 Tushare 已收盘日线；必须标注 forming 状态和实时来源，不能写入已收盘历史分区冒充正式 bar。 |
+
+### 15.2 四个组件的实际角色
+
+**Tushare** 是有 token 和接口限频约束的历史/参考数据主源，覆盖交易日历、证券列表、
+个股日线、复权因子、市值/换手、ST、涨跌停、指数日线和 PIT 成分。`stk_mins` 的分钟
+接口约每分钟一次，全市场历史分钟线不适合发行版核心；Tushare 也不是实时行情 ingress。
+`index_weight` 的 7000 行限制是接口行为，不能通过长区间或简单分页假设消失。
+
+**BaoStock** 在本项目中只承担已收盘历史分钟线，重点是 30 分钟。它的连接和预算约束
+决定了抓取必须串行、可断点、可恢复；它不负责个股日线的辅助字段、PIT 成分或实时快照。
+
+**Tencent** 通过 `qt.gtimg.cn` 提供批量实时快照（含价格、当日高低、成交量/额、时间和
+通常可用的涨跌停），并能提供近期 K 线和指数日线。它没有项目所需的完整复权、ST、PIT
+成分和日期批量日线能力；K 线逐股请求，分钟历史不应与实时轮询混用。其成交量口径还
+存在普通股票/科创板差异，成交额部分由源字段或估算得到，必须在候选验证时显式声明单位。
+
+**MarketDataHub** 是规范化实时消息入口、快照缓存和事件流，不是第三方 provider，也不
+是历史数据 fallback。发布者（腾讯、AkShare 或用户自建 HTTP/WS/SDK）只负责取得并发布
+快照；Paper、风控、UI 和 forming bar 只能从 Hub 读取。旧 `LiveQuote` 的 websocket、
+独立缓存和发布逻辑已经退役，`quantide.service.livequote` 只保留兼容名称指向 Hub。
+
+### 15.3 当前没有自动切换
+
+当前 `MultiSourceDataFetcher` 的 `DEFAULT_STAGES` 确实列出少数顺序，例如日线
+`[tushare, tencent]`、指数日线 `[tushare, tencent]`；它在调用层遇到异常或空结果时
+尝试下一个 fetcher。这是**窄范围的 best-effort 取数 fallback**，不是可靠的自动切换，
+因为它目前没有同时证明：
+
+1. 返回结果的 schema、覆盖、OHLC、单位、时间戳和整体质量合格；
+2. 新旧来源在重叠区间的一致性达到该数据集容差；
+3. 数据来源、规范化版本和 source epoch 已被记录；
+4. 写入对读者是原子可见的，且失败时旧快照仍然可读。
+
+因此当前运行语义是：**没有可依赖的自动 source switching，也没有跨数据集的全局
+fallback**。尤其不能因为 Tushare 失败就把所有数据都切到腾讯，也不能因为实时发布者
+短暂无数据就从历史 store 猜造实时价格。候选选择、提升和实时发布者更换都必须遵守
+下面的工作流和运行模式策略。
+
+### 15.4 推荐的候选提升工作流
+
+一个数据集的替换必须由同一个 `DataSyncService` 编排器执行，且对当前已发布快照保持
+只读。推荐顺序如下：
+
+1. **按能力选择候选**：按精确的 `dataset + frame + asset universe + date range`
+   查询能力记录；不匹配的 provider 不得因为“能返回数据”而进入候选。
+2. **抓取到 staging**：候选写入临时对象/临时分区，带请求参数和原始响应摘要；在所有
+   检查完成前，生产 store 和读者不可见。
+3. **schema 验证**：检查必需列、类型、主键、代码格式、日期/时间类型、调整字段和
+   可选字段的约定；拒绝静默改名或缺列填零。
+4. **coverage 验证**：根据交易日历、目标标的集合和目标区间检查缺日、缺标的、提前
+   结束、重复分区以及 frame 是否完整；允许的缺口必须是数据集策略明确声明的缺口。
+5. **OHLC 验证**：检查 `low <= open/high/close <= high`、正价、成交量/成交额非负，
+   并检查涨跌停、复权和 forming/已收盘状态没有混用。
+6. **单位验证**：明确成交量是股还是手、成交额是元、千元还是万元，价格是否已复权；
+   转换后用抽样和数量级规则复核，未知单位直接失败。
+7. **时间戳验证**：检查时区、交易时段、bar 是起点还是收盘时刻、单调性、未来时间和
+   分钟桶对齐；`30m` 必须继续遵守项目的收盘时刻语义。
+8. **质量验证**：检查空值、重复主键、异常跳变、停牌/零量解释、跨分区连续性和源
+   freshness，并生成可审计的 validation report，而不是只返回“非空”。
+9. **重叠比较**：将候选与当前已提升版本在重叠的 key/date/frame 上比较，记录覆盖率、
+   OHLC/量额差异、允许容差、差异样本和结论。没有重叠时必须由数据集策略明确批准，
+   不能把“无从比较”当作“比较通过”。
+10. **写 provenance 和 source epoch**：候选通过后，为该数据集/范围生成来源记录和
+    新 epoch；epoch 在 provider、原始版本、单位/时区/规范化语义改变时递增。
+11. **原子提升**：先完成不可变候选分区和 manifest，再以一次 manifest/version swap
+    将候选设为 active。任何验证、比对或写入失败都只删除/保留 staging，读者继续看
+    旧 active snapshot。
+
+### 15.5 数据集级策略，不是全局 fallback
+
+替换边界是一个数据集及其 frame，而不是一个进程级的“主源/备用源”开关。例如：
+
+- Tushare 日线失败时，只有在**日线候选**完成上述验证并被提升后，才可以改变日线
+  manifest；这不会改变 30 分钟、PIT 成分或实时快照的来源。
+- BaoStock 触发限频时，历史 30 分钟任务应暂停/失败并保留旧快照，不得把腾讯实时
+  K 线拼成未经验证的历史 30 分钟。
+- TencentPublisher 无快照时，MarketDataHub 应报告 stale/missing；不得由 Hub
+  自动启动另一个 provider，也不得把上一收盘价伪装成实时价。
+- 当日涨跌停是一个独立数据集，Hub 的发布值与 `LimitPriceStore` 的 Tushare 值可以
+  按该数据集的显式优先级读取，但冲突须记录，不能触发全局源切换。
+
+### 15.6 能力、健康和 provenance 数据结构
+
+下面是目标数据结构的最小形状。它们是数据集 manifest/审计记录的契约，不要求本次
+引入一个面向所有 provider 的大而全注册中心。
+
+```python
+@dataclass(frozen=True)
+class ProviderCapability:
+    provider_id: str                 # tushare / baostock / tencent / hub-publisher
+    dataset: str                     # daily_bars / minute_bars / quote_snapshot ...
+    frame: str                       # 1d / 30m / tick / pit_monthly
+    supported_from: date | None
+    supported_to: date | None
+    universe: str                    # all_a / configured_assets / index_codes
+    fields: tuple[str, ...]
+    units: dict[str, str]            # volume=share|lot, amount=cny|thousand_cny
+    timestamp_semantics: str         # session_date / bar_close / exchange_ts
+    adjustment: str                  # raw / qfq / hfq / none
+    max_batch: int | None
+    rate_limit: str | None
+    realtime_ingress: bool
+
+@dataclass
+class ProviderHealth:
+    provider_id: str
+    dataset: str
+    frame: str
+    checked_at: datetime
+    state: str                       # healthy / degraded / blocked / unknown
+    latency_ms: float | None
+    freshness_at: datetime | None
+    consecutive_failures: int
+    remaining_budget: int | None
+    last_error: str | None
+
+@dataclass(frozen=True)
+class DataProvenance:
+    dataset: str
+    frame: str
+    range_start: date | datetime
+    range_end: date | datetime
+    provider_id: str
+    source_epoch: str                # immutable epoch for this source/normalization
+    request_fingerprint: str
+    retrieved_at: datetime
+    normalization_version: str
+    validation_report_id: str
+    overlap_report_id: str | None
+    content_hash: str
+    promoted_at: datetime | None
+```
+
+`ProviderCapability`回答“能不能覆盖这个请求”，`ProviderHealth`回答“现在是否值得
+尝试”，`DataProvenance`回答“已发布的数据究竟来自哪里、何时、按什么口径生成”。
+三者不能互相替代：健康状态不能证明 schema 正确，能力声明不能证明本次覆盖完整，
+provenance 也不能掩盖验证失败。
+
+### 15.7 Paper/live 的 fail-closed 规则
+
+历史回测可以由调用方显式选择数据范围和容忍策略；**Paper 和 live 必须 fail-closed**：
+
+- 没有 active 且通过验证的快照、快照超过 freshness 上限、时间戳无效或单位未知时，
+  不产生交易信号/委托；
+- OHLC、覆盖、质量或重叠检查失败时，不把候选数据暴露给撮合或策略；
+- `MarketDataHub` 没有新鲜快照时，Paper 停止形成实时 bar，并报告 stale，而不是用
+  旧值静默继续；
+- source epoch、provenance 或 manifest 不完整时，拒绝把数据标记为 active；
+- **live 模式的来源提升或来源切换必须有操作员明确批准**，包括候选、验证摘要、重叠
+  差异和回退版本；不能由定时任务或网络错误自动切换。当前发行版仍只允许 backtest
+  和 paper，以上 live 规则是未来 live 能力的安全边界。
+
+### 15.8 本次范围边界
+
+本次只记录审计结论和推荐契约：不实现广义 provider registry，不改 fetcher、store、
+同步器或运行模式，不提交、不部署。后续实现应先在 `DataSyncService` 内落地一个数据集
+的 staging/validation/manifest 闭环，再逐个扩展能力矩阵；在此之前，文档中的“目标”
+不能被宣传为已经具备自动切换或零停机替换能力。

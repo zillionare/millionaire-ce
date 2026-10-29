@@ -13,10 +13,10 @@ AC-FR0093-3: 无单条日志删除按钮 (要不全保留, 要不全清空).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class BacktestReportSortField(str, Enum):
+class BacktestReportSortField(StrEnum):
     """报告排序字段."""
 
     ANNUALIZED = "annualized"

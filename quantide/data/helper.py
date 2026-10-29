@@ -12,6 +12,7 @@ def qfq_adjustment(
 ) -> pl.LazyFrame | pl.DataFrame:
     """
     前复权算法 (qfq - 前复权)
+
     以最新价格为基准，调整历史价格
     成交量需要反向调整，因为拆分后成交量增加
 
@@ -80,6 +81,7 @@ def hfq_adjustment(
 ) -> pl.DataFrame | pl.LazyFrame:
     """
     后复权算法 (hfq - 后复权)
+
     以历史价格为基准，调整后续价格
     成交量不调整，保持原始值
 

@@ -9,6 +9,7 @@ from monsterui.all import *
 from starlette.responses import RedirectResponse
 
 from quantide.config.branding import get_branding
+from quantide.config.features import supports_live_trading
 from quantide.core.enums import BrokerKind, OrderSide, OrderStatus
 from quantide.data.models import Position
 from quantide.service.init_wizard import init_wizard
@@ -729,6 +730,8 @@ def _get_broker(req):
     kind = req.query_params.get("kind")
     bid = req.query_params.get("id")
     if kind and bid:
+        if str(kind).lower() in {"qmt", "live"} and not supports_live_trading():
+            return None
         return reg.get(kind, bid)
 
     # Then check session for active account
@@ -736,6 +739,8 @@ def _get_broker(req):
     active_kind = session.get("active_account_kind")
     active_id = session.get("active_account_id")
     if active_kind and active_id:
+        if str(active_kind).lower() in {"qmt", "live"} and not supports_live_trading():
+            return None
         from quantide.core.enums import BrokerKind
         broker = reg.get(BrokerKind(active_kind), active_id)
         if broker:
@@ -744,6 +749,8 @@ def _get_broker(req):
     # Finally use default
     d = reg.get_default()
     if d:
+        if str(d[0]).lower() in {"qmt", "live"} and not supports_live_trading():
+            return None
         return reg.get(d[0], d[1])
     return None
 
@@ -761,7 +768,7 @@ def _auto_select_account(reg: BrokerRegistry, session: dict) -> tuple[str, str] 
         return None
 
     # 检查是否有实盘账户
-    live_accounts = reg.list_by_kind(BrokerKind.QMT)
+    live_accounts = reg.list_by_kind(BrokerKind.QMT) if supports_live_trading() else []
     if live_accounts:
         # 实盘账户只允许一个，选择第一个
         info = live_accounts[0]

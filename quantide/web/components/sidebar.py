@@ -4,8 +4,6 @@ from fasthtml.common import *
 from fasthtml.svg import Path as SvgPath
 from monsterui.all import *
 
-from quantide.web.design_system import BRAND, GRAY_500, GRAY_900
-
 
 def sidebar_component(
     menu_items: list[dict] | None = None,

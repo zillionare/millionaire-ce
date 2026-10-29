@@ -78,6 +78,13 @@ def get_strategy_runtime_state_path() -> Path:
     return ensure_app_config_dir() / "strategy_runtimes.json"
 
 
+def get_model_store_dir() -> Path:
+    """Return the directory used to persist the latest strategy model."""
+    path = ensure_app_config_dir() / "models"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_backtest_log_dir() -> Path:
     """Return the directory used to store saved backtest log files."""
     path = ensure_app_config_dir() / "backtest_logs"
@@ -99,6 +106,7 @@ __all__ = [
     "get_app_db_path",
     "get_backtest_log_dir",
     "get_backtest_log_path",
+    "get_model_store_dir",
     "get_pid_file_path",
     "get_strategy_runtime_state_path",
     "normalize_data_home",

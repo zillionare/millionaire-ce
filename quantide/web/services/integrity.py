@@ -8,13 +8,13 @@ AC-1: 字段空值率超过阈值 (例如 5%) 标红; 校验历史最近 N=10 �
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 DEFAULT_NULL_RATE_THRESHOLD: float = 0.05
 _INTEGRITY_HISTORY_LIMIT = 10
 
 
-class IntegrityStatus(str, Enum):
+class IntegrityStatus(StrEnum):
     """校验状态."""
 
     PASSED = "passed"

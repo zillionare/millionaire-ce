@@ -16,6 +16,10 @@ from loguru import logger
 from monsterui.all import *
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from quantide.config.features import (
+    live_trading_unavailable_message,
+    supports_live_trading,
+)
 from quantide.core.enums import BrokerKind, FrameType, OrderSide
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
@@ -34,6 +38,14 @@ from quantide.service.backtest_params import (
 )
 from quantide.service.discovery import strategy_loader
 from quantide.service.metrics import metrics
+from quantide.service.risk_programs import (
+    ALLOW_SAME_BAR_REPURCHASE_KEY,
+    RISK_PROGRAMS_KEY,
+    available_risk_programs,
+    normalize_risk_programs,
+    risk_program_names,
+    unavailable_risk_program_ids,
+)
 from quantide.service.runner import BacktestRunner
 from quantide.service.strategy_runtime import strategy_runtime_manager
 from quantide.service.trade_pairs import build_trade_pairs
@@ -1296,22 +1308,23 @@ def _build_backtest_action_cell(
             )
         )
 
-    if "live" in deployment_modes:
-        controls.append(
-            Span(
-                "实盘中",
-                cls="inline-flex items-center rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-600",
+    if supports_live_trading():
+        if "live" in deployment_modes:
+            controls.append(
+                Span(
+                    "实盘中",
+                    cls="inline-flex items-center rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-600",
+                )
             )
-        )
-    else:
-        controls.append(
-            _build_backtest_deploy_button(
-                "转实盘",
-                f"/strategy/backtest/{portfolio_id}/deploy/live/modal",
-                is_available=live_available,
-                unavailable_reason=live_unavailable_reason,
+        else:
+            controls.append(
+                _build_backtest_deploy_button(
+                    "转实盘",
+                    f"/strategy/backtest/{portfolio_id}/deploy/live/modal",
+                    is_available=live_available,
+                    unavailable_reason=live_unavailable_reason,
+                )
             )
-        )
 
     controls.append(
         Button(
@@ -1905,27 +1918,15 @@ def _parse_params(form, prefix="param_"):
 
 
 TRADE_PARAM_KEYS = (
-    "take_profit_pct",
-    "stop_loss_pct",
-    "up_pct",
-    "down_pct",
     "horizon",
-    "sell_fraction",
     "slippage_pct",
-    "use_broker_barriers",
     "use_alpha_exit",
     "cheat_on_close",
 )
 
 TRADE_PARAM_LABELS = {
-    "take_profit_pct": "止盈比例",
-    "stop_loss_pct": "止损比例",
-    "up_pct": "止盈比例",
-    "down_pct": "止损比例",
     "horizon": "持有交易日",
-    "sell_fraction": "卖出比例",
     "slippage_pct": "滑点比例",
-    "use_broker_barriers": "由 Broker 执行障碍",
     "use_alpha_exit": "启用 alpha 排名卖出",
     "cheat_on_close": "按收盘价成交",
     "commission": "佣金率(单边)",
@@ -2056,6 +2057,137 @@ def _build_feature_selection_panel() -> Any:
     )
 
 
+def _build_risk_selection_panel(
+    strategy_cls: Any,
+    interval: str = "1d",
+    selected: list[dict[str, Any]] | None = None,
+) -> Any:
+    """Build the explicit, priority-ordered risk-program step."""
+    selected_by_id = {
+        str(item.get("id")): item for item in (selected or []) if isinstance(item, dict)
+    }
+    cards: list[Any] = []
+    try:
+        programs = available_risk_programs(strategy_cls, interval)
+    except Exception:
+        programs = []
+    for index, program in enumerate(programs):
+        program_id = str(program["id"])
+        item = selected_by_id.get(program_id)
+        checked = item is not None
+        params = dict(program.get("params") or {})
+        params.update((item or {}).get("params") or {})
+        priority = (item or {}).get("priority", index)
+        param_inputs = [
+            Div(
+                Span(key, cls="text-xs text-gray-500 w-32 shrink-0"),
+                Input(
+                    name=f"risk_param_{index}_{key}",
+                    value=str(value),
+                    type="number" if isinstance(value, (int, float)) and not isinstance(value, bool) else "text",
+                    step="any" if isinstance(value, float) else None,
+                    cls="input input-xs w-full",
+                ),
+                cls="flex items-center gap-2 mb-1",
+            )
+            for key, value in params.items()
+        ]
+        cards.append(
+            Div(
+                fh.Label(
+                    fh.Input(
+                        type="checkbox",
+                        name="risk_program_id",
+                        value=program_id,
+                        checked=checked,
+                        cls="checkbox checkbox-sm",
+                    ),
+                    Span(str(program.get("name") or program_id), cls="font-medium text-sm"),
+                    cls="flex items-center gap-2 cursor-pointer",
+                ),
+                P(str(program.get("description") or ""), cls="text-xs text-gray-500 mt-1"),
+                Div(
+                    Span("优先级", cls="text-xs text-gray-500 w-32 shrink-0"),
+                    Input(
+                        name=f"risk_priority_{index}",
+                        value=str(priority),
+                        type="number",
+                        min="0",
+                        cls="input input-xs w-24",
+                    ),
+                    cls="flex items-center gap-2 mt-2 mb-1",
+                ),
+                Div(*param_inputs, cls="mt-1"),
+                cls="rounded-lg border border-gray-200 bg-gray-50 p-3 mb-2",
+            )
+        )
+    if not cards:
+        cards.append(P("当前周期没有可安全回测的风控程序。", cls="text-sm text-gray-500"))
+    return Div(
+        Input(type="hidden", name="risk_selection_present", value="1"),
+        H4("选择风控程序", cls="text-sm font-semibold text-gray-600 mb-1"),
+        P(
+            "可不选，也可选择多个；优先级越小越先执行。只有提供了明确回测适配器的风控程序会显示。",
+            cls="text-xs text-gray-500 mb-3",
+        ),
+        *cards,
+        fh.Label(
+            fh.Input(
+                type="checkbox",
+                name=ALLOW_SAME_BAR_REPURCHASE_KEY,
+                value="true",
+                checked=True,
+                cls="checkbox checkbox-sm",
+            ),
+            Span("允许风控卖出后同一 bar 再买入", cls="text-sm text-gray-700"),
+            cls="flex items-center gap-2 mt-3",
+        ),
+        P(
+            "日线回测仍遵守 T+1；该选项只决定风控卖出后宿主是否可在同一 bar 重新买入。",
+            cls="text-xs text-gray-500 mt-1",
+        ),
+    )
+
+
+def _parse_risk_program_selection(form: Any, strategy_cls: Any, interval: str) -> tuple[list[dict[str, Any]], bool]:
+    """Parse and server-validate risk IDs, priorities, and parameters."""
+    if not form.get("risk_selection_present"):
+        raise KeyError("risk selection was not submitted")
+    getlist = getattr(form, "getlist", None)
+    raw_ids = (
+        list(getlist("risk_program_id"))
+        if callable(getlist)
+        else ([form.get("risk_program_id")] if form.get("risk_program_id") else [])
+    )
+    # Browsers omit unchecked boxes, while a few form adapters represent an
+    # explicit empty selection as a single blank value.  Both mean no risk
+    # program was selected when the presence marker is submitted.
+    raw_ids = [value for value in raw_ids if str(value or "").strip()]
+    programs = available_risk_programs(strategy_cls, interval)
+    by_id = {str(item["id"]): item for item in programs}
+    selected: list[dict[str, Any]] = []
+    for index, program_id in enumerate(raw_ids):
+        program_id = str(program_id)
+        program = by_id.get(program_id)
+        if program is None:
+            raise ValueError(f"不支持的回测风控程序: {program_id}")
+        params = dict(program.get("params") or {})
+        for key, _default in params.items():
+            raw = form.get(f"risk_param_{programs.index(program)}_{key}")
+            if raw is not None and str(raw).strip():
+                params[key] = _coerce_form_value(raw)
+        priority = _coerce_form_value(form.get(f"risk_priority_{programs.index(program)}", index))
+        selected.append({"id": program_id, "params": params, "priority": priority})
+    normalized = normalize_risk_programs(
+        selected,
+        host_strategy_cls=strategy_cls,
+        frame_type=interval,
+    )
+    values = list(getlist(ALLOW_SAME_BAR_REPURCHASE_KEY)) if callable(getlist) else [form.get(ALLOW_SAME_BAR_REPURCHASE_KEY)]
+    allow_same_bar = any(str(value).lower() == "true" for value in values)
+    return normalized, allow_same_bar
+
+
 BACKTEST_WIZARD_SCRIPT = """
 (function () {
     function showStep(step) {
@@ -2068,7 +2200,7 @@ BACKTEST_WIZARD_SCRIPT = """
             buttons[j].classList.toggle('hidden', buttons[j].getAttribute('data-bt-show') !== String(step));
         }
         var indicator = document.getElementById('backtest-step-indicator');
-        if (indicator) { indicator.textContent = '第 ' + step + ' / 2 步'; }
+        if (indicator) { indicator.textContent = '第 ' + step + ' / 3 步'; }
     }
     window.showBacktestStep = showStep;
     showStep(1);
@@ -2077,7 +2209,7 @@ BACKTEST_WIZARD_SCRIPT = """
 
 @rt("/{name}/backtest/modal")
 def backtest_modal(name: str, req=None):
-    """运行回测向导：第一步参数，第二步因子选择。
+    """运行回测向导：参数、因子和显式风控程序选择。
 
     Args:
         name: 策略名。
@@ -2088,6 +2220,7 @@ def backtest_modal(name: str, req=None):
     if not cls:
         return "Strategy not found"
 
+    interval = BacktestRunner.strategy_interval(cls)
     default_params = _get_strategy_default_params(cls)
     strategy_params, trade_params = _split_backtest_params(default_params)
 
@@ -2135,12 +2268,12 @@ def backtest_modal(name: str, req=None):
         ),
         Div(
             Span("周期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-            fh.Select(
-                fh.Option("日线", value="1d", selected="selected"),
-                fh.Option("1分钟", value="1m"),
-                name="interval",
-                cls="uk-select uk-form-small flex-1 text-gray-700",
+            Input(type="hidden", name="interval", value=interval),
+            Span(
+                "日线" if interval == "1d" else "30分钟线",
+                cls="text-sm text-gray-700",
             ),
+            Span("（由策略固定）", cls="text-xs text-gray-500"),
             cls="flex items-center gap-3 mb-3",
         ),
         Div(
@@ -2159,11 +2292,11 @@ def backtest_modal(name: str, req=None):
         Div(H4("策略参数", cls="text-sm font-semibold text-gray-600 mt-4 mb-2"), *param_inputs),
         Details(
             Summary(
-                "交易参数（三重障碍 / 滑点 / 手续费，一般无需修改）",
+                "交易参数（风险程序 / 滑点 / 手续费，一般无需修改）",
                 cls="cursor-pointer text-sm font-semibold text-gray-600",
             ),
             P(
-                "这些参数决定成交与费用口径，默认按上次使用的值。修改三重障碍会影响训练标签，需要重新训练模型。",
+                "这些参数决定风险程序、成交与费用口径，默认按上次使用的值。",
                 cls="text-xs text-gray-500 mt-2 mb-3",
             ),
             *trade_param_inputs,
@@ -2178,12 +2311,18 @@ def backtest_modal(name: str, req=None):
         cls="hidden",
     )
 
+    step3 = Div(
+        _build_risk_selection_panel(cls, interval),
+        data_bt_step="3",
+        cls="hidden",
+    )
+
     return Div(
         Div(
             Div(
                 H3(f"运行回测 - {name}", cls="text-lg font-bold"),
                 Span(
-                    "第 1 / 2 步",
+                    "第 1 / 3 步",
                     id="backtest-step-indicator",
                     cls="text-xs text-gray-500 ml-2",
                 ),
@@ -2192,6 +2331,7 @@ def backtest_modal(name: str, req=None):
             Form(
                 step1,
                 step2,
+                step3,
                 Div(
                     Button(
                         "取消",
@@ -2215,6 +2355,13 @@ def backtest_modal(name: str, req=None):
                         data_bt_show="1",
                     ),
                     Button(
+                        "下一步：选择风控",
+                        type="button",
+                        cls="btn btn-primary hidden",
+                        onclick="showBacktestStep(3)",
+                        data_bt_show="2",
+                    ),
+                    Button(
                         "开始运行",
                         type="button",
                         cls="btn btn-primary",
@@ -2222,7 +2369,7 @@ def backtest_modal(name: str, req=None):
                         hx_post=f"/strategy/{name}/backtest/run",
                         hx_target="#modal-container",
                         hx_include="closest form",
-                        data_bt_show="2",
+                        data_bt_show="3",
                     ),
                     cls="flex justify-end gap-2 mt-6",
                 ),
@@ -2243,7 +2390,6 @@ async def run_backtest(req, name: str):
         start_date = arrow.get(form.get("start_date")).date()
         end_date = arrow.get(form.get("end_date")).date()
         initial_cash = float(form.get("initial_cash", 1000000))
-        interval = form.get("interval", "1d")
         save_logs = _parse_checkbox(form.get("save_logs"))
         config = _parse_params(form)
 
@@ -2252,6 +2398,18 @@ async def run_backtest(req, name: str):
 
         if not cls:
             raise Exception("Strategy not found")
+
+        expected_interval = BacktestRunner.strategy_interval(cls)
+        submitted_interval = form.get("interval")
+        interval = str(submitted_interval or expected_interval).strip().lower()
+        BacktestRunner.validate_strategy_interval(cls, config, interval)
+
+        if form.get("risk_selection_present"):
+            selected, allow_same_bar = _parse_risk_program_selection(
+                form, cls, str(interval)
+            )
+            config[RISK_PROGRAMS_KEY] = selected
+            config[ALLOW_SAME_BAR_REPURCHASE_KEY] = allow_same_bar
 
         portfolio_id = uuid.uuid4().hex
         strategy_runtime_manager.create_backtest_runtime(
@@ -2461,9 +2619,9 @@ def _render_stock_selection_modal(
     top_k = int(merged_config.get("top_k", 10))
     universe_size = int(merged_config.get("universe_size", 300))
     train_window = int(merged_config.get("train_window", 60))
-    horizon = int(merged_config.get("horizon", 5))
-    take_profit_pct = float(merged_config.get("take_profit_pct", 0.15))
-    stop_loss_pct = float(merged_config.get("stop_loss_pct", 0.06))
+    future_return_horizon = int(
+        merged_config.get("future_return_horizon", merged_config.get("horizon", 5))
+    )
     use_lgb = bool(merged_config.get("use_lightgbm", True))
     model_engine = "LightGBM" if use_lgb else "Ridge-ICIR"
 
@@ -2499,15 +2657,6 @@ def _render_stock_selection_modal(
         asset_name = str(row.get("name") or row.get("asset_name") or asset_code)
         board_name = str(row.get("board") or row.get("sector") or "主板")
         close_text = _format_number(row.get("close"))
-        tb_barrier_text = row.get("tb_barrier_text")
-        tp_raw = row.get("tp_price")
-        sl_raw = row.get("sl_price")
-        close_val = row.get("close")
-        if tp_raw is None and isinstance(close_val, (int, float)):
-            tp_raw = float(close_val) * (1.0 + take_profit_pct)
-        if sl_raw is None and isinstance(close_val, (int, float)):
-            sl_raw = float(close_val) * (1.0 - stop_loss_pct)
-        b_horizon = row.get("barrier_horizon", horizon)
         ret1_text, ret1_cls = _format_signed_pct(row.get("ret_1d"))
         ret5_text, ret5_cls = _format_signed_pct(row.get("ret_5d"))
         ret20_text, ret20_cls = _format_signed_pct(row.get("ret_20d"))
@@ -2547,19 +2696,9 @@ def _render_stock_selection_modal(
                     cls="px-3 py-2 font-mono text-xs",
                 ),
                 Td(rs_text, cls=f"px-3 py-2 font-mono {rs_cls}"),
-                (
-                    Td(
-                        tb_barrier_text,
-                        cls="px-3 py-2 font-mono text-xs whitespace-nowrap",
-                    )
-                    if isinstance(tb_barrier_text, str) and tb_barrier_text.strip()
-                    else Td(
-                        Span(f"↑{_format_number(tp_raw)}", cls="text-red-600 font-medium"),
-                        Span(" / ", cls="text-gray-300"),
-                        Span(f"↓{_format_number(sl_raw)}", cls="text-green-600 font-medium"),
-                        Span(f" ({b_horizon}d)", cls="text-gray-500"),
-                        cls="px-3 py-2 font-mono text-xs whitespace-nowrap",
-                    )
+                Td(
+                    f"未来{future_return_horizon}日收盘收益（仅训练）",
+                    cls="px-3 py-2 font-mono text-xs whitespace-nowrap",
                 ),
                 Td(
                     Span(
@@ -2602,7 +2741,7 @@ def _render_stock_selection_modal(
                 Th("当日涨跌", cls="px-3 py-2 font-medium"),
                 Th("5日/20日涨幅", cls="px-3 py-2 font-medium"),
                 Th("板块相对强弱(20D)", cls="px-3 py-2 font-medium"),
-                Th("三重障碍(止盈/止损/期)", cls="px-3 py-2 font-medium"),
+                Th("训练目标(未来收盘收益)", cls="px-3 py-2 font-medium"),
                 Th("短线与均线形态", cls="px-3 py-2 font-medium"),
                 Th("ML得分", cls="px-3 py-2 font-medium"),
                 Th("核心选股逻辑", cls="px-3 py-2 font-medium"),
@@ -2669,37 +2808,13 @@ def _render_stock_selection_modal(
                     ),
                 ),
                 Div(
-                    Span("时间屏障(日)", cls="block text-xs text-gray-500 mb-1"),
+                    Span("未来收益标签前瞻(日)", cls="block text-xs text-gray-500 mb-1"),
                     Input(
                         type="number",
-                        name="param_horizon",
-                        value=str(horizon),
+                        name="param_future_return_horizon",
+                        value=str(future_return_horizon),
                         min="1",
                         max="30",
-                        cls="input input-sm w-24",
-                    ),
-                ),
-                Div(
-                    Span("上轨止盈比例", cls="block text-xs text-gray-500 mb-1"),
-                    Input(
-                        type="number",
-                        name="param_take_profit_pct",
-                        value=str(take_profit_pct),
-                        step="0.01",
-                        min="0.01",
-                        max="1.0",
-                        cls="input input-sm w-24",
-                    ),
-                ),
-                Div(
-                    Span("下轨止损比例", cls="block text-xs text-gray-500 mb-1"),
-                    Input(
-                        type="number",
-                        name="param_stop_loss_pct",
-                        value=str(stop_loss_pct),
-                        step="0.01",
-                        min="0.01",
-                        max="1.0",
                         cls="input input-sm w-24",
                     ),
                 ),
@@ -2767,8 +2882,7 @@ def _render_stock_selection_modal(
                 cls="px-2.5 py-1 rounded-full bg-green-50 text-green-700 text-xs font-medium",
             ),
             Span(
-                f"三重障碍: +{take_profit_pct * 100:.0f}% / "
-                f"-{stop_loss_pct * 100:.0f}% / {horizon}日",
+                f"训练目标: 未来{future_return_horizon}日收盘收益（仅训练）",
                 cls="px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-medium",
             ),
             cls="flex flex-wrap items-center gap-2 mb-3",
@@ -2882,6 +2996,8 @@ def _get_paper_deploy_availability(req) -> tuple[bool, str]:
 
 def _get_live_deploy_availability(req) -> tuple[bool, str]:
     """返回转入实盘的可用性。"""
+    if not supports_live_trading():
+        return False, live_trading_unavailable_message()
     registry = _get_registry(req)
     if registry is None:
         return False, "运行时未初始化，无法转实盘"
@@ -3004,12 +3120,114 @@ def _render_fee_inputs(config: dict[str, Any]) -> Any:
     )
 
 
+def _render_deploy_risk_selection(
+    config: dict[str, Any], warning_message: str = "", interval: str = "1d"
+) -> Any:
+    """Allow paper/live transition to remove inherited adapted programs."""
+    selected = config.get(RISK_PROGRAMS_KEY) or []
+    selected_by_id = {
+        str(item.get("id")): item for item in selected if isinstance(item, dict)
+    }
+    unavailable = unavailable_risk_program_ids(selected, frame_type=interval)
+    cards = []
+    for index, program in enumerate(available_risk_programs(None, interval)):
+        program_id = str(program["id"])
+        item = selected_by_id.get(program_id)
+        params = dict(program.get("params") or {})
+        params.update((item or {}).get("params") or {})
+        cards.append(
+            Div(
+                fh.Label(
+                    fh.Input(
+                        type="checkbox",
+                        name="risk_program_id",
+                        value=program_id,
+                        checked=item is not None,
+                        cls="checkbox checkbox-sm",
+                    ),
+                    Span(str(program.get("name") or program_id), cls="text-sm font-medium"),
+                    cls="flex items-center gap-2 cursor-pointer",
+                ),
+                Div(
+                    Input(
+                        name=f"risk_priority_{index}",
+                        type="number",
+                        value=str((item or {}).get("priority", index)),
+                        min="0",
+                        cls="input input-xs w-20",
+                    ),
+                    *[
+                        Input(
+                            name=f"risk_param_{index}_{key}",
+                            value=str(value),
+                            type="number" if isinstance(value, (int, float)) and not isinstance(value, bool) else "text",
+                            step="any" if isinstance(value, float) else None,
+                            cls="input input-xs w-24",
+                        )
+                        for key, value in params.items()
+                    ],
+                    cls="flex flex-wrap gap-1 mt-2",
+                ),
+                cls="rounded border border-gray-200 bg-gray-50 p-2 mb-1",
+            )
+        )
+    unavailable_cards = [
+        Div(
+            Span("不可用/已阻止", cls="font-medium text-amber-700"),
+            Span(f"：{program_id}", cls="font-mono text-xs text-amber-800"),
+            P(
+                "该风险程序未由当前 CE 宿主注册，不能静默替换；移除后才能启动。",
+                cls="text-xs text-amber-700 mt-1",
+            ),
+            cls="rounded border border-amber-200 bg-amber-50 p-2 mb-1",
+        )
+        for program_id in unavailable
+    ]
+    warning = P(warning_message, cls="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2") if warning_message else None
+    return Div(
+        Input(type="hidden", name="risk_selection_present", value="1"),
+        H4("沿用回测风控程序", cls="text-sm font-semibold text-gray-600 mt-4 mb-1"),
+        P("默认继承回测选择，可移除；参数保持回测值。", cls="text-xs text-gray-500 mb-2"),
+        warning,
+        *unavailable_cards,
+        *cards,
+    )
+
+
+def _removed_risk_warning(
+    source: dict[str, Any], selected: list[dict[str, Any]], interval: str = "1d"
+) -> str:
+    """Describe exactly which backtest programs were removed at transition."""
+    source_ids = {
+        str(item.get("id")) for item in source.get(RISK_PROGRAMS_KEY) or [] if isinstance(item, dict)
+    }
+    selected_ids = {
+        str(item.get("id")) for item in selected if isinstance(item, dict)
+    }
+    removed = sorted(source_ids - selected_ids)
+    if not removed:
+        return ""
+    names = risk_program_names(
+        source.get(RISK_PROGRAMS_KEY) or [], frame_type=interval
+    )
+    removed_names = [
+        name
+        for name, item in zip(
+            names, source.get(RISK_PROGRAMS_KEY) or [], strict=True
+        )
+        if isinstance(item, dict) and str(item.get("id")) in set(removed)
+    ]
+    return "已移除回测使用的风控程序：" + "、".join(removed_names) + "；实盘/仿真结果可能与回测不同。"
+
+
 def _paper_deploy_modal(
     portfolio_id: str,
     principal: str = "1000000",
     config: dict[str, Any] | None = None,
     default_config: dict[str, Any] | None = None,
     error_message: str = "",
+    warning_message: str = "",
+    interval: str = "1d",
 ) -> Any:
     """渲染转入仿真确认弹窗。"""
     error_block = (
@@ -3023,6 +3241,9 @@ def _paper_deploy_modal(
             Form(
                 Input(type="hidden", name="portfolio_id", value=portfolio_id),
                 _render_strategy_config_readonly(config or {}, default_config),
+                _render_deploy_risk_selection(
+                    config or {}, warning_message, interval=interval
+                ),
                 _render_fee_inputs(config or {}),
                 Div(
                     fh.Label("仿真本金", cls="text-sm text-gray-500"),
@@ -3069,6 +3290,8 @@ def _live_deploy_modal(
     live_accounts: list[dict[str, Any]],
     config: dict[str, Any] | None = None,
     default_config: dict[str, Any] | None = None,
+    warning_message: str = "",
+    interval: str = "1d",
 ) -> Any:
     """渲染转入实盘确认弹窗."""
     if not live_accounts:
@@ -3102,6 +3325,9 @@ def _live_deploy_modal(
             Form(
                 Input(type="hidden", name="live_account_id", value=account_id),
                 strategy_config,
+                _render_deploy_risk_selection(
+                    config or {}, warning_message, interval=interval
+                ),
                 fee_inputs,
                 id="deploy-live-form",
             ),
@@ -3434,14 +3660,47 @@ def _coerce_form_value(raw: Any) -> Any:
         return text
 
 
+def _deployment_risk_config(
+    form: Any,
+    base_config: dict[str, Any],
+    strategy_name: str,
+    interval: str = "1d",
+) -> tuple[dict[str, Any], str]:
+    """Validate inherited/edited risk choices for a paper/live deployment."""
+    config = dict(base_config or {})
+    source = dict(base_config or {})
+    if form.get("risk_selection_present"):
+        strategy_cls = strategy_loader.load_from_cache().get(strategy_name)
+        if strategy_cls is None:
+            raise ValueError("源回测策略不存在，无法校验风控程序")
+        selected, allow_same_bar = _parse_risk_program_selection(
+            form, strategy_cls, interval
+        )
+        config[RISK_PROGRAMS_KEY] = selected
+        config[ALLOW_SAME_BAR_REPURCHASE_KEY] = allow_same_bar
+        return config, _removed_risk_warning(source, selected, interval=interval)
+    if RISK_PROGRAMS_KEY in config:
+        strategy_cls = strategy_loader.load_from_cache().get(strategy_name)
+        if strategy_cls is not None:
+            config[RISK_PROGRAMS_KEY] = normalize_risk_programs(
+                config[RISK_PROGRAMS_KEY],
+                host_strategy_cls=strategy_cls,
+                frame_type=interval,
+            )
+    return config, ""
+
+
 @rt("/backtest/{portfolio_id}/deploy/paper/modal")
 def deploy_backtest_to_paper_modal(portfolio_id: str):
     """渲染转入仿真确认弹窗。"""
     config, default_config = _load_backtest_run_config(portfolio_id)
+    run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
+    interval = run.interval if run is not None else "1d"
     return _paper_deploy_modal(
         portfolio_id,
         config=config,
         default_config=default_config,
+        interval=interval,
     )
 
 
@@ -3449,11 +3708,14 @@ def deploy_backtest_to_paper_modal(portfolio_id: str):
 def deploy_backtest_to_live_modal(req, portfolio_id: str):
     """渲染转入实盘确认弹窗。"""
     config, default_config = _load_backtest_run_config(portfolio_id)
+    run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
+    interval = run.interval if run is not None else "1d"
     return _live_deploy_modal(
         portfolio_id,
         _get_live_accounts(req),
         config=config,
         default_config=default_config,
+        interval=interval,
     )
 
 
@@ -3465,31 +3727,37 @@ async def deploy_backtest_to_paper(req, portfolio_id: str):
         principal = float(principal_raw)
     except ValueError:
         config, default_config = _load_backtest_run_config(portfolio_id)
+        run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
         return _paper_deploy_modal(
             portfolio_id,
             principal=principal_raw,
             config=config,
             default_config=default_config,
             error_message="请输入有效的仿真本金",
+            interval=run.interval if run is not None else "1d",
         )
     if principal <= 0:
         config, default_config = _load_backtest_run_config(portfolio_id)
+        run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
         return _paper_deploy_modal(
             portfolio_id,
             principal=principal_raw,
             config=config,
             default_config=default_config,
             error_message="仿真本金必须大于 0",
+            interval=run.interval if run is not None else "1d",
         )
     registry = _get_registry(req)
     if registry is None:
         config, default_config = _load_backtest_run_config(portfolio_id)
+        run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
         return _paper_deploy_modal(
             portfolio_id,
             principal=principal_raw,
             config=config,
             default_config=default_config,
             error_message="运行时未初始化",
+            interval=run.interval if run is not None else "1d",
         )
     existing_runtime = strategy_runtime_manager.get_active_backtest_deployment(portfolio_id, "paper")
     if existing_runtime is not None:
@@ -3506,8 +3774,14 @@ async def deploy_backtest_to_paper(req, portfolio_id: str):
             ),
         )
     base_config, _ = _load_backtest_run_config(portfolio_id)
-    custom_config = _form_to_config(form, base_config)
+    run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
+    strategy_name = run.strategy_name if run is not None else ""
+    interval = run.interval if run is not None else "1d"
     try:
+        risk_config, warning_message = _deployment_risk_config(
+            form, base_config, strategy_name, interval
+        )
+        custom_config = _form_to_config(form, risk_config)
         runtime = strategy_runtime_manager.deploy_to_paper(
             portfolio_id=portfolio_id,
             principal=principal,
@@ -3518,7 +3792,8 @@ async def deploy_backtest_to_paper(req, portfolio_id: str):
         return (
             Div(id="modal-container"),
             _render_deploy_result(
-                f"已转入仿真：{runtime.portfolio_id}，策略ID={runtime.strategy_id}",
+                f"已转入仿真：{runtime.portfolio_id}，策略ID={runtime.strategy_id}"
+                + (f"；{warning_message}" if warning_message else ""),
                 is_error=False,
             ),
             _build_backtest_action_cell(
@@ -3529,12 +3804,14 @@ async def deploy_backtest_to_paper(req, portfolio_id: str):
         )
     except Exception as e:
         config, default_config = _load_backtest_run_config(portfolio_id)
+        run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
         return _paper_deploy_modal(
             portfolio_id,
             principal=principal_raw,
             config=config,
             default_config=default_config,
             error_message=f"转入仿真失败: {e}",
+            interval=run.interval if run is not None else "1d",
         )
 
 
@@ -3565,8 +3842,14 @@ async def deploy_backtest_to_live(req, portfolio_id: str):
             ),
         )
     base_config, _ = _load_backtest_run_config(portfolio_id)
-    custom_config = _form_to_config(form, base_config)
+    run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
+    strategy_name = run.strategy_name if run is not None else ""
+    interval = run.interval if run is not None else "1d"
     try:
+        risk_config, warning_message = _deployment_risk_config(
+            form, base_config, strategy_name, interval
+        )
+        custom_config = _form_to_config(form, risk_config)
         runtime = strategy_runtime_manager.deploy_to_live(
             portfolio_id=portfolio_id,
             account_id=account_id,
@@ -3577,7 +3860,8 @@ async def deploy_backtest_to_live(req, portfolio_id: str):
         return (
             Div(id="modal-container"),
             _render_deploy_result(
-                f"已转入实盘：{runtime.portfolio_id}，策略ID={runtime.strategy_id}",
+                f"已转入实盘：{runtime.portfolio_id}，策略ID={runtime.strategy_id}"
+                + (f"；{warning_message}" if warning_message else ""),
                 is_error=False,
             ),
             _build_backtest_action_cell(

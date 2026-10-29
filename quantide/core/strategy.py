@@ -1,5 +1,8 @@
 import datetime
 from abc import ABC
+
+# Strategy hooks intentionally have no-op defaults for backward compatibility.
+# ruff: noqa: B024,B027
 from typing import Any
 
 import polars as pl

@@ -11,10 +11,10 @@ AC-11: 每日持仓 tab 支持按个股代码过滤.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class BacktestStage(str, Enum):
+class BacktestStage(StrEnum):
     """回测阶段 (AC-FR0080-3, NFR-0060 AC-5c).
 
     RUNNING: 回测中.

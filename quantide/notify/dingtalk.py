@@ -3,7 +3,6 @@ import base64
 import hashlib
 import hmac
 import json
-import logging
 import time
 import urllib.parse
 from collections.abc import Awaitable
@@ -11,17 +10,13 @@ from collections.abc import Awaitable
 import httpx
 from loguru import logger
 
-from quantide.config.settings import (
-    get_dingtalk_access_token,
-    get_dingtalk_secret,
-)
-
-logger = logging.getLogger(__name__)
+from quantide.config.settings import get_dingtalk_access_token, get_dingtalk_secret
 
 
 class DingTalkMessage:
     """
     钉钉的机器人消息推送类，封装了常用的消息类型以及加密算法
+
         需要在运行时配置中提供机器人的 access_token。
         如果配置了加签，需要同时提供机器人的 secret。
         如果配置了自定义关键词，需要同时提供 keyword，多个关键词用英文逗号分隔。

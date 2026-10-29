@@ -1,6 +1,5 @@
 """FR-0402 coverage tests for broker port adapters and isolated broker state."""
 
-import asyncio
 import datetime
 
 import pytest
@@ -55,6 +54,13 @@ def test_broker_types_keep_isolated_portfolio_identity(
         )
         monkeypatch.setattr(
             "quantide.service.backtest_broker.calendar.day_shift", lambda *_: day
+        )
+        # The singleton calendar may have been populated by earlier tests.
+        # This case intentionally models a minimal calendar with no earlier
+        # frame, so the constructor's damaged-calendar guard must not inspect
+        # unrelated suite state.
+        monkeypatch.setattr(
+            "quantide.service.backtest_broker.calendar.day_frames", []
         )
         broker = BacktestBroker(day, day, "backtest", _NoDataFeed())
     else:

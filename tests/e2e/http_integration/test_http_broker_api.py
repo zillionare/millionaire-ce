@@ -34,6 +34,7 @@ from quantide.core.runtime.modes import RuntimeBootstrap
 from quantide.data.models.app_state import AppState
 from quantide.service.init_wizard import init_wizard
 from quantide.service.strategy_runtime import strategy_runtime_manager
+from tests.e2e.support.auth_fixture import ensure_test_admin
 
 
 # ──────────────────────── Helpers ────────────────────────
@@ -104,6 +105,7 @@ def api_client(monkeypatch):
             app_config_dir=app_config_dir,
             enforce_single_instance=False,
         )
+        ensure_test_admin()
 
         _seed_market_data(market_home)
         _seed_initialized_state(market_home)

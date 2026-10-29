@@ -11,10 +11,10 @@ hover 显示数值.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class BacktestChartType(str, Enum):
+class BacktestChartType(StrEnum):
     """回测报告图表类型."""
 
     EQUITY_CURVE = "equity_curve"

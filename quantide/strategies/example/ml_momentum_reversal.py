@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import pickle
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ from quantide.factors.alpha import (
     standardize_features,
 )
 from quantide.factors.catalog import resolve_feature_selection
+from quantide.service.model_store import ModelArtifact, model_key, model_store
 
 try:
     import lightgbm as lgb
@@ -65,8 +67,9 @@ def _bars_fingerprint() -> tuple[Any, ...]:
 _PANEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
 _PANEL_CACHE_MAX = 2
 
-#: 三重障碍标签缓存（键：面板键 + 障碍参数 + 持有期）。
-#: 只存训练真正用到的三列（date/asset/tb_ret），单条约 4MB。
+#: 未来收盘收益标签缓存（键：面板键 + 训练历史范围 + 标签前瞻期）。
+#: 只存标签的三列（date/asset/future_n_trading_day_close_return），训练特征始终从当前标准化面板拼回，
+#: 避免为每个因子集在缓存中保留一份大面板。
 _LABEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
 _LABEL_CACHE_MAX = 6
 
@@ -109,6 +112,14 @@ def _coerce_date(
     return None
 
 
+def _future_return_horizon(config: dict[str, Any], default: int = 3) -> int:
+    """Resolve the model label horizon without treating it as an exit rule."""
+    raw = config.get("future_return_horizon")
+    if raw is None:
+        raw = config.get("horizon", default)
+    return max(1, int(raw))
+
+
 def _ensure_data_connected() -> bool:
     """Connect local daily_bars/calendar/stock_list if not yet initialized."""
     if getattr(daily_bars, "_initialized", False):
@@ -144,109 +155,34 @@ def _resolve_stock_name(asset: str) -> str:
     return asset
 
 
-def compute_triple_barrier_labels(
-    df: pl.DataFrame,
-    horizon: int = 3,
-    up_barrier_pct: float = 0.15,
-    down_barrier_pct: float = 0.06,
+def compute_future_close_return_labels(
+    df: pl.DataFrame, horizon: int = 3
 ) -> pl.DataFrame:
-    """Attach triple-barrier labels to a daily-bar panel.
+    """Attach a supervised future close-return target to a daily-bar panel.
 
-    The entry reference price is each row's close. Forward bars are scanned up
-    to ``horizon`` trading days; the first upper/lower barrier hit determines
-    ``tb_ret`` and ``tb_hit``, otherwise the vertical time barrier expires at
-    ``horizon`` using the forward close. Rows without a complete forward window
-    receive null labels to avoid lookahead bias.
-
-    Same-day dual hits follow ``quantide.service.triple_barrier.evaluate_day``:
-    the barrier closer to that day's open wins, with ties resolved to ``down``.
-
-    Args:
-        df: Panel with at least ``[asset, date, open, high, low, close]``.
-        horizon: Vertical-barrier holding-day limit.
-        up_barrier_pct: Upper barrier return, e.g. ``0.15`` for +15%.
-        down_barrier_pct: Lower barrier return, e.g. ``0.06`` for -6%.
-
-    Returns:
-        ``df`` sorted by ``[asset, date]`` with ``tb_ret``, ``tb_hit``,
-        ``tb_hold_days`` and backward-compatible ``fwd_ret`` columns.
+    ``horizon`` counts rows within each asset's sorted daily-bar history, so it
+    represents trading days rather than calendar days.  The target is used only
+    when fitting the model; it is never consulted by the daily exit policy.
+    Rows without a complete forward window remain null.  Callers must pass a
+    history frame cut off at the signal date when training, which leaves the
+    signal-day target null and prevents lookahead at decision time.
     """
     horizon = max(1, int(horizon))
-    label_cols = [
-        pl.lit(None, dtype=pl.Float64).alias("tb_ret"),
-        pl.lit(None, dtype=pl.Utf8).alias("tb_hit"),
-        pl.lit(None, dtype=pl.Int64).alias("tb_hold_days"),
-        pl.lit(None, dtype=pl.Float64).alias("fwd_ret"),
-    ]
     if df.is_empty():
-        return df.with_columns(label_cols)
-
-    out = df.sort(["asset", "date"])
-    entry_price = pl.col("close").cast(pl.Float64)
-    upper_price = entry_price * (1.0 + float(up_barrier_pct))
-    lower_price = entry_price * (1.0 - float(down_barrier_pct))
-    full_obs = pl.col("close").shift(-horizon).over("asset").is_not_null()
-
-    ret_exprs: list[pl.Expr] = []
-    hit_exprs: list[pl.Expr] = []
-    day_exprs: list[pl.Expr] = []
-    for k in range(1, horizon + 1):
-        open_k = pl.col("open").cast(pl.Float64).shift(-k).over("asset")
-        high_k = pl.col("high").cast(pl.Float64).shift(-k).over("asset")
-        low_k = pl.col("low").cast(pl.Float64).shift(-k).over("asset")
-
-        hit_up = high_k >= upper_price
-        hit_down = low_k <= lower_price
-        up_dist = (open_k - upper_price).abs()
-        down_dist = (open_k - lower_price).abs()
-        win_up = hit_up & (~hit_down | (up_dist < down_dist))
-        win_down = hit_down & (~hit_up | ~(up_dist < down_dist))
-
-        ret_exprs.append(
-            pl.when(win_up)
-            .then(pl.lit(float(up_barrier_pct)))
-            .when(win_down)
-            .then(pl.lit(-float(down_barrier_pct)))
-            .otherwise(pl.lit(None, dtype=pl.Float64))
-        )
-        hit_exprs.append(
-            pl.when(win_up)
-            .then(pl.lit("up", dtype=pl.Utf8))
-            .when(win_down)
-            .then(pl.lit("down", dtype=pl.Utf8))
-            .otherwise(pl.lit(None, dtype=pl.Utf8))
-        )
-        day_exprs.append(
-            pl.when(win_up | win_down)
-            .then(pl.lit(k, dtype=pl.Int64))
-            .otherwise(pl.lit(None, dtype=pl.Int64))
+        return df.with_columns(
+            pl.lit(None, dtype=pl.Float64).alias(
+                "future_n_trading_day_close_return"
+            )
         )
 
-    forward_close = pl.col("close").cast(pl.Float64).shift(-horizon).over("asset")
-    expire_ret = forward_close / entry_price - 1.0
-    expire_hit = pl.lit("expire", dtype=pl.Utf8)
-    expire_days = pl.lit(horizon, dtype=pl.Int64)
-
-    tb_ret = (
-        pl.when(full_obs)
-        .then(pl.coalesce([*ret_exprs, expire_ret]))
+    ordered = df.sort(["asset", "date"])
+    close = pl.col("close").cast(pl.Float64)
+    future_close = close.shift(-horizon).over("asset")
+    return ordered.with_columns(
+        pl.when(future_close.is_not_null() & (close != 0.0))
+        .then(future_close / close - 1.0)
         .otherwise(pl.lit(None, dtype=pl.Float64))
-        .alias("tb_ret")
-    )
-    tb_hit = (
-        pl.when(full_obs)
-        .then(pl.coalesce([*hit_exprs, expire_hit]))
-        .otherwise(pl.lit(None, dtype=pl.Utf8))
-        .alias("tb_hit")
-    )
-    tb_days = (
-        pl.when(full_obs)
-        .then(pl.coalesce([*day_exprs, expire_days]))
-        .otherwise(pl.lit(None, dtype=pl.Int64))
-        .alias("tb_hold_days")
-    )
-    return out.with_columns([tb_ret, tb_hit, tb_days]).with_columns(
-        pl.col("tb_ret").alias("fwd_ret")
+        .alias("future_n_trading_day_close_return")
     )
 
 
@@ -255,54 +191,70 @@ def _fit_ml_model(
     train_window: int = 45,
     horizon: int = 3,
     use_lightgbm: bool = True,
-    up_barrier_pct: float = 0.15,
-    down_barrier_pct: float = 0.06,
     feature_cols: list[str] | None = None,
     label_cache_key: tuple[Any, ...] | None = None,
 ) -> tuple[Any, str]:
     """Train the ranking model strictly on leak-free historical samples.
 
-    Labels are triple-barrier outcomes computed from ``hist_df``. The caller
-    MUST still filter ``date <= signal_date`` so shifted forward bars cannot
-    observe future prices.
+    The target is the future ``horizon``-trading-day close return computed from
+    ``hist_df``. The caller MUST still filter the training frame strictly before
+    the signal date; this function does not define or implement an exit rule.
 
     Args:
         hist_df: 截至信号日的标准化特征面板。
         train_window: 训练窗口（交易日）。
-        horizon: 标签的前瞻持有交易日。
+        horizon: future close-return label's forward trading-day count.
         use_lightgbm: True 用 LightGBM，False 用岭回归。
-        up_barrier_pct: 标签的止盈障碍。
-        down_barrier_pct: 标签的止损障碍。
         feature_cols: 参与训练的因子；为空表示全部因子。
-        label_cache_key: 面板内容键；相同面板的标签可跨训练复用。
+        label_cache_key: 稳定的面板内容键；相同训练历史的标签可跨训练复用。
 
     Returns:
         tuple: (模型, 引擎名)。
     """
-    z_cols = [f"{c}_z" for c in (feature_cols or FEATURE_COLS)]
-    label_key = (
-        tuple(label_cache_key) if label_cache_key is not None else id(hist_df),
-        round(float(up_barrier_pct), 6),
-        round(float(down_barrier_pct), 6),
-        int(horizon),
-    )
-    labeled = _LABEL_CACHE.get(label_key)
-    if labeled is None:
-        labeled = compute_triple_barrier_labels(
-            hist_df,
-            horizon=horizon,
-            up_barrier_pct=up_barrier_pct,
-            down_barrier_pct=down_barrier_pct,
+    selected_features = tuple(feature_cols or FEATURE_COLS)
+    z_cols = [f"{c}_z" for c in selected_features]
+
+    # A cache key is optional because callers without a stable panel identity
+    # must not cache by ``id(hist_df)``: once that frame is released, Python can
+    # reuse its id for a different panel.  Labels do not depend on the selected
+    # features, so feature_cols intentionally stays out of this key.  The
+    # current normalized feature columns are joined below on every invocation.
+    label_key = None
+    if label_cache_key is not None:
+        history_key = (
+            hist_df.height,
+            hist_df["date"].min(),
+            hist_df["date"].max(),
+            hist_df["asset"].n_unique(),
         )
-        if len(_LABEL_CACHE) >= _LABEL_CACHE_MAX:
-            _LABEL_CACHE.pop(next(iter(_LABEL_CACHE)))
-        # 只保留训练用得到的列，避免整面板副本放大内存占用
-        _LABEL_CACHE[label_key] = labeled.select(["date", "asset", "tb_ret"])
+        label_key = (
+            tuple(label_cache_key),
+            history_key,
+            int(horizon),
+        )
+
+    labels = _LABEL_CACHE.get(label_key) if label_key is not None else None
+    if labels is None:
+        labels = compute_future_close_return_labels(
+            hist_df.select(["date", "asset", "close"]), horizon=horizon
+        ).select(["date", "asset", "future_n_trading_day_close_return"])
+        if label_key is not None:
+            if len(_LABEL_CACHE) >= _LABEL_CACHE_MAX:
+                _LABEL_CACHE.pop(next(iter(_LABEL_CACHE)))
+            _LABEL_CACHE[label_key] = labels
+
+    # Labels may be reused across feature subsets, but the normalized inputs
+    # must always come from the caller's historical frame.  This keeps feature
+    # selection correct and limits the cached object to the small label table.
+    labeled = hist_df.select(["date", "asset", *z_cols]).join(
+        labels, on=["date", "asset"], how="inner"
+    )
     valid_train = labeled.filter(
-        pl.col("tb_ret").is_not_null() & pl.col("tb_ret").is_finite()
+        pl.col("future_n_trading_day_close_return").is_not_null()
+        & pl.col("future_n_trading_day_close_return").is_finite()
     )
     if valid_train.is_empty():
-        raise RuntimeError("训练样本不足：没有可用的三重障碍标签")
+        raise RuntimeError("训练样本不足：没有可用的未来收盘收益标签")
 
     train_dates = valid_train["date"].unique().sort().tail(max(5, train_window))
     valid_train = valid_train.filter(pl.col("date").is_in(train_dates.to_list()))
@@ -313,14 +265,16 @@ def _fit_ml_model(
     if n_assets > 1:
         valid_train = valid_train.with_columns(
             (
-                pl.col("tb_ret").rank().over("date")
+                pl.col("future_n_trading_day_close_return").rank().over("date")
                 / pl.len().over("date").clip(lower_bound=1)
                 - 0.5
             ).alias("label_y")
         )
     else:
         valid_train = valid_train.with_columns(
-            (pl.col("tb_ret").clip(-0.2, 0.2) * 2.5).alias("label_y")
+            (
+                pl.col("future_n_trading_day_close_return").clip(-0.2, 0.2) * 2.5
+            ).alias("label_y")
         )
 
     x_train = (
@@ -473,24 +427,25 @@ def _format_candidate_rows(
     target_date: datetime.date,
     model_engine: str,
     limit: int,
-    take_profit_pct: float = 0.15,
-    stop_loss_pct: float = 0.06,
-    horizon: int = 3,
 ) -> list[dict[str, Any]]:
     """Format top-N scored rows into UI & strategy selection dicts."""
     if scored_df.is_empty():
         return []
 
-    take_profit_pct = float(take_profit_pct)
-    stop_loss_pct = float(stop_loss_pct)
-    barrier_horizon = int(horizon)
-
-    # Exclude stocks locked at up-limit on the signal bar
-    tradable = scored_df.filter(
-        ~((pl.col("up_limit") > 0) & (pl.col("close") >= pl.col("up_limit") * 0.999))
-    )
-    if tradable.is_empty():
-        tradable = scored_df
+    # Eligibility is applied before ranking and ``limit`` is only an upper
+    # bound.  An all-ineligible cross-section must not be repopulated with
+    # locked-at-limit names just to fill top_k.
+    eligibility = pl.lit(True)
+    if "volume" in scored_df.columns:
+        eligibility = eligibility & (pl.col("volume").fill_null(0) > 0)
+    if "is_st" in scored_df.columns:
+        eligibility = eligibility & ~pl.col("is_st").fill_null(False)
+    if "up_limit" in scored_df.columns:
+        eligibility = eligibility & ~(
+            (pl.col("up_limit") > 0)
+            & (pl.col("close") >= pl.col("up_limit") * 0.999)
+        )
+    tradable = scored_df.filter(eligibility)
 
     ranked = tradable.sort(["ml_score", "asset"], descending=[True, False]).head(limit)
     date_str = target_date.isoformat()
@@ -499,13 +454,6 @@ def _format_candidate_rows(
     for idx, row in enumerate(ranked.iter_rows(named=True), start=1):
         asset = str(row["asset"])
         close_val = float(row.get("close") or 0.0)
-        tp_price = round(close_val * (1.0 + take_profit_pct), 2)
-        sl_price = round(close_val * (1.0 - stop_loss_pct), 2)
-        tb_barrier_text = (
-            f"止盈:{tp_price:.2f}(+{take_profit_pct * 100:.0f}%) / "
-            f"止损:{sl_price:.2f}(-{stop_loss_pct * 100:.0f}%) / "
-            f"{barrier_horizon}日"
-        )
         ma_bounce = float(row.get("ma20_support_bounce") or 0.0)
         ma_align = float(row.get("ma_alignment") or 0.0)
         ma20_slp = float(row.get("ma20_slope") or 0.0)
@@ -529,10 +477,6 @@ def _format_candidate_rows(
                 "signal_reason": _describe_signal_reason(row),
                 "as_of_date": date_str,
                 "model_engine": model_engine,
-                "tp_price": tp_price,
-                "sl_price": sl_price,
-                "barrier_horizon": barrier_horizon,
-                "tb_barrier_text": tb_barrier_text,
             }
         )
     return results
@@ -741,25 +685,21 @@ class MLMomentumReversalStrategy(BaseStrategy):
     """A股动量与趋势反转机器学习选股策略 (LightGBM 截面排序)"""
 
     VERSION = "v1.0.0"
-    RISK_OVERLAY = "triple_barrier"
+    BAR_INTERVAL = "1d"
     #: 声明本策略支持逐次预测归因（web 层据此动态加载 SHAP 面板）
     ATTRIBUTION = "shap"
     PARAMS: dict[str, Any] = {
         "top_k": 5,
-        "keep_top_n": 15,
         "universe_size": 2000,
         "universe_mode": "market_cap_trim",
         "market_cap_trim_pct": 0.05,
         "universe_rebalance_days": 20,
         "train_window": 45,
-        "horizon": 3,
+        "future_return_horizon": 3,
         "retrain_days": 5,
-        "stop_loss_pct": 0.06,
-        "take_profit_pct": 0.15,
         "slippage_pct": 0.001,
         "use_lightgbm": True,
-        "use_broker_barriers": True,
-        "use_alpha_exit": True,
+        "bar_interval": "1d",
         "fill_timing": "auction_close",
         "auction_epsilon": 0.001,
         "index_pool_codes": ["000300.SH", "000905.SH", "000852.SH"],
@@ -773,11 +713,16 @@ class MLMomentumReversalStrategy(BaseStrategy):
 
     def __init__(self, broker: Any, config: dict[str, Any] | None = None) -> None:
         merged = {**self.default_config(), **(config or {})}
+        if (
+            config
+            and "future_return_horizon" not in config
+            and "horizon" in config
+        ):
+            merged["future_return_horizon"] = config["horizon"]
         super().__init__(broker, merged)
         self.top_k = max(1, int(self.config.get("top_k", 5)))
-        self.keep_top_n = max(self.top_k, int(self.config.get("keep_top_n", 15)))
         self.universe_size = max(
-            self.keep_top_n, int(self.config.get("universe_size", 2000))
+            self.top_k, int(self.config.get("universe_size", 2000))
         )
         self.universe_mode = str(
             self.config.get("universe_mode", "market_cap_trim")
@@ -797,28 +742,26 @@ class MLMomentumReversalStrategy(BaseStrategy):
             1, int(self.config.get("universe_rebalance_days", 20))
         )
         self.train_window = max(10, int(self.config.get("train_window", 45)))
-        self.horizon = max(1, int(self.config.get("horizon", 3)))
-        self.retrain_days = max(1, int(self.config.get("retrain_days", 5)))
-        self.stop_loss_pct = float(self.config.get("stop_loss_pct", 0.06))
-        self.take_profit_pct = float(self.config.get("take_profit_pct", 0.15))
-        self.use_lightgbm = bool(self.config.get("use_lightgbm", True))
-        self.use_broker_barriers = bool(
-            self.config.get("use_broker_barriers", True)
+        self.future_return_horizon = _future_return_horizon(
+            config or self.config
         )
-        # alpha 排名卖出开关：关闭后只剩三重障碍出场
-        self.use_alpha_exit = bool(self.config.get("use_alpha_exit", True))
-        if not self.use_alpha_exit and not self.use_broker_barriers:
-            self.log(
-                "use_alpha_exit 与 use_broker_barriers 同时关闭，持仓将没有自动卖出条件",
-                level="WARNING",
-            )
+        self.retrain_days = max(1, int(self.config.get("retrain_days", 5)))
+        self.use_lightgbm = bool(self.config.get("use_lightgbm", True))
         self.selected_features: list[str] = resolve_feature_selection(
             self.config.get("features")
         )
         self.custom_assets = _parse_custom_assets(self.config)
+        #: dry-run 影子模式：只加载模型，不训练
+        self._shadow_mode = bool(self.config.get("_shadow_mode", False))
 
         self._model: Any = None
         self._model_engine: str = "LightGBM" if self.use_lightgbm else "Prior-Ridge"
+        #: 模型持久化键（策略名 + 模型相关配置哈希），回测/仿真/实盘共用
+        self._model_key = model_key(self.__class__.__name__, self.config)
+        self._model_train_end: datetime.date | None = None
+        self._model_effective_from: datetime.date | None = None
+        self._model_pending: bool = False
+        self._model_due_logged: datetime.date | None = None
         #: 归因用：回测期间的每日持仓快照（日期 → 资产 → 股数）
         self._positions_by_date: dict[datetime.date, dict[str, float]] = {}
         #: 重训计数按「交易日」推进（实盘每 2 秒一次 on_bar 不应算作一天）
@@ -837,13 +780,181 @@ class MLMomentumReversalStrategy(BaseStrategy):
         """Initialize strategy state and log configuration."""
         self.log(
             f"MLMomentumReversalStrategy Initialized: top_k={self.top_k}, "
-            f"keep_top_n={self.keep_top_n}, universe_size={self.universe_size}, "
+            f"universe_size={self.universe_size}, "
             f"universe_mode={self.universe_mode}, "
             f"market_cap_trim_pct={self.market_cap_trim_pct}, "
-            f"train_window={self.train_window}, horizon={self.horizon}, "
+            f"train_window={self.train_window}, "
+            f"future_return_horizon={self.future_return_horizon}, "
             f"use_lightgbm={self.use_lightgbm}, "
-            f"use_alpha_exit={self.use_alpha_exit}"
         )
+        if self._is_live_mode():
+            try:
+                if self._shadow_mode:
+                    self._load_model_from_store(datetime.date.today())
+                else:
+                    self._ensure_live_model(datetime.date.today())
+            except Exception as exc:  # pragma: no cover - 数据未就绪时保持 pending
+                self._model_pending = True
+                self.log(f"模型加载/初始化失败，等待后台重训: {exc}", level="WARNING")
+
+    def _is_live_mode(self) -> bool:
+        return getattr(self.broker, "_bt_start", None) is None
+
+    def _load_model_from_store(self, day: datetime.date | None = None) -> bool:
+        """加载最新模型；只接受 effective_from <= day 的版本。"""
+        model, meta = model_store.load(self._model_key)
+        if model is None or meta is None:
+            self._model_pending = True
+            return False
+        try:
+            effective = datetime.date.fromisoformat(str(meta.effective_from))
+        except Exception:
+            self._model_pending = True
+            return False
+        if day is not None and effective > day:
+            self._model_pending = True
+            return False
+        try:
+            train_end = datetime.date.fromisoformat(str(meta.train_end))
+        except Exception:
+            self._model_pending = True
+            return False
+        self._model = model
+        self._model_engine = meta.engine or self._model_engine
+        self._model_train_end = train_end
+        self._model_effective_from = effective
+        self._model_pending = False
+        return True
+
+    def _model_due(self, day: datetime.date) -> bool:
+        if self._model is None or self._model_train_end is None:
+            return True
+        try:
+            elapsed = calendar.count_trading_days(self._model_train_end, day) - 1
+        except Exception:
+            return False
+        return elapsed >= self.retrain_days
+
+    def _save_model_artifact(
+        self,
+        model: Any,
+        engine: str,
+        training_frame: pl.DataFrame,
+        *,
+        effective_from: datetime.date,
+    ) -> None:
+        if model is None or training_frame is None or training_frame.is_empty():
+            return
+        try:
+            train_end = training_frame["date"].max()
+            if isinstance(train_end, datetime.datetime):
+                train_end = train_end.date()
+            if not isinstance(train_end, datetime.date):
+                return
+            model_hash = hashlib.sha1(pickle.dumps(model)).hexdigest()[:16]
+            meta = ModelArtifact(
+                model_key=self._model_key,
+                strategy_name=self.__class__.__name__,
+                config_hash=self._model_key.rsplit("-", 1)[-1],
+                train_end=train_end.isoformat(),
+                effective_from=effective_from.isoformat(),
+                engine=engine,
+                feature_version=FACTOR_VERSION,
+                pipeline_version=PIPELINE_VERSION,
+                model_hash=model_hash,
+                data_fingerprint=str(_bars_fingerprint()),
+                metrics={},
+                extra={
+                    "retrain_days": self.retrain_days,
+                    "future_return_horizon": self.future_return_horizon,
+                    "train_window": self.train_window,
+                },
+            )
+            model_store.save(key=self._model_key, model=model, metadata=meta)
+            self._model_train_end = train_end
+            self._model_effective_from = effective_from
+        except Exception as exc:  # pragma: no cover - 持久化失败不应中断策略
+            self.log(f"模型落盘失败: {exc}", level="WARNING")
+
+    def _ensure_live_model(self, day: datetime.date) -> bool:
+        """启动时加载模型；如缺失或过期，在启动阶段训练一次（不占决策窗口）。"""
+        loaded = self._load_model_from_store(day)
+        if loaded and not self._model_due(day):
+            return True
+        if not getattr(daily_bars, "_initialized", False):
+            self._model_pending = True
+            return False
+        self._ensure_backtest_panel(day)
+        panel = self._cached_norm_panel
+        if panel is None or panel.is_empty():
+            self._model_pending = True
+            return False
+        train_df = panel.filter(pl.col("date") < day)
+        if train_df.is_empty():
+            self._model_pending = True
+            return False
+        model, engine = _fit_ml_model(
+            train_df,
+            train_window=self.train_window,
+            horizon=self.future_return_horizon,
+            use_lightgbm=self.use_lightgbm,
+            feature_cols=self.selected_features or FEATURE_COLS,
+            label_cache_key=self._panel_cache_key(day),
+        )
+        if model is None:
+            self._model_pending = True
+            return False
+        self._model = model
+        self._model_engine = engine
+        self._save_model_artifact(
+            model, engine, train_df, effective_from=day
+        )
+        self._model_pending = False
+        # 启动阶段构建的面板只用于训练；14:57 必须用最新 forming bar 重建。
+        self._cached_norm_panel = None
+        self._panel_start = None
+        self._panel_end = None
+        self.log(
+            f"模型已就绪: train_end={self._model_train_end} effective={day} "
+            f"engine={engine}"
+        )
+        return True
+
+    def train_model_for_day(self, as_of: datetime.date) -> bool:
+        """收盘后训练：使用截至 as_of 的数据，供下一交易日使用。"""
+        try:
+            next_day = calendar.shift(as_of, 1, FrameType.DAY)
+        except Exception:
+            next_day = as_of + datetime.timedelta(days=1)
+        if not getattr(daily_bars, "_initialized", False):
+            return False
+        self._ensure_backtest_panel(next_day)
+        panel = self._cached_norm_panel
+        if panel is None or panel.is_empty():
+            return False
+        train_df = panel.filter(pl.col("date") <= as_of)
+        if train_df.is_empty():
+            return False
+        model, engine = _fit_ml_model(
+            train_df,
+            train_window=self.train_window,
+            horizon=self.future_return_horizon,
+            use_lightgbm=self.use_lightgbm,
+            feature_cols=self.selected_features or FEATURE_COLS,
+            label_cache_key=self._panel_cache_key(next_day),
+        )
+        if model is None:
+            return False
+        self._model = model
+        self._model_engine = engine
+        self._save_model_artifact(model, engine, train_df, effective_from=next_day)
+        self._cached_norm_panel = None
+        self._panel_start = None
+        self._panel_end = None
+        self.log(
+            f"模型已重训: train_end={as_of} effective={next_day} engine={engine}"
+        )
+        return True
 
     @classmethod
     def select_stocks(
@@ -863,12 +974,16 @@ class MLMomentumReversalStrategy(BaseStrategy):
             List of top-K ranked stock dictionaries with scores and explanations.
         """
         cfg = {**cls.default_config(), **(config or {})}
+        if (
+            config
+            and "future_return_horizon" not in config
+            and "horizon" in config
+        ):
+            cfg["future_return_horizon"] = config["horizon"]
         top_k = max(1, int(cfg.get("top_k", 5)))
         universe_size = max(top_k, int(cfg.get("universe_size", 2000)))
         train_window = max(10, int(cfg.get("train_window", 45)))
-        horizon = max(1, int(cfg.get("horizon", 3)))
-        take_profit_pct = float(cfg.get("take_profit_pct", 0.15))
-        stop_loss_pct = float(cfg.get("stop_loss_pct", 0.06))
+        future_return_horizon = _future_return_horizon(config or cfg)
         use_lightgbm = bool(cfg.get("use_lightgbm", True))
         universe_mode = str(
             cfg.get("universe_mode", "market_cap_trim")
@@ -938,10 +1053,8 @@ class MLMomentumReversalStrategy(BaseStrategy):
         model, model_engine = _fit_ml_model(
             norm_df,
             train_window=train_window,
-            horizon=horizon,
+            horizon=future_return_horizon,
             use_lightgbm=use_lightgbm,
-            up_barrier_pct=take_profit_pct,
-            down_barrier_pct=stop_loss_pct,
             feature_cols=feature_cols,
         )
         cross_df = norm_df.filter(pl.col("date") == target_date)
@@ -955,9 +1068,6 @@ class MLMomentumReversalStrategy(BaseStrategy):
             target_date,
             model_engine,
             top_k,
-            take_profit_pct=take_profit_pct,
-            stop_loss_pct=stop_loss_pct,
-            horizon=horizon,
         )
 
     def _resolve_signal_date(self, tm: datetime.datetime) -> datetime.date:
@@ -1020,6 +1130,16 @@ class MLMomentumReversalStrategy(BaseStrategy):
         """
         if getattr(self.broker, "_bt_start", None) is not None:
             return True
+        if str(self.config.get("fill_timing", "")).strip().lower() in {
+            "next_open",
+            "open",
+        }:
+            try:
+                from quantide.service.execution_clock import execution_clock
+
+                return execution_clock.phase(tm).name == "post_close"
+            except Exception:
+                return tm.time() >= datetime.time(15, 0)
         try:
             from quantide.service.execution_clock import execution_clock
 
@@ -1206,9 +1326,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
             PIPELINE_VERSION,
             FACTOR_VERSION,
             self.train_window,
-            self.horizon,
-            round(self.stop_loss_pct, 6),
-            round(self.take_profit_pct, 6),
+            self.future_return_horizon,
             self.universe_size,
             self.universe_mode,
             round(self.market_cap_trim_pct, 6),
@@ -1363,10 +1481,8 @@ class MLMomentumReversalStrategy(BaseStrategy):
         model, engine = _fit_ml_model(
             hist,
             train_window=self.train_window,
-            horizon=self.horizon,
+            horizon=self.future_return_horizon,
             use_lightgbm=self.use_lightgbm,
-            up_barrier_pct=self.take_profit_pct,
-            down_barrier_pct=self.stop_loss_pct,
             feature_cols=self.selected_features or FEATURE_COLS,
             label_cache_key=self._panel_cache_key(build_signal),
         )
@@ -1522,6 +1638,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
         self, tm: datetime.datetime
     ) -> tuple[list[dict[str, Any]], dict[str, float], dict[str, int]]:
         """Compute ranked stock candidates, latest close map, and full rank map."""
+        is_live = self._is_live_mode()
         use_pull_bars = not getattr(daily_bars, "_initialized", False) or (
             self.custom_assets is not None and len(self.custom_assets) <= 10
         )
@@ -1563,16 +1680,31 @@ class MLMomentumReversalStrategy(BaseStrategy):
             feat_df = compute_alpha_features(panel)
             norm_df = standardize_features(feat_df, feature_cols)
             target_date: datetime.date = norm_df["date"].max()  # type: ignore[assignment]
-            if self._should_retrain(target_date):
+            if is_live and self._model is None:
+                self._load_model_from_store(target_date)
+                if self._model is None:
+                    self._model_pending = True
+                    if self._model_due_logged != target_date:
+                        self._model_due_logged = target_date
+                        self.log(
+                            "模型未就绪，等待后台重训；本次不交易",
+                            level="WARNING",
+                        )
+                    return [], {}, {}
+            if not is_live and self._should_retrain(target_date):
                 train_df = norm_df.filter(pl.col("date") < target_date)
                 self._model, self._model_engine = _fit_ml_model(
                     train_df,
                     train_window=self.train_window,
-                    horizon=self.horizon,
+                    horizon=self.future_return_horizon,
                     use_lightgbm=self.use_lightgbm,
-                    up_barrier_pct=self.take_profit_pct,
-                    down_barrier_pct=self.stop_loss_pct,
                     feature_cols=feature_cols,
+                )
+                self._save_model_artifact(
+                    self._model,
+                    self._model_engine,
+                    train_df,
+                    effective_from=target_date,
                 )
             model, engine = self._model, self._model_engine
             if model is None:
@@ -1593,10 +1725,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
                 scored_df,
                 target_date,
                 engine,
-                self.keep_top_n,
-                take_profit_pct=self.take_profit_pct,
-                stop_loss_pct=self.stop_loss_pct,
-                horizon=self.horizon,
+                self.top_k,
             )
             return ranked, price_map, full_ranks
 
@@ -1610,7 +1739,6 @@ class MLMomentumReversalStrategy(BaseStrategy):
             return [], {}, {}
 
         target_date = hist_slice["date"].max()  # type: ignore[assignment]
-        is_live = getattr(self.broker, "_bt_start", None) is None
         if is_live:
             today = signal_date
             if target_date != today:
@@ -1649,16 +1777,39 @@ class MLMomentumReversalStrategy(BaseStrategy):
                         level="ERROR",
                     )
                 return [], {}, {}
-        if self._should_retrain(signal_date):
+        if is_live:
+            # 后台任务可能已写入新模型；决策前重新解析一次最新 artifact。
+            self._load_model_from_store(signal_date)
+            if self._model is None:
+                self._model_pending = True
+                if self._model_due_logged != signal_date:
+                    self._model_due_logged = signal_date
+                    self.log(
+                        "模型未就绪，等待后台重训；本次不交易",
+                        level="WARNING",
+                    )
+                return [], {}, {}
+            if self._model_due(signal_date) and self._model_due_logged != signal_date:
+                self._model_due_logged = signal_date
+                self.log(
+                    "模型已到重训周期，继续使用当前模型直至后台更新",
+                    level="WARNING",
+                )
+        if not is_live and self._should_retrain(signal_date):
+            training_df = self._training_slice(hist_slice, signal_date)
             self._model, self._model_engine = _fit_ml_model(
-                self._training_slice(hist_slice, signal_date),
+                training_df,
                 train_window=self.train_window,
-                horizon=self.horizon,
-                use_lightgbm=self.use_lightgbm,
-                up_barrier_pct=self.take_profit_pct,
-                down_barrier_pct=self.stop_loss_pct,
+                    horizon=self.future_return_horizon,
+                    use_lightgbm=self.use_lightgbm,
                 feature_cols=self.selected_features or FEATURE_COLS,
                 label_cache_key=self._panel_cache_key(signal_date),
+            )
+            self._save_model_artifact(
+                self._model,
+                self._model_engine,
+                training_df,
+                effective_from=signal_date,
             )
             self._mark_retrained()
 
@@ -1688,19 +1839,21 @@ class MLMomentumReversalStrategy(BaseStrategy):
             scored_df,
             target_date,
             self._model_engine,
-            self.keep_top_n,
-            take_profit_pct=self.take_profit_pct,
-            stop_loss_pct=self.stop_loss_pct,
-            horizon=self.horizon,
+            self.top_k,
         )
         return ranked, price_map, full_ranks
 
     async def on_bar(self, tm: datetime.datetime) -> None:
-        """Execute daily ML ranking, alpha exits, and portfolio rotation.
+        """Rebalance to today's top-K selection.
 
         实盘/模拟盘每个交易日只决策一次：策略按**信号日**去重，
         避免运行时高频轮询导致重复下单。实盘在 14:57 之后才决策
         （收盘集合竞价）；若 15:00 后仍在运行则继续算（不回退 T+1）。
+
+        Today's top-K is the complete portfolio target: selected holdings are
+        kept, every other available holding is fully sold, and every selected
+        asset that was not held is bought.  The supervised forward-return
+        horizon is unrelated to this execution policy.
         """
         self._data_missing = False
         if not self._in_decision_window(tm):
@@ -1708,7 +1861,7 @@ class MLMomentumReversalStrategy(BaseStrategy):
         signal_date = self._resolve_signal_date(tm)
         if self._last_executed_signal_date == signal_date:
             return
-        ranked, price_map, full_ranks = self._rank_for_bar(tm)
+        ranked, _, _ = self._rank_for_bar(tm)
         if self._data_missing:
             self._data_missing = False
             return
@@ -1719,15 +1872,14 @@ class MLMomentumReversalStrategy(BaseStrategy):
         if not ranked and not current_positions:
             return
 
-        score_map = {item["asset"]: float(item["ml_score"]) for item in ranked}
-        is_single_asset = (
-            self.custom_assets is not None and len(self.custom_assets) == 1
-        ) or (not getattr(daily_bars, "_initialized", False) and len(price_map) <= 1)
+        target_assets = {str(item["asset"]) for item in ranked[: self.top_k]}
+        sold_assets: set[str] = set()
 
-        # 1. Alpha exits only. Price/time barriers are owned by the shared
-        # triple-barrier risk policy (backtest overlay or live risk strategy).
-        # use_alpha_exit=False 时完全关闭 alpha 排名卖出，只保留三重障碍出场。
-        for asset, pos in (current_positions.items() if self.use_alpha_exit else ()):
+        # The target set is the sole exit rule.  There is no fixed holding
+        # period or separate price/time exit in this strategy.
+        for asset, pos in current_positions.items():
+            if asset in target_assets:
+                continue
             avail = (
                 int(pos.avail)
                 if hasattr(pos, "avail")
@@ -1735,46 +1887,31 @@ class MLMomentumReversalStrategy(BaseStrategy):
             )
             if avail <= 0:
                 continue
+            try:
+                await self.broker.sell(asset, avail, price=0, order_time=tm)
+                sold_assets.add(str(asset))
+                self.log(f"[卖出] {asset} 数量={avail} 原因=不在今日Top-{self.top_k}")
+            except Exception as exc:
+                self.log(
+                    f"[卖出跳过] {asset} 无法成交: {exc}",
+                    level="WARNING",
+                )
 
-            cur_rank = full_ranks.get(asset)
-            sell_reason: str | None = None
-            if is_single_asset:
-                if score_map.get(asset, 0.0) < -0.05:
-                    sell_reason = (
-                        "ML动量反转走弱("
-                        f"score={score_map.get(asset, 0.0):.2f})"
-                    )
-            elif cur_rank is None:
-                # 不在选股池内：ST/停牌或被市值裁剪，持仓已不合格
-                sell_reason = "已不符合选股池条件(未入池)"
-            elif cur_rank > self.keep_top_n:
-                sell_reason = f"截面排名跌出前{self.keep_top_n}(排名=#{cur_rank})"
-
-            if sell_reason is not None:
-                try:
-                    await self.broker.sell(asset, avail, price=0, order_time=tm)
-                    self.log(f"[卖出] {asset} 数量={avail} 原因={sell_reason}")
-                except Exception as exc:
-                    self.log(
-                        f"[卖出跳过] {asset} 无法成交: {exc}",
-                        level="WARNING",
-                    )
-
-        # 2. Buy top-K ranked stocks into available slots
+        # Buy selected, currently unheld assets into the slots freed above.
         held_assets = {
             a
             for a, p in self.broker.positions.items()
             if float(getattr(p, "shares", 0) or 0) > 0
         }
+        held_assets -= sold_assets
         empty_slots = self.top_k - len(held_assets)
         if empty_slots <= 0 or float(self.broker.cash) <= 1000.0:
             return
 
-        min_score = 0.0 if is_single_asset else -0.25
         buy_candidates = [
             item
             for item in ranked[: self.top_k]
-            if item["asset"] not in held_assets and item["ml_score"] > min_score
+            if item["asset"] not in held_assets
         ][:empty_slots]
 
         if not buy_candidates:

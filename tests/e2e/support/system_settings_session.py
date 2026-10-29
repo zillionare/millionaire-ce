@@ -17,9 +17,11 @@ from quantide.core.init_wizard_steps import WIZARD_FINAL_STEP
 from quantide.core.runtime.modes import RuntimeBootstrap
 from quantide.data.models.app_state import AppState
 from quantide.service.init_wizard import init_wizard
+from quantide.service.registry import BrokerRegistry
 from quantide.service.strategy_runtime import strategy_runtime_manager
 from quantide.web.auth.manager import AuthManager
 from quantide.web.pages import init_wizard as init_wizard_page
+from tests.e2e.support.auth_fixture import ensure_test_admin
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 ASSETS_ROOT = TESTS_ROOT / "assets"
@@ -36,12 +38,33 @@ _SYNC_STATUS_TEMPLATE = {
 }
 
 
+def _reset_market_data_hub() -> None:
+    from quantide.service.market_data_hub import market_data_hub
+
+    # ``MarketDataHub`` is intentionally a production singleton, but each
+    # e2e app session must get a fresh test view of its in-memory state.
+    market_data_hub.stop()
+    with market_data_hub._lock:
+        market_data_hub._snapshots.clear()
+        market_data_hub._limits.clear()
+        market_data_hub._subscribed.clear()
+
+
+def _reset_broker_registry() -> None:
+    """Clear process-global broker registrations between isolated e2e apps."""
+    registry = BrokerRegistry()
+    registry._brokers.clear()
+    registry._default = None
+
+
 def _reset_global_state() -> None:
     init_wizard._state = None
     AuthManager._instance = None
     init_wizard_page._sync_status = dict(_SYNC_STATUS_TEMPLATE)
     init_wizard_page._set_download_error(None)
     init_wizard_page._set_reconfigure_mode(False)
+    _reset_broker_registry()
+    _reset_market_data_hub()
 
 
 @dataclass
@@ -75,6 +98,7 @@ def open_system_settings_client(app_config_dir: Path, market_home: Path | None =
         app_config_dir=app_config_dir,
         enforce_single_instance=False,
     )
+    ensure_test_admin()
     if market_home is not None:
         _seed_initialized_state(market_home)
         runtime = RuntimeBootstrap().bootstrap()

@@ -37,7 +37,7 @@
 - ⬜ 策略调用指标记录接口 → 数据可在后续分析/可视化中使用
 - ⬜ `get_bars(asset, count, end_dt=None, frame_type="1d", include_forming_bar=True) → pl.DataFrame` 在 `Strategy` 抽象根定义（两个基类均可用）
 - ⬜ 策略调用 `get_bars(frame_type="1d")` → 4 模式可用（回测/仿真/实盘/dry-run）
-- ⬜ 策略调用 `get_bars(frame_type="30m")` → 回测模式下抛 `UnsupportedFrameTypeForBacktest`；paper/live 正常返回 30m 数据
+- ⬜ 策略调用 `get_bars(frame_type="30m")` → backtest/paper/live/dry-run 均正常返回 30m 数据；1m 回测才抛 `UnsupportedFrameTypeForBacktest`
 - ⬜ 独立策略（`BaseStrategy` 子类）调用 `get_prices` / `get_ticks` → 类层**不存在**该方法（继承结构保证，非运行时拦截）
 - ⬜ 风控策略（`RiskStrategy` 子类）调用 `get_prices(assets)` → 返回 `dict[str, float]`
 - ⬜ 风控策略（`RiskStrategy` 子类）调用 `get_ticks(asset, count)` → 返回 `pl.DataFrame`
@@ -50,7 +50,7 @@
 <a id="ac-fr-013"></a>
 ### FR-013 RiskStrategy 结构契约（风控策略）
 
-> **不可回测**：v0.2 不支持 RiskStrategy 回测。仅 paper/live 下验证。
+> 风控不能独立回测；兼容程序可挂载宿主回测，见 AC-135。
 
 #### AC-013-01 风控策略无独立账户
 - ⬜ 风控策略不创建 `portfolio_id`，不持有资金
@@ -321,42 +321,14 @@
 
 <a id="fr-100"></a>
 <a id="ac-fr-100"></a>
-### FR-100 内置策略 — 回落卖出（风控）
-
-> 回落卖出契约见 [spec-strategy.md §FR-100](./spec-strategy.md)
-
-#### AC-100-01 默认参数 m=7.0, k=0.5, n=1
-- ⬜ 策略类未传参数时, 框架自动用 `[m=7.0, k=0.5, n=1]` 初始化
-- ⬜ 验证依据: `quantide/strategies/pullback_sell.py` 的 `default_config()` 返回 `{"m": 7.0, "k": 0.5, "n": 1}`
-
-#### AC-100-02 个股当天上涨至 m% 后 n 分钟内下跌超 k% 立即卖出
-- ⬜ T 日 10:00 标的从开盘 10.00 涨至 10.70 (m=7.0%), 10:01 跌至 10.65 (0.5% 内下跌超 k=0.5%) → `on_check` 触发 `sell_host_position`
-- ⬜ 验证依据: [interfaces.md §6 日志条目类型](./interfaces.md) 发出 `risk.triggered` event, payload 含 `reason="drawback"`, 订单 `side=sell`
-
-#### AC-100-03 tick 级数据驱动 (FR-125 on_check)
-- ⬜ 回落卖出**不**在 `on_bar` 触发, 而在 `on_check(positions, tm)` 触发 (每 tick 一次)
-- ⬜ 验证依据: 跑 paper E2E, 注入 tick 序列 (10:00 涨 / 10:01 跌), 断言 `on_check` 被调用 1 次, 卖出单在 10:01 提交
-
----
-
 <a id="fr-110"></a>
 <a id="ac-fr-110"></a>
-### FR-110 内置策略 — 成本止损（风控）
+### FR-100 / FR-110 私有风险程序（不在 CE 验收范围）
 
-> 成本止损契约见 [spec-strategy.md §FR-110](./spec-strategy.md); cost_basis 来自 [spec-strategy.md §FR-185 经典方案 A](./spec-strategy.md) (P1 已解)
-
-#### AC-110-01 默认参数 k=-5.0
-- ⬜ 策略类未传参数时, 框架自动用 `k=-5.0` (跌破买入价 5% 触发) 初始化
-- ⬜ 验证依据: `quantide/strategies/cost_stop_loss.py` 的 `default_config()` 返回 `{"k": -5.0}`
-
-#### AC-110-02 触发条件 last_price <= cost_basis × (1 + k/100)
-- ⬜ 持仓 `cost_basis=10.00, k=-5.0` → `last_price <= 10.00 × (1 + (-5.0)/100) = 9.50` 时触发
-- ⬜ last_price=9.49 (≤ 9.50) 触发; last_price=9.51 (> 9.50) **不**触发
-- ⬜ 验证依据: 跑 paper E2E, 推进虚拟时钟让 last_price 跌到 9.49, 断言 `sell_host_position` 被调用; 推进到 9.51 时**不**调用
-
-#### AC-110-03 触发后清仓该标的可卖持仓 (受 T+1 约束)
-- ⬜ 持仓 `avail=1000, in_transit=200` (T+0 买入 200 在 T+1 才能卖) → 触发后清仓 1000 股, 200 在途不动
-- ⬜ 验证依据: 订单 `shares=1000` (清仓可卖, 不动在途), 订单表正确归宿主; [interfaces.md §6](./interfaces.md) `risk.triggered` event 含 `asset=该标的` + `reason="cost_stop"`; T+1 后 `avail=200` (在途变可卖)
+回落卖出与成本止损属于私有 learner package。它们的源码、专用验收和
+触发参数不随 CE 分发；私有包可通过通用 `RiskStrategy` 与显式
+`RiskProgramAdapter` 注册接口自行验收。CE 验收覆盖通用接口、空选择、
+不可用 ID 阻止和适配器组合行为。
 
 #### AC-110-04 卖出走 sell_host_position 归属宿主
 - ⬜ 触发时, 框架调 `sell_host_position(asset, shares, reason="cost_stop")` 而非风控自身账户
@@ -378,22 +350,24 @@
 - ⬜ 策略调 `get_bars(asset, count, frame_type="1d")` 在 backtest/paper/live/dry-run 均返回 `pl.DataFrame` (≥ 1 行)
 - ⬜ 验证依据: 跑 4 模式各 1 天, 断言 4 次调用都成功
 
-#### AC-115-03 frame_type="30m" 仅 paper/live 可用, 回测抛异常
-- ⬜ paper/live 调 `get_bars(asset, count, frame_type="30m")` → 成功
-- ⬜ backtest 调同样接口 → 抛 `UnsupportedFrameTypeForBacktest` (HTTP 错误码 `UNSUPPORTED_FRAME_TYPE_FOR_BACKTEST`)
-- ⬜ 验证依据: 跑 1 次回测调用, 断言异常; 跑 1 次 paper 调用, 断言成功
+#### AC-115-03 frame_type="30m" 四种模式可用
+- ⬜ backtest/paper/live/dry-run 调 `get_bars(asset, count, frame_type="30m")` → 成功，返回 ≥1 行
+- ⬜ 未存储粒度（如 1m 回测）→ 抛 `UnsupportedFrameTypeForBacktest`
+- ⬜ 验证依据: 四模式各调用 1 次；1m 回测调用 1 次断言异常
 
 #### AC-115-04 on_bar 不携带 quote 参数, 策略通过 get_bars 拉取
 - ⬜ 策略 `on_bar(tm)` 方法签名**只有** `tm` 参数 (无 `quote` / `bars` / 等行情参数)
 - ⬜ 验证依据: 策略基类 `BaseStrategy.on_bar` 反射签名, 断言只有 `self` + `tm` 2 个参数
 
-#### AC-115-05 paper/live 默认 15:05 触发 (盘后 5 分钟)
-- ⬜ paper/live 下 `on_bar` 在 T 日 15:05 触发 (默认配置, 可配)
-- ⬜ 验证依据: 跑 paper E2E 一天, 断言 `on_bar.tm.hour == 15 and on_bar.tm.minute == 5`
+#### AC-115-05 1d/30m 决策时点（FR-055）
+- ⬜ 1d + cheat_on_close：`on_bar` 在 14:57 触发（可配 lead）
+- ⬜ 1d + next_open：`on_bar` 仅在收盘且当日日线成功持久化后触发；持久化未成功时不触发并报告错误
+- ⬜ 30m + cheat_on_close：在每个 bar 结束前 2 分钟触发（如 9:58/10:28/…/14:58）
+- ⬜ 30m + next_open：在每个 bar 结束后触发；11:30/15:00 信号进入队列
 
 #### AC-115-06 信号与撮合解耦 (FR-050/060/070 决定撮合)
 - ⬜ 策略在 `on_bar` 调 `buy(...)` 仅产生**信号**; 实际撮合时点与价格由下单方式决定
-- ⬜ 验证依据: cheat-on-close 模式下, `on_bar` 在 15:05 触发, 订单 `tm` 在 14:57 (FR-050 撮合时点); 次日开盘模式下, 订单 `tm` 在 T+1 09:30
+- ⬜ 验证依据: 1d cheat 模式下 `on_bar` 在 14:57 触发、订单在当期成交；1d next_open 模式下订单在 T+1 09:30/集合竞价处理；30m 按 bar 时点执行
 
 ---
 
@@ -537,7 +511,7 @@
 <a id="ac-fr-360"></a>
 ### FR-360 评估指标 — 风控策略
 
-> 评估仅在 paper/live 下进行(v0.2 不支持 RiskStrategy 回测)。
+> 独立风控超额收益评估仅在 paper/live 下进行；宿主回测执行兼容风控但不产生该独立指标。
 
 #### AC-360-01 评估维度齐全
 - ⬜ 每次风控触发卖出后,系统记录一条触发事件 `event_id`,字段含 `risk_strategy_id` / `host_strategy_id` / `asset` / `trigger_ts` / `trigger_price` / `reason`(`sell_host_position` 的 `reason` 参数)
@@ -563,10 +537,10 @@
 <a id="ac-fr-130"></a>
 ### FR-130 风控策略契约
 
-> 风控策略契约见 [spec-strategy.md §FR-130](./spec-strategy.md); 账户/不可回测/不可独立启动 已在 AC-013 段, 本节只补 AC-013 外的 3 条新行为
+> 风控策略契约见 [spec-strategy.md §FR-130](./spec-strategy.md); 账户/不可独立回测/不可独立启动已在 AC-013 段，本节只补 AC-013 外的行为。
 
-#### AC-130-01 BacktestRunner 启动时检测到 RiskStrategy 拒绝
-- ⬜ 启动回测任务时, 若传入的策略类型是 `RiskStrategy` (或子类), BacktestRunner 抛 `RiskStrategyNotBacktestable` 异常
+#### AC-130-01 独立 RiskStrategy 回测拒绝
+- ⬜ 启动回测任务时，若传入的宿主类型是 `RiskStrategy` (或子类)，BacktestRunner 抛 `RiskStrategyNotBacktestable`；兼容风控作为宿主配置由 AC-135 验证
 - ⬜ HTTP 入口返回 `code=RISK_STRATEGY_NOT_BACKTESTABLE, status=409` (参见 [interfaces.md §5 异常错误码表](./interfaces.md))
 - ⬜ 验证依据: 跑 1 次 `BacktestRunner.run(strategy=RiskStrategy_instance)` → 断言异常; 跑 1 次 HTTP POST 启动 → 断言 409
 
@@ -587,20 +561,19 @@
 <a id="ac-fr-135"></a>
 ### FR-135 可回测的 Broker 层风控 Overlay
 
-> 契约见 [spec-strategy.md §FR-135](./spec-strategy.md)；本 FR 是回测执行路径，不改变 FR-013/FR-130 的 paper/live-only 定位。
+> 契约见 [spec-strategy.md §FR-135](./spec-strategy.md)；兼容风控作为宿主回测的一部分执行。
 
-#### AC-135-01 宿主 opt-in 装配与职责分离
-- ⬜ 宿主声明 `RISK_OVERLAY="triple_barrier"` 且 `use_broker_barriers=True` → BacktestRunner 创建 overlay；paper/live 自动装配 `TripleBarrierRiskStrategy`
-- ⬜ 每个日线 bar 先执行 overlay gap/时间检查，再执行宿主 `on_bar`；`on_bar` 结束后同步新持仓并执行 intraday 检查
-- ⬜ 同一回测中宿主不再执行价格/时间 barrier；排名/得分 alpha 退出仍执行
-- ⬜ `use_broker_barriers=False` → 不创建 overlay / 不装配 live 风控；不回退到宿主自身 barrier
-- ⬜ overlay 不创建新 `portfolio_id`，不实例化 `RiskStrategy`
+#### AC-135-01 选择、执行与迁移
+- ⬜ 1d/30m 宿主可选多个兼容风控及各自参数，或不选；不兼容和无效参数由服务端拒绝；保存并恢复配置。
+- ⬜ 每个 bar 使用当期可用数据先执行风控再执行宿主；风控卖出后同 bar 重买允许，但当日买入不可卖。
+- ⬜ 转 paper/live 默认沿用回测选择及参数；取消曾用程序有警告，最终配置持久化并恢复；不兼容配置报错。
+- ⬜ 风控不创建新 `portfolio_id`；独立风控实例作为宿主回测仍被拒绝。
 
-#### AC-135-02 日线 barrier 执行
+#### AC-135-02 1d / 30m barrier 执行
 - ⬜ T0 不卖；T0 触达 barrier → pending；T1 开盘卖出
 - ⬜ Tn 开盘 gap 越过 barrier → 按 Tn open 卖出；时间屏障 → Tn open 卖出
 - ⬜ Tn 盘中 low/high 触达 barrier → 按 barrier 价卖出（扣 slippage）
-- ⬜ 同日上下轨都触发 → 以 Tn open 更近者优先；等距 down
+- ⬜ 同一 bar 上下轨都触发 → 以该 bar open 更近者优先；等距 down；不使用未来周期或不可用的更细数据
 - ⬜ 使用 broker 复权后成本，不使用策略 qfq/raw 成本
 
 #### AC-135-03 T+1 / 涨跌停 / 部分成交
@@ -621,12 +594,12 @@
 <a id="ac-fr-125"></a>
 ### FR-125 风控策略驱动契约
 
-> **不可回测**：v0.2 不支持 RiskStrategy 回测。FR-125 全部 AC 在 paper/live 下验证。
+> 本节验证 paper/live 驱动；宿主历史回测见 AC-135。
 
 #### AC-125-01 tick 级独立驱动（paper/live）
-- ⬜ 风控策略的 `on_check` 由 tick 触发，与宿主的 `on_bar` 周期无关
-- ⬜ 宿主为日线策略（一天一次 `on_bar`）时，风控仍为 tick 级监控
-- ⬜ 宿主为实时策略（30m `on_bar`）时，风控同样为 tick 级监控
+- ⬜ 风控策略由可用 tick 或最细实时 bar 驱动，与宿主的 `on_bar` 周期无关
+- ⬜ 宿主为 1d 或 30m 时，风控均按独立实时数据监控
+- ⬜ 将宿主周期从 1d/30m 变更的请求不得改变风控驱动；风控仍按可用 tick 或最细 live bar 独立运行
 
 #### AC-125-02 持仓快照在 on_day_open 确定
 - ⬜ `on_day_open` 时读取前一日可卖持仓（受 T+1 约束）
@@ -638,8 +611,8 @@
 - ⬜ 宿主主动卖出某标的 → 该标的也从风控监控列表移除
 - ⬜ 被移除的标的仍纳入超额收益统计
 
-#### AC-125-04 即时市价成交
-- ⬜ 风控调用 `sell_host_position` → 即时市价成交，不延迟到次日开盘
+#### AC-125-04 即时提交市价意图
+- ⬜ 风控调用 `sell_host_position` → 即时提交市价卖出意图；成交取决于市场及可卖数量
 - ⬜ 标的当日跌停 → 卖单提交但无法成交，不阻塞后续标的的风控监控
 
 #### AC-125-05 超额收益事件记录
@@ -742,13 +715,14 @@
 
 > 无回测启动路径契约见 [spec-strategy.md §FR-240](./spec-strategy.md)
 
-#### AC-240-01 适用场景: 独立策略用 live-only 数据粒度
-- ⬜ 独立策略声明 `frame_type="30m"` 等 live-only 粒度 → 不需回测
-- ⬜ 验证依据: 跑 1 次"30m 策略直接进 paper" 调用, 启动成功 (不要求先回测)
+#### AC-240-01 适用场景: 无历史数据的粒度
+- ⬜ 独立策略声明 `frame_type="1m"` 等无历史数据粒度 → 不经回测，直接 paper/live
+- ⬜ 30m 有历史数据，应走 FR-230（回测→仿真→实盘）
+- ⬜ 验证依据: 跑 1 次 1m 策略直接进 paper 成功；30m 策略回测入口可用
 
 #### AC-240-02 路径: 仿真 → 实盘, 或直接启动实盘
-- ⬜ 30m 策略可经路径 "paper → live" 或直接 "live" 启动
-- ⬜ 验证依据: 跑 1 次 30m 策略 paper→live 顺序, 跑 1 次直接 live, 都成功
+- ⬜ 无历史数据粒度可经 "paper → live" 或直接 "live" 启动
+- ⬜ 验证依据: 跑 1 次 paper→live 顺序, 跑 1 次直接 live, 都成功
 
 ---
 
@@ -781,13 +755,18 @@
 
 > dry-run 行为契约见 [spec-trading.md §FR-440](./spec-trading.md); UI 表现已迁移 [v0.2-002-ui/spec.md UI-FR-060](../v0.2-002-ui/spec.md)
 
-#### AC-440-01 正在实盘的策略可进入 dry-run: 策略正常运行, 但不实际下单
-- ⬜ 策略在 live 模式运行, 用户点"进入 dry-run" → 策略继续产生信号 (`on_bar` / `on_check` 仍触发), 但 `buy` / `sell` / `sell_host_position` 调**不**落 `orders` 表
-- ⬜ 验证依据: 跑 1 次 live→dry-run 切换, 跑 1 天, 断言 `orders` 表**无**新记录 (dry-run 期间), 但 [interfaces.md §6](./interfaces.md) `risk.triggered` event 仍按触发条件发出
+#### AC-440-01 dry-run 是陪跑影子，不暂停实际策略
+- ⬜ paper/live runtime 默认创建 dry-run 影子；实际策略继续正常下单，不受影响
+- ⬜ 影子使用同一策略/模型/数据/bar_interval/fill_timing，但成交由回测撮合引擎计算
+- ⬜ 验证依据: 跑 1 天 paper/live，实际 orders 与 shadow trades 同时存在且账户隔离
 
-#### AC-440-02 dry-run 期间策略指标参考其并行仿真实例
-- ⬜ dry-run 期间, 策略的评估指标 (净值/年化收益/Sharpe 等) **参考**其并行仿真实例, 而**不**直接算 dry-run 自身 (因 dry-run 无成交, 算不出指标)
-- ⬜ 验证依据: 跑 1 次 live + 并行 paper 组合, 切到 dry-run, 断言指标 UI 显示的是 paper 数据, 不是 dry-run 的 (空) 数据
+#### AC-440-02 dry-run 结果入库并可关闭
+- ⬜ 影子每日 NAV/持仓/成交/model_hash 写入 tracking 表
+- ⬜ 关闭 dry-run 只停止影子；实际策略与模型维护继续
+- ⬜ 进程重启后 tracking 历史保留；dry-run 开关状态保留
+
+#### AC-440-03 旧“dry-run=暂停/不实际下单”语义作废
+- ⬜ 不要求 dry-run 期间停止实际 orders；不要求 PAUSED 状态
 
 ---
 
@@ -821,6 +800,32 @@
 - ⬜ 验证依据: 结构化日志 `order.submitted` 或 [interfaces.md §4.2 orders](./interfaces.md) 的 `tm` 字段等于配置时点; 策略自身仍不感知运行模式
 
 ---
+
+<a id="fr-055"></a>
+<a id="ac-fr-055"></a>
+### FR-055 运行周期、决策与成交时点
+
+> 契约见 [spec-strategy.md §FR-055](./spec-strategy.md).
+
+#### AC-055-01 1d 两种 fill_timing
+- ⬜ 1d + cheat_on_close：回测按 T 收盘价成交；paper/live 在 14:57 启动决策并立即下单
+- ⬜ 1d + next_open：回测按 T+1 开盘成交；paper/live 收盘且当日日线成功持久化后计算并入队，下一交易日开盘处理
+
+#### AC-055-02 30m 两种 fill_timing
+- ⬜ 30m + cheat_on_close：每个 bar 结束前 2 分钟启动决策并立即下单；回测按 bar 收盘价成交
+- ⬜ 30m + next_open：bar 结束后立即计算；连续 bar 尽快下单（允许错过下一 bar 开盘）；11:30/15:00 入队
+
+#### AC-055-03 next_open 队列持久化
+- ⬜ 11:30/15:00/1d 盘后信号写入持久化队列；进程重启后仍存在
+- ⬜ 下一交易时点开盘处理；未成交/过期条目保留审计
+
+#### AC-055-04 dry-run 使用同一时序
+- ⬜ dry-run 影子的 `bar_interval`/`fill_timing`/决策时点与主 runtime 一致
+- ⬜ 影子成交由回测撮合引擎计算，每日结果入库
+
+#### AC-055-05 策略周期不可变
+- ⬜ 1d/30m 周期由策略定义；回测、转入及重启恢复一致，向导不可修改。
+- ⬜ 服务端拒绝伪造的不同周期；旧记录缺失、冲突或无法验证时显示错误并阻止启动/恢复，不静默转换。
 
 <a id="fr-060"></a>
 <a id="ac-fr-060"></a>
@@ -873,13 +878,14 @@
 
 <a id="fr-185"></a>
 <a id="ac-fr-185"></a>
-### FR-185 持仓成本基准（加权均价算法 — 经典方案 A）
+### FR-185 持仓成本基准（含交易费用的加权均价算法 — 经典方案 A）
 
 > 成本基准算法见 [spec-strategy.md §FR-185](./spec-strategy.md); 存储字段见 [interfaces.md §4.4 positions.price](./interfaces.md)。
 
-#### AC-185-01 买入时按加权均价更新 cost_basis
-- ⬜ 已有持仓 `old_qty > 0`, 再次买入 `buy_qty` → `positions.price = (old_qty × old_cost_basis + buy_qty × buy_price) / (old_qty + buy_qty)`
-- ⬜ 首次建仓 (`old_qty == 0`) → `positions.price = buy_price`
+#### AC-185-01 买入时按含手续费的总成本加权更新 cost_basis
+- ⬜ 已有持仓 `old_qty > 0`, 再次买入 `buy_qty`，本笔手续费为 `buy_fee` → `positions.price = (old_qty × old_cost_basis + buy_qty × buy_price + buy_fee) / (old_qty + buy_qty)`
+- ⬜ 首次建仓 (`old_qty == 0`) → `positions.price = (buy_qty × buy_price + buy_fee) / buy_qty`
+- ⬜ 卖出手续费不回溯改变剩余持仓的 `positions.price`
 - ⬜ 验证依据: 成交后查询 [interfaces.md §4.4 positions](./interfaces.md) 的 `price` 字段, 与 spec-strategy.md F-CB-1/F-CB-4 手算结果一致
 
 #### AC-185-02 卖出时剩余持仓成本不变或清仓删除
@@ -895,14 +901,14 @@
 
 > 行情数据源契约见 [spec-trading.md §FR-270](./spec-trading.md); 测试数据字段契约见 [test-plan.md §2.4.1](./test-plan.md)。
 
-#### AC-270-01 日线行情字段完整且按年分区存储
+#### AC-270-01 1d/30m 历史行情字段完整且可按周期读取
 - ⬜ 同步个股或指数日线后, 本地 Parquet 至少包含 OHLCV、amount、adjust、is_st、up_limit、down_limit 中该资产类型适用的字段
-- ⬜ 数据按年份分区或可按年份范围读取, 不要求保存 tick/分钟/30m 生产行情
+- ⬜ 1d 与 30m 历史数据可按日期/周期读取；不要求保存 tick/分钟生产行情
 - ⬜ 验证依据: 读取落盘 Parquet schema 与分区路径, 对比 spec-trading.md §FR-270 字段清单
 
-#### AC-270-02 回测仅消费本地历史日线
-- ⬜ 回测运行时读取本地 tushare 历史日线数据, 不发起网络行情请求
-- ⬜ 验证依据: 回测日志/配置记录数据源为本地 Parquet; 测试环境断网时仍可读取 fixture 完成回测数据加载
+#### AC-270-02 回测仅消费本地历史数据
+- ⬜ 回测运行时读取本地 1d/30m 历史数据, 不发起网络行情请求
+- ⬜ 验证依据: 回测日志/配置记录数据源为本地 Parquet; 测试环境断网时仍可读取 fixture 完成对应周期回测数据加载
 
 ---
 
@@ -949,7 +955,7 @@
 - ⬜ 验证依据: L2 假网关推送行情后, [interfaces.md §6](./interfaces.md) 日志或行情流事件可观测到同一标的/时间戳/价格
 
 #### AC-300-02 实时行情不作为生产历史数据落盘
-- ⬜ tick/分钟/30m 实时行情仅用于 paper/live 当日运行; 生产数据同步不把它们写入历史行情库
+- ⬜ tick/最细实时 bar 用于 paper/live 当日运行；30m 历史数据可由历史数据源持久化并用于回测，tick 不要求写入历史库
 - ⬜ 验证依据: 运行一次实时行情订阅后, 历史日线 Parquet/数据库无新增 tick/分钟/30m 生产历史分区
 
 ---

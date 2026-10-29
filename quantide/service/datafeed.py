@@ -13,10 +13,9 @@ import polars as pl
 from loguru import logger
 
 from quantide.core.enums import FrameType
+from quantide.core.ports import MarketDataPort
 
 if TYPE_CHECKING:
-    from quantide.data.models.live_quote import LiveQuote
-
     from quantide.data.models.daily_bars import DailyBars
 
 
@@ -51,10 +50,11 @@ class BarsFeed(Protocol):
 
         自动处理回测/实盘场景：
         - 回测：从数据库获取历史数据
-        - 实盘：合并数据库历史数据 + LiveQuote 实时数据
+        - 实盘：合并数据库历史数据 + MarketDataHub 实时数据
 
-        暂不实现分钟级接口。需要实时/分钟级数据，
-        可以直接从 LiveQuote 获取当天数据。
+        通用 ``BarsFeedImpl`` 目前只承载日线。30m 策略必须通过
+        ``HistBarView``/``LiveBarView`` 的分钟路径；其它分钟周期显式失败，
+        不把请求静默降级为日线。
 
         Args:
             asset: 资产代码，如 "000001.SZ"
@@ -131,24 +131,29 @@ class BarsFeed(Protocol):
 class BarsFeedImpl:
     """BarsFeed 的实现类
 
-    整合 DailyBars（历史数据）和 LiveQuote（实时数据），
+    整合 DailyBars（历史数据）和 MarketDataHub（实时数据），
     为策略提供统一的数据接口。
     """
 
     def __init__(
         self,
         daily_bars: DailyBars | None = None,
-        live_quote: LiveQuote | None = None,
+        market_data: MarketDataPort | None = None,
+        *,
+        live_quote: MarketDataPort | None = None,
     ):
         """初始化 BarsFeedImpl
 
         Args:
             daily_bars: DailyBars 实例，用于获取历史数据
-            live_quote: LiveQuote 实例，用于获取实时数据
+            market_data: MarketDataHub 实例，用于获取实时数据
+            live_quote: Deprecated keyword alias for ``market_data``.
         """
         self._daily_bars = daily_bars
-        self._live_quote = live_quote
-        self._is_backtest = live_quote is None or not live_quote.is_running
+        self._market_data = market_data if market_data is not None else live_quote
+        self._is_backtest = (
+            self._market_data is None or not self._market_data.is_running
+        )
 
     def get_bars(
         self,
@@ -162,16 +167,18 @@ class BarsFeedImpl:
 
         实现逻辑：
         1. 从 DailyBars 获取历史数据
-        2. 如果是实盘且包含当天，从 LiveQuote 获取实时数据并合并
+         2. 如果是实盘且包含当天，从 MarketDataHub 获取实时数据并合并
         3. 统一字段命名和格式
         """
         try:
             if frame_type != FrameType.DAY:
-                logger.warning(f"Frame type {frame_type} not supported yet, using DAY")
+                raise NotImplementedError(
+                    f"BarsFeedImpl 不支持 {frame_type.value}；请使用 30m bar view"
+                )
 
             history_df = self._get_history_bars(asset, start, end, adjust)
 
-            if not self._is_backtest and self._live_quote is not None:
+            if not self._is_backtest and self._market_data is not None:
                 today = datetime.date.today()
                 need_live = end is None or (
                     isinstance(end, datetime.date) and end >= today
@@ -226,12 +233,12 @@ class BarsFeedImpl:
             return self._empty_df()
 
     def _get_live_bar(self, asset: str) -> pl.DataFrame | None:
-        """从 LiveQuote 获取当天实时数据"""
-        if self._live_quote is None:
+        """从 MarketDataHub 获取当天实时数据"""
+        if self._market_data is None:
             return None
 
         try:
-            bar = self._live_quote.get_daily_bar(asset)
+            bar = self._market_data.get_daily_bar(asset)
             if bar is None:
                 return None
 
@@ -307,8 +314,8 @@ class BarsFeedImpl:
 
     def get_price_limits(self, asset: str) -> tuple[float, float]:
         """获取实时涨跌停价格"""
-        if self._live_quote is not None:
-            return self._live_quote.get_price_limits(asset)
+        if self._market_data is not None:
+            return self._market_data.get_price_limits(asset)
 
         if self._daily_bars is not None:
             try:
@@ -322,10 +329,10 @@ class BarsFeedImpl:
 
     def get_current_price(self, asset: str) -> float | None:
         """获取最新价格（仅实盘）"""
-        if self._live_quote is None:
+        if self._market_data is None:
             return None
 
-        quote = self._live_quote.get_quote(asset)
+        quote = self._market_data.get_quote(asset)
         if quote is None:
             return None
 

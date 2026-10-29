@@ -67,7 +67,7 @@ def test_maybe_attach_forming_bar_returns_prev_bars_when_bar_none():
     prev_date = dt.date(2024, 5, 31)
     expected = MagicMock()
     with patch.object(wrapper, "_today", return_value=today), \
-         patch.object(gb_mod.live_quote, "get_daily_bar", return_value=None), \
+         patch.object(gb_mod.market_data_hub, "get_daily_bar", return_value=None), \
          patch.object(wrapper, "_previous_trade_date", return_value=prev_date), \
          patch.object(wrapper, "_provider_get_bars", return_value=expected) as mock_get:
         result = wrapper._maybe_attach_forming_bar("A", hist, today, end_dt, 5)
@@ -190,7 +190,7 @@ def test_resolve_price_returns_zero_when_quote_falsy():
         timeout=0.5,
         extra={},
     )
-    with patch.object(gb_mod.live_quote, "get_quote", return_value={}):
+    with patch.object(gb_mod.market_data_hub, "get_quote", return_value={}):
         result = adapter._resolve_price(request)
     assert result == 0.0
 
@@ -209,6 +209,6 @@ def test_resolve_price_returns_value_from_quote_keys():
         extra={},
     )
     quote = {"price": 0, "open": 0, "high": 12.5, "low": 10.0}
-    with patch.object(gb_mod.live_quote, "get_quote", return_value=quote):
+    with patch.object(gb_mod.market_data_hub, "get_quote", return_value=quote):
         result = adapter._resolve_price(request)
     assert result == 12.5

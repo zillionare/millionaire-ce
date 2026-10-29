@@ -7,12 +7,8 @@ Targets: EnumerationResult, SkippedEntry, StrategyMetadata, StrategyDiscovery.di
 from __future__ import annotations
 
 import textwrap
-import types
 from pathlib import Path
 
-import pytest
-
-from quantide.core.strategy import BaseStrategy, RiskStrategy
 from quantide.core.strategy_discovery import (
     EnumerationResult,
     SkippedEntry,
@@ -20,7 +16,6 @@ from quantide.core.strategy_discovery import (
     StrategyDiscovery,
     StrategyMetadata,
 )
-
 
 # -------------------------------------------------------- EnumerationResult
 
@@ -392,18 +387,16 @@ def test_discover_default_config_raising_marks_invalid_config(tmp_path) -> None:
 # -------------------------------------------------------- discover_builtin
 
 def test_discover_builtin_returns_quantide_strategy_classes() -> None:
-    """AC-FR0320-23: discover_builtin returns the three built-in strategy classes."""
+    """CE discovery returns the built-in independent example strategy."""
     res = StrategyDiscovery.discover_builtin()
     types = {m.strategy_type for m in res.strategies}
-    # Both BaseStrategy ("independent") and RiskStrategy ("risk") subclasses present
     assert "independent" in types
-    assert "risk" in types
-    # At least three builtins present
-    assert len(res.strategies) >= 3
+    assert "risk" not in types
+    assert len(res.strategies) >= 1
 
 
 def test_discover_builtin_modules_under_quantide_strategies(tmp_path) -> None:
-    """AC-FR0320-24: discover_builtin returns at least the documented FR-090/100/110 strategies.
+    """CE discover_builtin contains only the shipped independent example.
 
     discover_builtin loads each builtin's source file via importlib with a
     dynamic module name, so `module` is the dynamic name rather than the
@@ -414,14 +407,11 @@ def test_discover_builtin_modules_under_quantide_strategies(tmp_path) -> None:
     without asserting the currently-incorrect `is_builtin` flag.
     """
     res = StrategyDiscovery.discover_builtin()
-    # Three documented builtins are discoverable
     names = {m.name for m in res.strategies}
     assert "DualMAStrategy" in names
-    assert "PullbackSellStrategy" in names
-    assert "CostStopLossStrategy" in names
     types = {m.strategy_type for m in res.strategies}
     assert "independent" in types
-    assert "risk" in types
+    assert "risk" not in types
 
 
 # -------------------------------------------------------- SkippedReason

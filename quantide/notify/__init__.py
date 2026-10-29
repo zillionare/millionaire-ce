@@ -56,9 +56,7 @@ def get_stock_id_xt(stock_code: str) -> str:
 
 
 def get_stock_id_hson(stock_code: str) -> str:
-    """
-    转换成股票代码id,600136.XSHG->6001361
-    """
+    """转换成股票代码id,600136.XSHG->6001361"""
     """判断股票ID对应的证券市场
     匹配规则
     ['50', '51', '60', '90', '110'] 为 sh
@@ -86,9 +84,7 @@ def get_stock_id_jq(stock_code):
 
 
 def get_high_low_limit(symbol_code: str, preclose_px: float):
-    """
-    计算涨跌停价格
-    """
+    """计算涨跌停价格"""
     if symbol_code.startswith("300") or symbol_code.startswith("688"):
         return round(preclose_px * 1.2, 2), round(preclose_px * 0.8, 2)
     return round(preclose_px * 1.1, 2), round(preclose_px * 0.9, 2)
@@ -106,3 +102,7 @@ def open_time_delta(dt: datetime.datetime):
         14: 180 + minute,
         15: 240,
     }.get(hour, 0)
+"""Notification and stock-code helpers."""
+
+# Preserve the established multilingual API documentation layout.
+# ruff: noqa: D205,D200

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Protocol
 
 from quantide.service.triple_barrier import (
     ExitPlan,
@@ -17,6 +17,16 @@ from quantide.service.triple_barrier import (
     plan_intraday_exit,
     plan_open_exit,
 )
+
+
+class RiskOverlay(Protocol):
+    """Protocol implemented by broker-level backtest risk overlays."""
+
+    async def check_open(self, broker: Any, tm: datetime.datetime) -> None: ...
+
+    async def check_intraday(self, broker: Any, tm: datetime.datetime) -> None: ...
+
+    def sync_positions(self, positions: Any, today: datetime.date) -> None: ...
 
 
 class TripleBarrierOverlay:
@@ -75,15 +85,26 @@ class TripleBarrierOverlay:
                 self._holding_days[asset] = self._holding_days.get(asset, 0) + 1
             self._last_seen_date[asset] = today
 
-    def _bar(self, broker: Any, asset: str, today: datetime.date) -> dict[str, Any] | None:
+    def _bar(
+        self,
+        broker: Any,
+        asset: str,
+        tm: datetime.datetime,
+        interval: str | None = None,
+    ) -> dict[str, Any] | None:
+        if interval == "30m":
+            getter = getattr(broker, "get_bar_for_time", None)
+            if callable(getter):
+                return getter(asset, tm)
         getter = getattr(broker, "get_bar_for_date", None)
         if callable(getter):
-            return getter(asset, today)
+            return getter(asset, tm.date())
         return None
 
     async def check_open(self, broker: Any, tm: datetime.datetime) -> None:
         """Check gap/time exits before the host's ``on_bar`` runs."""
         today = tm.date()
+        interval = getattr(broker, "interval", None)
         positions = self._as_mapping(broker.positions)
         self.sync_positions(positions, today)
 
@@ -93,7 +114,7 @@ class TripleBarrierOverlay:
             cost = float(getattr(pos, "price", 0) or 0)
             if shares <= 0 or avail <= 0 or cost <= 0:
                 continue
-            bar = self._bar(broker, asset, today)
+            bar = self._bar(broker, asset, tm, interval)
             if not bar:
                 continue
             plan = plan_open_exit(
@@ -109,6 +130,7 @@ class TripleBarrierOverlay:
     async def check_intraday(self, broker: Any, tm: datetime.datetime) -> None:
         """Check intraday barrier touches after ``on_bar`` has run."""
         today = tm.date()
+        interval = getattr(broker, "interval", None)
         positions = self._as_mapping(broker.positions)
 
         for asset, pos in positions.items():
@@ -117,7 +139,7 @@ class TripleBarrierOverlay:
             cost = float(getattr(pos, "price", 0) or 0)
             if shares <= 0 or cost <= 0:
                 continue
-            bar = self._bar(broker, asset, today)
+            bar = self._bar(broker, asset, tm, interval)
             if not bar:
                 continue
             is_entry_day = self._entry_dates.get(asset) == today
@@ -217,3 +239,28 @@ class TripleBarrierOverlay:
         log = getattr(broker, "_log", None)
         if callable(log):
             log(level, message, dt=tm)
+
+
+class CompositeRiskOverlay:
+    """Run explicitly selected backtest overlays in priority order."""
+
+    def __init__(
+        self,
+        overlays: list[Any],
+        *,
+        allow_same_bar_repurchase: bool = True,
+    ) -> None:
+        self.overlays = list(overlays)
+        self.allow_same_bar_repurchase = allow_same_bar_repurchase
+
+    async def check_open(self, broker: Any, tm: datetime.datetime) -> None:
+        for overlay in self.overlays:
+            await overlay.check_open(broker, tm)
+
+    async def check_intraday(self, broker: Any, tm: datetime.datetime) -> None:
+        for overlay in self.overlays:
+            await overlay.check_intraday(broker, tm)
+
+    def sync_positions(self, positions: Any, today: datetime.date) -> None:
+        for overlay in self.overlays:
+            overlay.sync_positions(positions, today)

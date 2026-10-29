@@ -8,17 +8,17 @@ runtime directories.
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, packages_distributions, version
 from pathlib import Path
-import tomllib
 
 RUNTIME_NAME = "quantide"
 DEFAULT_EDITION = "millionaire"
 EDITION_ENV_VAR = "QUANTIDE_EDITION"
 EDITION_OVERRIDE_ENV_VAR = "QUANTIDE_ENABLE_EDITION_OVERRIDE"
-SUPPORTED_EDITIONS = {"millionaire", "zillionaire"}
+SUPPORTED_EDITIONS = {"millionaire", "millionaire-ce", "zillionaire"}
 
 
 @dataclass(frozen=True)

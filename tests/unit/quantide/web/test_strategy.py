@@ -749,7 +749,9 @@ def test_deploy_backtest_to_live_modal_requires_gateway(monkeypatch):
     assert "未检测到可用的实盘网关" in html
 
 
-def test_deploy_backtest_to_live_modal_confirms_when_gateway_exists(monkeypatch):
+def test_deploy_backtest_to_live_modal_confirms_when_gateway_exists(
+    monkeypatch, private_edition_feature_override
+):
     monkeypatch.setattr(
         strategy_page,
         "_get_live_accounts",

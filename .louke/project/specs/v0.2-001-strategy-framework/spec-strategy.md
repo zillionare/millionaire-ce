@@ -24,7 +24,7 @@ v0.2 提供可用的 Python SDK（非"仅声明"）：含 `Strategy` 抽象根�
 
 #### 分类依据：账户有无（而非"日线 vs 日内"）
 
-story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用户场景，但二者**仅在"是否可回测"上有别**——而可回测性是 **Millionaire 不存日线以下行情**这一数据约束的派生结果，属业务/产品决定，不构成代码层面的类型分界。两者接口、账户、生命周期、评估指标完全相同，因此合并为同一个类。业务视角的对照见 story §1。
+story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用户场景。日线与 30m 均有历史数据，**两种周期都可回测**；二者接口、账户、生命周期、评估指标完全相同，不构成代码层面的类型分界。业务视角的对照见 story §1。
 
 真正的类型分界是 **是否拥有独立资金账户**。它是一条因果链的根：账户有无 → 持仓归谁 → 能否买入 → 收益如何闭环 → 如何回测 → 如何评估 → 能否独立调度。按此将策略划为**两类**：
 
@@ -35,7 +35,7 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 | 买入能力     |        ✅ buy 全家族         |            ❌ 类层无此 API（兄弟类，不继承）             | 无账户 → 无处入账   |
 | 卖出能力     |      卖**自己**的持仓       |            `sell_host_position` 卖**宿主**的            | 持仓归属不同        |
 | 收益闭环     |        卖出时即确定         | 从卖出时**才开始计算**（对比未来 N 日，Triple Barrier） | 收益范式不同        |
-| 回测方法     |      完整资金循环模拟       |      ❌ 不可回测 (BacktestRunner 拒绝 RiskStrategy)      | 无账户 → 无回测语义 |
+| 回测方法     |      完整资金循环模拟       |      兼容程序挂载宿主回测；不能独立回测      | 无独立账户 |
 | 评估指标     |   8 项完整（FR-340/350）    |             仅超额收益 + 触发统计（FR-360）             | 收益范式不同        |
 | 调度独立性   |    ✅ 可独立起 paper/live    |              ❌ 跟随宿主生命周期（FR-250）               | 无账户              |
 | 决策驱动钩子 |        `on_bar(tm)`         |                `on_check(positions, tm)`                | 决策触发方式不同    |
@@ -83,7 +83,7 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 | `default_config()` → `dict[str, Any]`                                                             | `@staticmethod`，声明策略参数名与默认值，默认返回 `{}`                                                                                                                                                                                           |
 | `log(msg, level, tm)`                                                                             | 输出日志，时间戳默认为仿真时间                                                                                                                                                                                                                   |
 | `record(key, value, dt)`                                                                          | 记录策略指标/信号，`dt` 默认为仿真时间                                                                                                                                                                                                           |
-| `get_bars(asset, count, end_dt=None, frame_type="1d", include_forming_bar=True)` → `pl.DataFrame` | **拉取式数据接口，所有策略可用**。`frame_type` 支持 `"1d"` \| `"30m"`，是运行时参数不是类型。1d 数据四模式可用；30m 等 live-only 粒度仅 paper/live 实时聚合。回测中调用 `frame_type` ≠ `"1d"` 抛 `UnsupportedFrameTypeForBacktest`（运行时检查） |
+| `get_bars(asset, count, end_dt=None, frame_type="1d", include_forming_bar=True)` → `pl.DataFrame` | **拉取式数据接口，所有策略可用**。`frame_type` 支持 `"1d"` \| `"30m"`，是运行时参数不是类型。1d/30m 均有历史数据，四模式可用；其它未存储周期（如 1m 回测）抛 `UnsupportedFrameTypeForBacktest`（运行时检查） |
 
 > **模式无关性约束**
 > 策略代码中无任何 API 可获取当前运行模式（回测/仿真/实盘/dry-run）。基类不暴露 `get_mode()` 或等价方法。生命周期钩子在四模式下行为一致（同一回调名、同一时序、同一参数语义）；仅撮合行为与数据来源因模式不同而异，且这些差异由框架在策略不可见处处理。
@@ -94,7 +94,7 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 
 | 类别         | 成员                                                                                                                                       | 设计要点                                                                                                                     |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| 决策驱动钩子 | `on_bar(tm)`                                                                                                                               | **唯一决策入口**，async，默认 `pass`。日线模式下每个交易日收盘后触发一次；日内模式下每个 30m bar 边界触发。驱动契约见 FR-115 |
+| 决策驱动钩子 | `on_bar(tm)`                                                                                                                               | **唯一决策入口**，async，默认 `pass`。1d 在每个决策时点触发一次；30m 每个 bar 的决策时点触发。驱动契约见 FR-115、FR-055 |
 | 交易         | `buy` / `buy_percent` / `buy_amount` / `sell` / `sell_percent` / `sell_amount` / `cancel_order` / `cancel_all_orders` / `trade_target_pct` | 全部返回 `TradeResult`（含 `qt_oid` 与 `trades`），归属本策略 `portfolio_id`                                                 |
 | 账户查询     | `positions`（属性）/ `cash`（属性）                                                                                                        | 只反映本账户                                                                                                                 |
 
@@ -114,7 +114,7 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 风控策略的基类，继承自抽象根 `Strategy`。**与独立策略是结构性差异，不是"共享+约束"关系**：无账户、操作宿主持仓、只算超额收益。
 
 - **资金账户**：❌ 无。不创建 `portfolio_id`，不持有资金
-- **可回测**：❌ 否。v0.2 不支持 RiskStrategy 回测。BacktestRunner 在启动时检测到 RiskStrategy 实例则拒绝（类型层 / 启动检查，关联 AC-013-05）。风控策略仅在 paper/live 下验证。若需要在回测中执行 Triple Barrier，使用 FR-135 的 broker 层 overlay；本 FR 仍是 paper/live-only
+- **回测**：不可作为独立宿主启动；兼容回测的风控程序可由宿主回测选择并执行其历史数据适配器（FR-135），不要求直接运行实时 `RiskStrategy` 实例。未声明兼容的程序不可选择。
 - **不可独立 paper/live**：无宿主即无可监控的持仓；仅在宿主进入 paper/live 时由 FR-250 自动激活跟随。用户若想在 paper/live 阶段验证风控策略，必须先挂载到宿主
 - **宿主挂载**：每个 `RiskStrategy` 实例绑定一个宿主 `BaseStrategy`（独立策略）。宿主进入 paper/live 时，其关联的 `RiskStrategy` 自动激活（FR-250）。绑定关系在运行配置中建立（可热调），不在策略代码中以类属性声明
 - **可随时停止和重新启动**：停止后不再监控宿主持仓，已发出的订单不撤回；重新启动后开启新的"开启区间"，新开启区间的超额收益独立计算（见下方）
@@ -126,22 +126,11 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
   - `get_prices(assets: list[str]) → dict[str, float]` — 拿最新价（单点）。仅 paper/live 下可用（回测下 RiskStrategy 不可用）
   - `get_ticks(asset: str, count: int) → pl.DataFrame` — 拿最近 N 个 tick（完整序列）。仅 paper/live 下可用
   - 上述两个方法**类层不存在**于 `BaseStrategy`，由"RiskStrategy 继承结构"保证独立策略不可调用（不是运行时拦截）
-- **驱动契约**：见 FR-125（事件驱动）。`on_check(positions, tm)` 由框架在每个 tick（paper/live）触发，`positions` 为宿主当日可卖持仓快照（只读）
+- **驱动契约**：见 FR-125。paper/live 独立使用 tick 或可用的最细实时 bar，`positions` 为宿主可卖持仓的只读视图。
 - **评估指标**：✅ paper/live 下完整计算（见 FR-360）
-- **内置实现**：`DrawbackSellStrategy`（FR-100）、`CostStopStrategy`（FR-110）、`TripleBarrierRiskStrategy`（FR-135）
+- **内置实现**：CE 不内置风险程序。私有学习包可通过稳定的风险程序适配器注册 API 提供实现；CE 不导入或发现私有风险类。
 
-> **超额收益公式 — Triple Barrier**（FR-013/FR-360 共用，story §1.9）—— **✅ 已固化**：
->
-> 使用 Triple Barrier 方法计算每次触发的收益。从持仓卖出之日（`T0`）起，监控 `n` 日（`n` 可配置，默认 0），直到满足以下条件之一，结束监控并记该次贡献:
->
-> 1. 价格上涨到 `P_sell * (1 + up_threshold)` 屏障 → 贡献 `−1 * up_threshold`(详见 [spec-trading.md F-TB-1](./spec-trading.md))
-> 2. 价格下跌到 `P_sell * (1 − down_threshold)` 屏障 → 贡献 `+down_threshold`(详见 [spec-trading.md F-TB-2](./spec-trading.md))
-> 3. 直到 `T_n` 日，上述条件均未满足 → 按当日收盘价 `Close_n` 退出，贡献 `P_sell / Close_n − 1`(详见 [spec-trading.md F-TB-3](./spec-trading.md))
->
-> **仿真/实盘**：以 last_price 先到者为准。
-> **N=0** 即当日收盘价。
->
-> **按"开启区间"独立计算**：风控策略的"开启" = 被激活且正在监控宿主持仓的状态。每发生一次 stop → start，记为一个**新开启区间**。每个开启区间内的所有触发事件的收益**单独累计**，不与前一个开启区间合并。指标展示与持久化按"开启区间"维度切分（详见 FR-360）。
+> **CE 风险框架边界**：保留上述通用 `RiskStrategy` 接口、宿主持仓卖出/事件契约和 broker risk-overlay 生命周期。宿主回测可以选择零个或多个由当前进程显式注册、声明兼容性的适配器；适配器按 priority 组成有序 composite，并携带 `allow_same_bar_repurchase` 策略。没有安装风险程序时选择为空且不产生导入错误。旧的持久化私有 ID 必须显示不可用/阻止，不能静默替换。
 >
 
 ---
@@ -325,11 +314,43 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 | -------- | ------ | ---------- |
 | ✅        | ✅      | ✅          |
 
-- 回测：T+0 收盘价信号，T+0 收盘价撮合
-- paper/live：T+0 尾盘信号，在尾盘集合竞价（用户可配置时间点，默认 14:57）执行；触发信号则立即委托，等撮合
+> 周期、决策提前量与成交时点的统一契约见 **FR-055**。
+
+- 回测：周期 T 的收盘价信号，T 收盘价撮合。
+- paper/live：在**周期结束前 `decision_lead_minutes` 分钟**启动决策（1d 默认 3 分钟=14:57；30m 默认 2 分钟，如 9:58/10:28/…/14:58），立即下单，成交与否/成交价由撮合决定。
+- **已知差异**：paper/live 无法保证按周期收盘价成交，尤其 30m；回测按 bar 收盘价成交是对该行为的近似。该差异归入 FR-080/FR-190，不视为 bug。
 
 
 ---
+
+<a id="fr-055"></a>
+### FR-055 运行周期、决策与成交时点
+
+| 有效需求 | 可测性 | 是否已决定 |
+| -------- | ------ | ---------- |
+| ✅        | ✅      | ✅          |
+
+**周期与参数**：
+- `bar_interval`: `1d` | `30m`，由策略定义（未声明时默认 `1d`），是该策略的不可变运行周期，不是向导可编辑参数。回测、转 paper/live 和恢复时均沿用；服务端校验提交值和已存记录与策略定义一致，冲突或无法验证的旧记录须报错并阻止启动/恢复，不静默改写。`get_bars` 拉取粒度可独立选择，不改变驱动周期。
+- `fill_timing`: `cheat_on_close` | `next_open`，默认 `cheat_on_close`。
+- `decision_lead_minutes`: `1d` 默认 3，`30m` 默认 2，可配置。
+
+**周期边界**：
+- 1d：15:00 结束。
+- 30m：10:00 / 10:30 / 11:00 / 11:30 / 13:30 / 14:00 / 14:30 / 15:00。
+- `cheat_on_close` 决策时刻 = 周期结束 − `decision_lead_minutes`；1d=14:57，30m=9:58…14:58。14:58 落在收盘集合竞价内，允许。
+- `next_open`：1d 必须在收盘且当日完成日线成功持久化之后才决策，绝不盘前或收盘前决策；不指定固定时刻。数据未成功持久化时不决策，报告数据缺口/错误；成功后将意图入队。30m 在每个 bar 结束后计算，11:30/15:00 入队，其余连续竞价 bar 立即下单。
+
+**成交语义**：
+
+| 模式 | 回测 | paper/live |
+| ---- | ---- | ---------- |
+| `cheat_on_close` | 周期 T 收盘价成交 | 周期结束前 n 分钟决策并立即下单；成交价由撮合决定，不保证等于周期收盘价 |
+| `next_open` | T 信号，下一 bar 开盘价成交（1d 为下一交易日开盘） | 连续 bar 尽快下单（允许错过开盘）；午休/收盘信号入队，下一交易时点开盘处理 |
+
+- **队列持久化**：`next_open` 在 11:30、15:00 或 1d 盘后产生的信号必须写入持久化队列，跨进程重启保留；1d 盘后与 15:00 信号在下一交易日开盘集合竞价（默认 09:25/09:30）处理，30m 午休信号在 13:00 连续竞价开盘处理（13:00 无集合竞价）；未成交/过期条目保留审计。
+- **dry-run**：使用与主 runtime 相同的 `bar_interval`、`fill_timing` 和决策时点，但成交由回测撮合引擎计算；每日结果入库。
+- `next_limit`（FR-070）暂不扩展到 30m，保留 1d 既有语义。
 
 <a id="fr-060"></a>
 ### FR-060 下单方式 — 次日开盘（正常模式）
@@ -338,8 +359,12 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 | -------- | ------ | ---------- |
 | ✅        | ✅      | ✅          |
 
-- 回测：T+0 收盘价信号，T+1 开盘价成交（开盘即涨跌停则不撮合）
-- paper/live：盘后运行；T+1 开盘集合竞价发单（卖单跌停价、买单涨停价）
+> 周期、决策时点与队列契约见 **FR-055**。
+
+- 回测：周期 T 收盘信号，下一 bar 开盘价成交；1d 为下一交易日开盘，30m 为下一 30m bar 开盘。开盘即涨跌停则不撮合。
+- paper/live：
+  - 1d：收盘且当日日线成功持久化后计算信号，存入持久化队列，下一交易日开盘处理；数据未就绪则不提前决策。
+  - 30m：每个 bar 结束后立即计算；连续竞价 bar 尽快下单（允许错过下一 bar 开盘价）；11:30 信号于 13:00 连续竞价开盘处理，15:00 信号于下一交易日开盘集合竞价处理。
 
 
 ---
@@ -351,8 +376,9 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 | -------- | ------ | ---------- |
 | ✅        | ✅      | ✅          |
 
-- 回测：T+0 收盘价信号，若指定价落在 T+1 bar [low, high] 则全部成交
-- paper/live：盘后运行；T+1 开盘集合竞价发单，由撮合系统处理
+- 回测：T+0 收盘价信号，若指定价落在 T+1 bar [low, high] 则全部成交。
+- paper/live：盘后运行；T+1 开盘集合竞价发单，由撮合系统处理。
+- **周期范围**：本 FR 暂只保留 1d；30m 的 `next_limit` 未纳入本轮，使用 FR-055 的 `cheat_on_close`/`next_open`。
 
 
 ---
@@ -365,6 +391,11 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 | ✅        | ✅      | ✅          |
 
 三种下单方式下，回测/仿真/实盘**运行结果差异是允许的**。差异来源详见 story §1.5 末尾说明。
+
+FR-055 时序差异（显式允许）：
+- `cheat_on_close` 的 paper/live 成交价不保证等于周期收盘价，尤其 30m；
+- `next_open` 的 30m 连续 bar 可能错过下一 bar 开盘价；
+- 午休/收盘队列在下一交易时点开盘处理。
 
 
 ---
@@ -421,28 +452,30 @@ story 同时列举了日线策略（§1.6）与日内策略（§1.7）两个用�
 
 `BaseStrategy`（独立策略）的运行时驱动规范。本契约由框架的回测引擎（backtest）/仿真与实盘运行时（paper/live）实现，策略代码只消费回调。**数据粒度通过 `get_bars(frame_type=...)` 在调用点声明**（1d/30m 等），与驱动契约本身解耦。
 
-#### 回调时序（单日）
+#### 回调时序
 
 ```
 on_day_open(tm=T 09:30)          ← 每个交易日开盘前一次
   ↓
-on_bar(tm=T)                               ← T 日收盘后驱动一次；策略通过 get_bars 拉取数据
-  ↓                                    策略在此产生信号；信号订单按 FR-050/060/070 撮合
+on_bar(tm=决策时点)              ← 1d：14:57(cheat)/当日日线持久化成功后(next_open)；
+                                   30m：每个 bar 的决策时点
+  ↓                              策略通过 get_bars 拉取数据并产生信号
 on_day_close(tm=T 15:00)         ← 每个交易日收盘后一次
 ```
 
 #### 各模式差异（策略不可见）
 
-| 模式  | `on_bar` 触发时点            | 数据来源             | 撮合                                     |
-| ----- | ---------------------------- | -------------------- | ---------------------------------------- |
-| 回测  | 回测时钟推进到 T 日收盘      | 历史日线（parquet）  | 按 FR-050/060/070 立即撮合               |
-| paper | T 日盘后（默认 15:05，可配） | 当日聚合日线         | 信号延迟至 T+1 处理（见 FR-050/060/070） |
-| live  | T 日盘后（默认 15:05，可配） | qmt-gateway 当日行情 | 同 paper                                 |
+| 模式  | `on_bar` 触发时点 | 数据来源 | 撮合 |
+| ----- | ----------------- | -------- | ---- |
+| 回测  | 回测时钟推进到 FR-055 定义的决策时点 | 1d/30m 历史 parquet | 按 FR-055 撮合 |
+| paper | 同上（实时时钟） | 当日 forming/聚合数据 | 按 FR-055 撮合/排队 |
+| live  | 同上（实时时钟） | qmt-gateway/MarketDataHub | 按 FR-055 撮合/排队 |
 
-- **数据粒度（1d vs 30m）通过调用点声明**：`get_bars(frame_type="1d")` / `get_bars(frame_type="30m")` 框架按粒度选数据源——1d 走 tushare parquet（可回测）；30m 等仅 live/paper 实时聚合（不可回测）。BacktestRunner 在策略调用 `frame_type="30m"` 等 live-only 粒度时抛 `UnsupportedFrameTypeForBacktest`（运行时检查，比"类型保证"更精确）
-- **"盘后运行"时点**：paper/live 下策略在 T 日收盘后被驱动，默认 15:05（A 股收盘 15:00 后留 5 分钟确保数据完整），可在运行时参数配置。对比 FR-050 cheat-on-close 的 14:57——后者是尾盘集合竞价前，本契约是收盘后，二者不冲突（分属不同下单方式的驱动时点）。
-- **信号与撮合解耦**：`on_bar` 只产生信号（调用交易接口表达意图）；实际撮合时点与价格由下单方式（FR-050/060/070）决定，策略无需感知。
-- **拉取式数据模型**：`on_bar` 不携带行情数据（无 `quote` 参数）；策略通过 `get_bars` 主动拉取所需数据（日线、30m 等），框架仅负责时序驱动。
+- **数据粒度**：`get_bars(frame_type="1d")` 与 `"30m"` 均有历史数据，**回测/paper/live 四模式可用**；仅未存储的粒度（如 1m 回测）抛 `UnsupportedFrameTypeForBacktest`。
+- **决策提前量**：1d 默认 3 分钟（14:57），30m 默认 2 分钟；见 FR-055。
+- **信号与撮合解耦**：`on_bar` 只产生信号；实际成交由 FR-055 的 `fill_timing` 决定。
+- **拉取式数据模型**：`on_bar` 不携带行情数据；策略通过 `get_bars` 拉取。
+- **风控独立时序**：实时风控不跟随宿主 `bar_interval`，按可用 tick 或最细 live bar 独立驱动；历史宿主回测仅使用所选周期实际可用的历史数据。
 
 
 ---
@@ -465,7 +498,7 @@ on_day_close(tm=T 15:00)         ← 每个交易日收盘后一次
 
 #### 回调时序与驱动模型
 
-风控策略采用 **tick 级独立驱动**，不绑定宿主的 `on_bar` 周期：
+风控策略独立驱动，不绑定宿主的 `on_bar` 周期：实时使用 tick 或可用的最细实时 bar；历史执行见 FR-135。
 
 ```
 on_day_open(tm)                               ← 每个交易日开盘前
@@ -481,7 +514,7 @@ on_day_open(tm)                               ← 每个交易日开盘前
 on_day_close(tm)                              ← 收盘后停止监控，记录超额收益事件
 ```
 
-- **驱动数据**：tick 级实时行情，数据来源为 qmt-gateway 订阅消息的当日缓存
+- **驱动数据**：qmt-gateway/MarketDataHub 可用 tick 或最细实时 bar。
 - **持仓快照**：`on_day_open` 时读取前一日可卖持仓（受 T+1 约束，当日买入的不可卖）
 - **回调签名**：`on_check(positions: dict[str, Position], tm: datetime)` —— `positions` 是 `on_day_open` 时确定的可卖持仓快照（只读）
 - **监控列表管理**：风控触发卖出的标的从监控列表移除（当日不再重复触发），但仍纳入超额收益统计
@@ -490,7 +523,7 @@ on_day_close(tm)                              ← 收盘后停止监控，记录
 #### 卖出撮合
 
 - 风控调用 `sell_host_position(asset, shares, reason)` 表达卖出意图
-- **撮合方式**：即时市价成交。卖出订单写入**宿主** `portfolio_id`，资金从宿主扣减，不改变持仓归属（FR-130）
+- **撮合方式**：即时提交市价卖出意图，成交与否和成交价由市场/柜台决定。卖出订单写入**宿主** `portfolio_id`，回款归宿主，不改变持仓归属（FR-130）。
 - 同时记一条风控触发事件：`{风控策略id, 宿主id, asset, 触发价, 成本价, reason, ts}`
 
 #### 超额收益落账
@@ -508,7 +541,7 @@ on_day_close(tm)                              ← 收盘后停止监控，记录
 
 - 无独立资金账户，监控其它策略的持仓
 - 只统计超额收益（Triple Barrier 公式，定义见 FR-013 / story §1.9），不统计其他指标
-- **可回测**：❌ 否。v0.2 不支持 RiskStrategy 回测（与 FR-013 一致）。BacktestRunner 启动时检测到 RiskStrategy 实例则拒绝。回测中的 Triple Barrier 执行由 FR-135 的 broker 层 overlay 承担，不改变本 FR 的 paper/live 契约
+- **回测**：不接受风控作为独立回测宿主；兼容的风控程序可作为宿主回测的配置执行，见 FR-135。
 - **不可独立 paper/live**：无宿主即无可监控的持仓；仅在宿主进入 paper/live 时由 FR-250 自动激活跟随
 - **可随时停止和重新启动**：每次重新启动记一个新"开启区间"，超额收益按开启区间独立累计（详见 FR-013）
 - 操作他人持仓时不改变持仓归属、不改变原策略的收益计算
@@ -516,49 +549,33 @@ on_day_close(tm)                              ← 收盘后停止监控，记录
 
 
 <a id="fr-135"></a>
-### FR-135 可回测的 Broker 层风控 Overlay（Triple Barrier）
+### FR-135 可回测的 Broker 层风控 Overlay（通用框架）
 
 | 有效需求 | 可测性 | 是否已决定 |
 | -------- | ------ | ---------- |
 | ✅        | ✅      | ✅          |
 
-FR-013 / FR-130 的 `RiskStrategy` 仍是 paper/live-only，v0.2 不可回测。为了在回测中执行同一套 Triple Barrier 规则，框架提供 **broker 层风控 overlay**：它不是策略实例、不创建独立账户。`BacktestRunner` 在 T 日开盘、宿主 `on_bar` **之前**先执行 gap/时间检查；`on_bar` 结束后同步新持仓并检查 T 日 intraday barrier。paper/live 由 `TripleBarrierRiskStrategy` 使用同一 `TripleBarrierPolicy`，按最新价/市价执行。两套执行器共享决策逻辑，但成交模型不同。
+回测向导允许选择零个或多个由当前宿主显式注册、声明与宿主及历史数据兼容的风控程序，并分别配置参数；服务端验证兼容性和参数，保存选择及参数。没有选择即无风控。风控作为宿主回测的一部分执行，不创建独立账户。CE 不包含 Triple Barrier、CostStopLoss 或 PullbackSell 等私有程序；独立风控回测不在此契约内。
+
+回测转 paper/live 时，列出目标模式兼容程序，默认选择回测所用风控并带入参数；允许修改或不选，取消回测所用程序时警告。最终选择及参数随运行配置持久化、恢复，服务端校验；原配置无法兼容或恢复时报告错误，不静默替换。
+
+每个历史周期用该周期实际可用数据先执行所选风控，再执行宿主决策；不得借用未来周期或不可用的更细数据。多个已选程序按 priority 稳定排序组成 ordered composite。`allow_same_bar_repurchase` 随配置传递并决定风控卖出后宿主是否可在同一 bar 再买入；新买入持仓仍受 T+1 限制。
 
 #### 与 RiskStrategy 的边界
 
-- **回测执行**：本 FR 的 overlay；宿主必须是 `BaseStrategy`，数据粒度为日线。
-- **paper/live**：使用 `TripleBarrierRiskStrategy`（`RiskStrategy` 子类，FR-013 / FR-125 / FR-250），按最新价触发、即时市价卖出；它与本 FR 的 overlay 共享 `quantide.service.triple_barrier` 决策函数。
-- **Triple Barrier 公式**：评估口径见 FR-360；本 FR 的 overlay 复用 `evaluate_day` 作为执行判断，但**不产生** `excess_return` 指标。
-- **宿主 opt-in**：宿主声明 `RISK_OVERLAY = "triple_barrier"` 且 `use_broker_barriers=True`。开启时宿主只保留 alpha 退出（排名/得分等），价格/时间 barrier 全部交给 overlay（回测）或 `TripleBarrierRiskStrategy`（paper/live）；宿主不再保留第二套 barrier 实现。
-- **关闭**：`use_broker_barriers=False` 表示显式关闭三重障碍风控；不会回退到宿主自身的价格/时间 barrier。
+- **回测执行**：宿主必须是 `BaseStrategy`；适配器声明支持的历史 bar 类型（CE 生命周期支持 1d 与 30m）。
+- **paper/live**：适配器可提供对应的 `RiskStrategy` 工厂；CE 保持通用接口，不内置或导入任何私有实现。
+- **注册与选择**：私有包通过 `RiskProgramAdapter` / `register_risk_program` 注册参数、兼容性、backtest overlay 工厂和 live 工厂。发现的 `RiskStrategy` 没有适配器时不可选择。
+- **恢复失败**：旧持久化 ID 若未注册，显示不可用/阻止并 fail closed，不能静默替换。
 
 #### 配置
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| `up_pct` / `down_pct` | 0.15 / 0.06（宿主可覆盖） | 小数，止盈/止损 |
-| `horizon` | 3（宿主可覆盖） | 交易日数，时间屏障 |
-| `sell_fraction` | 1.0 | 触发后卖出比例 |
-| `slippage` | 0.001（10bp） | 回测卖出滑点；paper/live 用实际成交 |
-| `use_broker_barriers` | 由策略声明决定；未声明 false | 是否启用三重障碍风控 |
+| `risk_programs` | `[]` | 已注册适配器的有序选择及参数 |
+| `allow_same_bar_repurchase` | `true` | 风控卖出后宿主是否允许同一 bar 再买入 |
 
-仅支持日线回测；分钟级/日内回测不支持（FR-115 数据约束）。overlay 只作用于日线宿主，不对 paper/live 的 `RiskStrategy` 生效。
-
-#### 执行时点（日线）
-
-- **T0（买入日）**：当天不能卖。若 T0 的 low/high 触达下/上轨，记为 pending，在 T1 开盘卖出。
-- **Tn（n≥1）开盘**：先于宿主 `on_bar` 检查 gap 与时间屏障：
-  - `open <= cost×(1−down_pct)` / `open >= cost×(1+up_pct)` → 按 Tn 开盘价卖出；
-  - 持有满 `horizon` → 按 Tn 开盘价卖出。
-- **Tn 盘中/收盘后**：宿主 `on_bar` 结束后，用 Tn 的 high/low 模拟**已挂出的条件止损/止盈单**：
-  - low 触达下轨 → 按 `cost×(1−down_pct)` 卖出；
-  - high 触达上轨 → 按 `cost×(1+up_pct)` 卖出；
-  - 同日上下轨都触发 → 以 Tn 开盘价离上/下轨更近者为准；等距时 down 优先。
-- 回测卖出价再扣 `slippage`；若开盘跳空越过 barrier，则按开盘价（再扣 slippage）而不是 barrier 价成交。
-- 这是日线数据下对盘中条件单的近似：不使用 Tn 收盘价决定 Tn 开盘成交；收盘后才用 Tn OHLC 模拟盘中触发。真实盘中路径仍需分钟/tick 数据。
-- T+1：只卖出 `avail`；涨跌停/停牌/无流动性导致卖单失败时保留仓位，下一交易日重试；部分成交保留剩余仓位。
-- 日志：`[风控卖出]` / `[风控挂起]`，含原因、触发价、成交价、执行日、股数。
-- paper/live 当前由 `StrategyRuntime._strategy_loop` 每 2 秒调用一次 `on_check`；它按最新价判断，但不等同于 FR-125 的逐 tick 驱动，后者的 tick 级契约仍是目标态。
+上述默认值是通用配置边界；具体参数由已注册适配器声明并校验。回测与 paper/live 的对应程序使用所保存配置，成交模型可能不同。
 
 #### 公司行为与成本
 
@@ -573,21 +590,23 @@ FR-013 / FR-130 的 `RiskStrategy` 仍是 paper/live-only，v0.2 不可回测。
 #### 叠加与复用
 
 - 叠加 = **宿主策略 + broker overlay**；不是两个策略实例，也没有第二个 `portfolio_id`。
-- 宿主负责选股/买入/alpha 退出；overlay 负责价格/时间风险退出。
-- 同一 overlay 可被任意声明 `RISK_OVERLAY` 的 `BaseStrategy` 复用；策略无需重复实现公司行为、T+1、涨跌停处理。
+- 宿主负责选股/买入/alpha 退出；overlay 负责价格/时间风险退出。宿主也可以像
+  `MLMomentumReversalStrategy` 一样采用每日 `top_k` 目标组合，完全不声明或使用
+  overlay；其训练标签不构成退出规则。
+- 兼容的 overlay 可被宿主选择复用；策略无需重复实现公司行为、T+1、涨跌停处理。
 - 回测中不计算 `RiskStrategy` 的超额收益指标；若需要 paper/live 的超额收益评估，仍走 FR-360。
 
-> **实现落点**：`quantide/service/triple_barrier.py`（共享 `TripleBarrierPolicy` / `plan_*_exit`）、`quantide/service/risk_overlay.py`（回测 `TripleBarrierOverlay`）、`quantide/service/backtest_broker.py`（`run_risk_overlay` / `execute_exit` / 复权持仓）、`quantide/service/runner.py`（按 `RISK_OVERLAY` 装配）、`quantide/strategies/triple_barrier_risk.py`（paper/live 风控策略）、`quantide/strategies/example/ml_momentum_reversal.py`（示例宿主）。
+> **实现落点**：`quantide/service/risk_programs.py`（显式 adapter registry）、`quantide/service/risk_overlay.py`（通用 overlay protocol/composite）、`quantide/service/backtest_broker.py`（overlay 生命周期/执行）、`quantide/service/runner.py`（按已注册程序装配）。私有学习包自行提供并注册具体风险实现；CE 不包含私有程序源码。
 
 
 <a id="fr-185"></a>
-### FR-185 持仓成本基准（加权均价算法 — 经典方案 A）
+### FR-185 持仓成本基准（含交易费用的加权均价算法 — 经典方案 A）
 
 | 有效需求 | 可测性 | 是否已决定 |
 | -------- | ------ | ---------- |
 | ✅        | ✅      | ✅          |
 
-持仓的"成本基准"用于风控策略（FR-110 成本止损）判断是否触发卖出。**算法**（用户 2026-06-21 拍板：经典方案 A — 买入时加权更新，部分卖出后剩余持仓成本不变）：
+持仓的"成本基准"用于风控策略（FR-110 成本止损）判断是否触发卖出。**算法**（用户 2026-06-21 拍板：经典方案 A — 买入时按含本笔交易手续费的总取得成本加权更新，部分卖出后剩余持仓成本不变）：
 
 #### 算法公式
 
@@ -595,8 +614,8 @@ FR-013 / FR-130 的 `RiskStrategy` 仍是 paper/live-only，v0.2 不可回测。
 ```
 ∀ asset, 在已有持仓上买入 (old_qty > 0):
     new_qty   = old_qty + buy_qty
-    new_price = (old_qty × old_cost_basis + buy_qty × buy_price) / new_qty
-    cost_basis ← new_price
+    new_price = (old_qty × old_cost_basis + buy_qty × buy_price + buy_fee) / new_qty
+cost_basis ← new_price
 ```
 
 **F-CB-2 部分卖出时成本不变**：
@@ -614,7 +633,7 @@ FR-013 / FR-130 的 `RiskStrategy` 仍是 paper/live-only，v0.2 不可回测。
 
 **F-CB-4 首次建仓**（old_qty == 0 时买入）：
 ```
-cost_basis ← buy_price   # 按本次买入价初始化
+cost_basis ← (buy_qty × buy_price + buy_fee) / buy_qty   # 含本次买入手续费
 ```
 
 #### 边界条件
@@ -688,7 +707,7 @@ FR-110 成本止损的"跌破买入价 k%"中的"买入价"= 本 FR 的 `cost_ba
 | -------- | ------ | ---------- |
 | ✅        | ✅      | ✅          |
 
-- 适用场景：独立策略使用 live-only 数据粒度（如 `frame_type="30m"`），无历史数据不可回测
+- 适用场景：独立策略使用无历史数据的粒度（如 1m 回测）或用户选择不经回测直接启动；30m 已有历史数据，可走 FR-230。
 - 路径：仿真 → 实盘，或直接启动实盘（不经回测）
 - 进入实盘后，原仿真（若有）当日停止，自动创建并行仿真
 
@@ -713,4 +732,3 @@ FR-110 成本止损的"跌破买入价 k%"中的"买入价"= 本 FR 的 `cost_ba
 > **已迁移到 [v0.2-002-ui/spec.md UI-FR-260](../v0.2-002-ui/spec.md)**。调度规则在 001-FR-230/240/250;UI 操作定义在 UI-FR-040。
 
 ---
-

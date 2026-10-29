@@ -19,12 +19,12 @@ import importlib
 import importlib.util
 import inspect
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
 
-class SkippedReason(str, Enum):
+class SkippedReason(StrEnum):
     """跳过原因 (FR-020 diagnostics)."""
 
     NotAStrategy = "NotAStrategy"
@@ -156,7 +156,7 @@ class StrategyDiscovery:
 
         strategies: list[StrategyMetadata] = []
         diagnostics: list[SkippedEntry] = []
-        for name, obj in inspect.getmembers(module, inspect.isclass):
+        for _name, obj in inspect.getmembers(module, inspect.isclass):
             if obj.__module__ != module.__name__:
                 continue
             if obj in (base_cls, risk_cls):
@@ -211,14 +211,7 @@ class StrategyDiscovery:
 
     @staticmethod
     def discover_builtin() -> EnumerationResult:
-        """发现内置策略 (FR-090/100/110) — 合并多个目录的 EnumerationResult."""
+        """发现 CE 内置示例策略。风险程序由宿主显式注册。"""
         from quantide.strategies.example import dual_ma
-        from quantide.strategies import pullback_sell, cost_stop_loss
 
-        all_strategies: list[StrategyMetadata] = []
-        all_diags: list[SkippedEntry] = []
-        for path in (dual_ma.__file__, pullback_sell.__file__, cost_stop_loss.__file__):
-            res = StrategyDiscovery.discover(Path(path).parent)
-            all_strategies.extend(res.strategies)
-            all_diags.extend(res.diagnostics)
-        return EnumerationResult(strategies=all_strategies, diagnostics=all_diags)
+        return StrategyDiscovery.discover(Path(dual_ma.__file__).parent)

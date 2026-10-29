@@ -37,7 +37,6 @@ from quantide.data.models.daily_bars import daily_bars
 from quantide.data.sqlite import db
 from quantide.service.abstract_broker import AbstractBroker
 from quantide.service.bar_views import LiveBarView
-from quantide.service.livequote import live_quote
 from quantide.service.market_data_hub import market_data_hub
 
 
@@ -239,7 +238,7 @@ class PaperBroker(AbstractBroker):
     def _on_limit_update(self, data: dict):
         """涨跌停更新回调。
 
-        目前 SimBroker 通过 live_quote 单例获取涨跌停数据，该单例会在此回调之前更新。
+        SimBroker 通过 MarketDataHub 获取实时涨跌停数据。
         此处订阅主要为了保持架构一致性（所有外部数据均来自 MessageHub）。
         """
         with self._lock:
@@ -274,14 +273,14 @@ class PaperBroker(AbstractBroker):
             snap = self._market_data.snapshot([asset]).get(asset)
             if snap is not None:
                 return {
-                    "lastPrice": snap.price or 0,
-                    "open": snap.open or 0,
-                    "high": snap.high or 0,
-                    "low": snap.low or 0,
-                    "volume": snap.volume or 0,
-                    "amount": snap.amount or 0,
+                    "lastPrice": getattr(snap, "price", 0) or 0,
+                    "open": getattr(snap, "open", 0) or 0,
+                    "high": getattr(snap, "high", 0) or 0,
+                    "low": getattr(snap, "low", 0) or 0,
+                    "volume": getattr(snap, "volume", 0) or 0,
+                    "amount": getattr(snap, "amount", 0) or 0,
                 }
-        return live_quote.get_quote(asset)
+        return market_data_hub.get_quote(asset)
 
     def _in_auction(self, price: float) -> bool:
         """当前是否处于集合竞价撮合窗口。"""
@@ -315,22 +314,27 @@ class PaperBroker(AbstractBroker):
     def _get_price_limits(self, asset: str) -> tuple[float, float]:
         """获取涨跌停价格.
 
-        优先顺序：本地缓存 → 行情订阅中心（发布者推送）→ live_quote → 本地日线数据。
+        优先顺序：本地缓存 → MarketDataHub → 本地日线数据。
         涨跌停是日频静态数据，最后回落到本地存储，避免依赖实时行情源。
         """
         limits = self._limits.get(asset)
         if limits is not None:
             return limits["down"], limits["up"]
+        # A supplied market-data port is authoritative for this broker.  An
+        # absent quote means this isolated port has no limit data; do not
+        # silently borrow a process-global/local-store limit.
+        if self._market_data is not None:
+            try:
+                if not self._market_data.snapshot([asset]).get(asset):
+                    return (0.0, 0.0)
+            except Exception:
+                return (0.0, 0.0)
         hub_limits = market_data_hub.get_limits(asset)
         if hub_limits != (0.0, 0.0):
             return hub_limits
         stored_limits = self._limits_from_limit_store(asset)
         if stored_limits != (0.0, 0.0):
             return stored_limits
-        if self._market_data is None:
-            quote_limits = live_quote.get_price_limits(asset)
-            if quote_limits != (0.0, 0.0):
-                return quote_limits
         return self._limits_from_local_data(asset)
 
     def _limits_from_limit_store(self, asset: str) -> tuple[float, float]:
@@ -348,7 +352,7 @@ class PaperBroker(AbstractBroker):
             from quantide.data.models.daily_bars import daily_bars
 
             return daily_bars.get_trade_price_limits(
-                asset, datetime.date.today()
+                asset, self._get_today()
             )
         except Exception:  # pragma: no cover - 数据层未就绪
             return 0.0, 0.0
@@ -381,7 +385,7 @@ class PaperBroker(AbstractBroker):
         """获取 paper 模式策略所需的历史日线/分钟线数据。
 
         Issue #20：默认 ``include_forming_bar=True``，当 ``end_dt`` 落在今日且
-        LiveQuote 已收到今日 tick 时，合并今日 forming bar 在末尾；close/high/low
+        MarketDataHub 已收到今日 tick 时，合并今日 forming bar 在末尾；close/high/low
         反映盘中最新状态。
 
         Args:
@@ -455,8 +459,8 @@ class PaperBroker(AbstractBroker):
     def _extract_forming_bar(
         self, asset: str, end_date: datetime.date
     ) -> dict[str, Any] | None:
-        """从 LiveQuote 拿今日 forming bar（若没有则返回 None）。"""
-        bar = live_quote.get_daily_bar(asset)
+        """从 MarketDataHub 拿今日 forming bar（若没有则返回 None）。"""
+        bar = market_data_hub.get_daily_bar(asset)
         if bar is None:
             return None
         bar_dt = bar.get("dt")
@@ -475,7 +479,7 @@ class PaperBroker(AbstractBroker):
         forming 行的 4 个补齐字段（#43）：
         - ``adjust`` ← hist 今日行的 adjust 因子（未复权）
         - ``is_st`` ← hist 今日行的 is_st
-        - ``up_limit`` / ``down_limit`` ← ``live_quote._limits[asset]``（highest priority）
+        - ``up_limit`` / ``down_limit`` ← ``MarketDataHub``（highest priority）
 
         合并后整体调 ``qfq_adjustment``（``quantide/data/helper.py:8`` 现成函数）
         把 hist 历史的 OHLCV 按今日 adjust 因子调整到前复权；forming 行的
@@ -504,9 +508,11 @@ class PaperBroker(AbstractBroker):
 
         today_adjust = hist["adjust"][-1] if "adjust" in hist.columns else 1.0
         today_is_st = bool(hist["is_st"][-1]) if "is_st" in hist.columns else False
-        limits = live_quote._limits.get(forming_clean.get("asset", ""), {}) or {}
-        today_up_limit = limits.get("up_limit")
-        today_down_limit = limits.get("down_limit")
+        down_limit, up_limit = market_data_hub.get_limits(
+            forming_clean.get("asset", "")
+        )
+        today_up_limit = up_limit or None
+        today_down_limit = down_limit or None
 
         for col, val in (
             ("adjust", today_adjust),

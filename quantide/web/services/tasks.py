@@ -13,7 +13,7 @@ AC-6: 查看历史最近 N=10 次.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 DATA_SYNC_TASK_NAMES: tuple[str, ...] = (
     "日线行情",
@@ -26,7 +26,7 @@ DATA_SYNC_TASK_NAMES: tuple[str, ...] = (
 _TASK_HISTORY_LIMIT = 10
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """任务状态."""
 
     SUCCESS = "success"

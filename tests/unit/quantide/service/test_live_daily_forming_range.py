@@ -30,6 +30,9 @@ class _Bars:
 
 
 class _MarketData:
+    def get_limits(self, asset):
+        return 9.0, 11.0
+
     def snapshot(self, symbols):
         return {
             "600519.SH": {
@@ -64,5 +67,5 @@ def test_get_bars_range_injects_today_forming_bar_with_date_end():
     # forming 行必须有明确的 is_st，否则策略的 ~is_st 过滤会把今日标的全丢掉
     assert today["is_st"][0] is False
     assert float(today["adjust"][0]) == 1.0
-    assert "up_limit" in frame.columns
-    assert "down_limit" in frame.columns
+    assert float(today["up_limit"][0]) == 11.0
+    assert float(today["down_limit"][0]) == 9.0

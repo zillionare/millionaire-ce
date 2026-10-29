@@ -35,6 +35,8 @@ from tests.e2e.support.gateway_stub import (
     running_gateway_stub,
 )
 
+pytestmark = pytest.mark.private_only
+
 ASSETS_ROOT = Path(__file__).resolve().parents[2] / "assets"
 BASELINE_PATH = ASSETS_ROOT / "baselines" / "dual_ma_2024.backtest.json"
 MARKET_PATH = ASSETS_ROOT / "2024_bars_ext_cols.parquet"

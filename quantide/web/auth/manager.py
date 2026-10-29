@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# ruff: noqa: D205
 from fasthtml.common import *
 from monsterui.all import *
 
@@ -65,9 +66,6 @@ class AuthManager:
         # Create repo to manage users
         self.user_repo = UserRepository(self.db)
 
-        # Create default admin
-        self._create_default_admin()
-
         # Register auth routes if app is provided
         if app is not None:
             self.register_routes(app, prefix=prefix)
@@ -84,7 +82,6 @@ class AuthManager:
         self.auth_db = AuthDatabase(db_path)
         self.db = self.auth_db.initialize_auth_tables()
         self.user_repo = UserRepository(self.db)
-        self._create_default_admin()
 
     def _prioritize_prefixed_routes(self, app, prefix: str) -> None:
         """Move auth routes ahead of catch-all mounts like `/`."""
@@ -151,16 +148,3 @@ class AuthManager:
             include_admin=include_admin,
             allow_custom_login=allow_custom_login,
         )
-
-    # Create default admin
-    def _create_default_admin(self):
-        """Create default admin if needed"""
-        if self.user_repo is None:
-            return
-        if not self.user_repo.get_by_username("admin"):
-            self.user_repo.create(
-                username="admin",
-                email="admin@system.local",
-                password="admin123",  # Will be hashed by repository
-                role="admin",
-            )

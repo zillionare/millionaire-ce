@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from quantide.config.features import FeatureUnavailableError
 import quantide.service.strategy_runtime as sr_mod
 from quantide.service.strategy_runtime import (
     BacktestRun,
@@ -254,12 +255,10 @@ def test_restore_persisted_runtimes_records_account_block_reason():
     with patch.object(mgr, "_save_specs") as mock_save, \
          patch.object(mgr, "_record_risk_event") as mock_record:
         mgr._restore_persisted_runtimes()
-    # spec should be marked blocked with account scope
     assert mgr._runtime_specs[runtime_id]["status"] == "blocked"
     assert mgr._runtime_specs[runtime_id]["block_scope"] == "account"
     assert mgr._runtime_specs[runtime_id]["block_reason"] == "manual block"
     mock_save.assert_called()
-    # risk event recorded with account scope
     account_events = [c for c in mock_record.call_args_list if c.kwargs.get("scope") == "account"]
     assert len(account_events) >= 1
 
@@ -290,7 +289,9 @@ def test_restore_persisted_runtimes_starts_unblocked_spec():
     assert len(success_events) == 1
 
 
-def test_restore_persisted_runtimes_records_start_failure():
+def test_restore_persisted_runtimes_records_start_failure(
+    private_edition_feature_override,
+):
     """[AC-NFR1101-01] _restore_persisted_runtimes records failure when _start_from_spec raises (1003-1007)."""
     mgr = _make_manager()
     runtime_id = "live:p1:s1"

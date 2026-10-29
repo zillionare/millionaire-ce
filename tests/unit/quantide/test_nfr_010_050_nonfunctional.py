@@ -71,14 +71,6 @@ def test_nfr_020_notification_event_is_string_enum():
         assert isinstance(event.value, str)
 
 
-def test_nfr_020_triple_barrier_has_return_type():
-    """AC-NFR-020: triple_barrier.evaluate_day 返回类型注解 (声明性)."""
-    from quantide.service.triple_barrier import evaluate_day
-
-    sig = inspect.signature(evaluate_day)
-    assert sig.return_annotation is not inspect.Signature.empty or True
-
-
 def test_nfr_030_paper_broker_module_single_responsibility():
     """AC-NFR-030: PaperBroker 模块负责 paper broker 模拟撮合 (单一职责)."""
     from quantide.service import sim_broker
@@ -89,18 +81,6 @@ def test_nfr_030_paper_broker_module_single_responsibility():
     assert "class PaperBroker" in src
 
 
-def test_nfr_030_triple_barrier_module_single_responsibility():
-    """AC-NFR-030: triple_barrier 模块负责 Triple Barrier 公式 (单一职责)."""
-    from quantide.service import triple_barrier
-
-    src = Path(triple_barrier.__file__).read_text()
-    assert "excess_return_up" in src
-    assert "excess_return_down" in src
-    assert "excess_return_expire" in src
-    assert "check_up_barrier" in src
-    assert "check_down_barrier" in src
-
-
 def test_nfr_040_no_unused_imports_paper_broker():
     """AC-NFR-040: sim_broker.py 无未用 import (静态检查)."""
     import py_compile
@@ -108,15 +88,6 @@ def test_nfr_040_no_unused_imports_paper_broker():
     from quantide.service import sim_broker
 
     py_compile.compile(sim_broker.__file__, doraise=True)
-
-
-def test_nfr_040_no_unused_imports_triple_barrier():
-    """AC-NFR-040: triple_barrier.py 无未用 import."""
-    import py_compile
-
-    from quantide.service import triple_barrier
-
-    py_compile.compile(triple_barrier.__file__, doraise=True)
 
 
 def test_nfr_040_no_unused_imports_notifications():

@@ -190,4 +190,4 @@ async def index(req):
     )
 
     layout.main_block = page_content
-    return layout.render()
+    return layout.render(req)

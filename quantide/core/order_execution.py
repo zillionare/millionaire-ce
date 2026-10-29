@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class OrderExecutionMode(str, Enum):
+class OrderExecutionMode(StrEnum):
     """下单方式 (FR-050/060/070).
 
     - CHEAT_ON_CLOSE: T+0 close 信号, T+0 close 撮合 (回测) / T+0 尾盘集合竞价 (paper/live, 默认 14:57)

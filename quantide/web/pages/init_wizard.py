@@ -23,6 +23,7 @@ from quantide.config.dev_stubs import (
     dev_stubs_enabled,
     ensure_dev_stubs_started,
 )
+from quantide.config.features import supports_live_trading
 from quantide.config.paths import DEFAULT_DATA_HOME
 from quantide.core.init_wizard_steps import WIZARD_TOTAL_STEPS, build_wizard_steps
 from quantide.core.message import msg_hub
@@ -397,19 +398,30 @@ def _wizard_step_meta() -> dict[int, dict[str, str]]:
     return {
         1: {
             "title": f"欢迎使用 {product_name}!",
-            "description": f"{product_name} 是为量化人打造的集成开发环境 -- 数据、研究、回测、实盘。",
+            "description": (
+                f"{product_name} 是为量化人打造的集成开发环境 -- 数据、研究、回测、"
+                + ("实盘。" if supports_live_trading() else "仿真。")
+            ),
         },
         2: {
             "title": "运行环境",
-            "description": "配置行情数据存储位置、访问控制、监听端口和路径前缀。配置数据库固定保存在系统配置目录。",
+            "description": "配置行情数据存储位置、访问控制、监听端口和路径前缀。默认仅允许本机访问。配置数据库固定保存在系统配置目录。",
         },
         3: {
             "title": "设置管理员密码",
-            "description": "首次初始化时必须设置管理员密码。当前版本固定使用 admin 作为管理员账号。",
+            "description": "首次初始化时必须设置管理员密码。系统不会创建默认管理员或默认密码；当前版本固定使用 admin 作为管理员账号。",
         },
         4: {
-            "title": "配置交易/实时行情网关",
-            "description": "配置 gateway 连接信息，用于获取实时行情和执行交易。",
+            "title": (
+                "配置交易/实时行情网关"
+                if supports_live_trading()
+                else "确认仿真行情"
+            ),
+            "description": (
+                "配置 gateway 连接信息，用于获取实时行情和执行交易。"
+                if supports_live_trading()
+                else "CE 使用 MarketDataHub 接收行情（可通过 Tencent 行情发布路径提供），仿真交易无需配置实盘网关。"
+            ),
         },
         5: {
             "title": "数据源设置及下载",
@@ -562,7 +574,7 @@ def StepIndicator(current_step: int, steps: list[dict]):
 
 def Step1_Welcome():
     """步骤1：欢迎页"""
-    gateway_text = "配置交易/实时行情网关"
+    gateway_text = "配置交易/实时行情网关" if supports_live_trading() else "确认仿真行情路径"
     data_text = "配置数据源并下载历史数据。"
     if dev_stubs_enabled():
         gateway_text = "确认开发 Stub 自动注入的交易/实时行情网关"
@@ -749,6 +761,21 @@ def Step2_Runtime(state: dict | None = None):
 
 def Step4_Gateway(state: dict | None = None):
     """步骤4：网关配置"""
+    if not supports_live_trading():
+        return Div(
+            H3("CE 仿真模式", cls="text-lg font-semibold text-gray-900 mb-3"),
+            P(
+                "当前 CE 版本暂不支持实盘交易，因此不显示实盘网关配置。仿真账户和运行时会继续使用 MarketDataHub 行情；可按部署需要启用 Tencent 行情发布路径。",
+                style=FONT_STYLES["description"],
+                cls="mb-4",
+            ),
+            Div(
+                Span("仿真行情", cls="font-medium text-gray-700 mr-2"),
+                Span("MarketDataHub（保留 Tencent quote path）", cls="text-gray-900"),
+                cls="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4",
+            ),
+            cls="w-full",
+        )
     if dev_stubs_enabled():
         runtime = ensure_dev_stubs_started()
         gateway_url = getattr(runtime, "gateway_base_url", "") if runtime is not None else ""
@@ -1397,7 +1424,16 @@ async def handle_step(request: Request, step: int):
                     error_message=str(e),
                 )
         elif current_step == 4:
-            if dev_stubs_enabled():
+            if not supports_live_trading():
+                # Keep the shared wizard state machine intact, but never let
+                # CE form submissions enable or persist a live gateway.
+                state = init_wizard.get_state(force_refresh=True)
+                state.gateway_enabled = False
+                state.gateway_server = ""
+                state.gateway_base_url = "/"
+                state.gateway_api_key = ""
+                init_wizard.save_state(state)
+            elif dev_stubs_enabled():
                 runtime = ensure_dev_stubs_started()
                 if runtime is None:
                     state = init_wizard.get_state(force_refresh=True)

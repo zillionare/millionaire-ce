@@ -337,41 +337,18 @@ async def test_deploy_backtest_to_paper_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_deploy_backtest_to_live_success(monkeypatch):
-    """deploy_to_live success -> returns tuple with success message (line 2175)."""
+async def test_deploy_backtest_to_live_is_unavailable_in_ce(monkeypatch):
+    """CE never renders a successful live deployment result."""
     form_data = {"live_account_id": "gateway:default"}
     req = _make_req(form_data=form_data)
     req.scope = {"registry": MagicMock()}
 
-    # Stub all the gating checks.
-    monkeypatch.setattr(strategy_mod, "_get_live_accounts", lambda req: [{"id": "a1"}])
-    monkeypatch.setattr(
-        strategy_mod.strategy_runtime_manager,
-        "get_active_backtest_deployment",
-        lambda pid, kind: None,
-    )
-    monkeypatch.setattr(
-        strategy_mod, "_load_backtest_run_config", lambda pid: ({}, {})
-    )
-    monkeypatch.setattr(strategy_mod, "_form_to_config", lambda form, base: {})
-    monkeypatch.setattr(strategy_mod, "_get_market_data", lambda req: MagicMock())
-
-    fake_runtime = MagicMock()
-    fake_runtime.portfolio_id = "live-pf-1"
-    fake_runtime.strategy_id = "strat-2"
-    monkeypatch.setattr(
-        strategy_mod.strategy_runtime_manager,
-        "deploy_to_live",
-        lambda **kwargs: fake_runtime,
-    )
-    monkeypatch.setattr(
-        strategy_mod, "_get_backtest_deploy_capabilities", lambda req: {}
-    )
+    monkeypatch.setattr(strategy_mod, "_get_live_accounts", lambda req: [])
+    monkeypatch.setattr(strategy_mod, "_load_backtest_run_config", lambda pid: ({}, {}))
 
     out = await deploy_backtest_to_live(req, "demo-pf")
-    assert isinstance(out, tuple)
     text = " ".join(
         strategy_mod.to_xml(o) if not isinstance(o, str) else o for o in out
     )
-    assert "已转入实盘" in text
-    assert "live-pf-1" in text
+    assert "无法转入实盘" in text
+    assert "未检测到可用的实盘网关" in text

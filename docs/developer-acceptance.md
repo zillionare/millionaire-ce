@@ -12,7 +12,8 @@
 本文档覆盖当前仓库里最常见的两类开发动作：
 
 1. 修改策略、交易链路或页面后，先在本地验证核心流程没有断。
-2. 需要在不连接真实 Tushare、真实 qmt-gateway/QMT 的情况下，使用 stub 走通开发态验证。
+2. 需要在不连接真实 Tushare、真实 qmt-gateway/QMT 的情况下，使用 stub 走通
+   开发态纸面/仿真验证。
 
 本文档不替代 `.dev/specs/00-architecture.md`、`.dev/specs/01-e2e-accuracy-contract.md` 和 `.dev/specs/three_mode_acceptance_checklist.md`；后者仍然是工程约束和发布态验收基线。
 
@@ -52,7 +53,7 @@ source .venv/bin/activate
 开始验证前，默认你已经完成一次初始化，至少具备：
 
 1. 可用的 `app_home`。
-2. 已完成基础登录/初始化状态。
+2. 已完成基础登录/初始化状态；管理员密码由初始化向导设置，系统不提供默认密码。
 3. 仓库测试资产和本地 SQLite 可正常访问。
 
 ## 3. 本地启动方式
@@ -85,7 +86,8 @@ QUANTIDE_ENABLE_DEV_STUBS=1 uvicorn quantide.app:app --reload
 
 1. 启动本地 gateway stub，并把 effective gateway 配置指向它。
 2. 用 fixture-backed 数据替代默认 Tushare fetcher。
-3. 在已完成初始化的前提下，开放开发态的 simulation/live 相关链路。
+3. 在已完成初始化的前提下，开放开发态的 simulation/paper 链路；CE
+   不开放 live 链路。
 
 注意：
 
@@ -109,7 +111,8 @@ QUANTIDE_ENABLE_DEV_STUBS=1 uvicorn quantide.app:app --reload
 .venv/bin/python -m pytest tests/e2e/three_mode/test_dual_ma_parity.py -q
 ```
 
-用途：确认在同一策略、同一标的、同一时间窗口下，`backtest / paper / live` 的成交事实、每日权益曲线和收益指标仍然一致。
+用途：确认在同一策略、同一标的、同一时间窗口下，`backtest / paper / simulation`
+的成交事实、每日权益曲线和收益指标仍然一致。
 
 这条用例当前固定校验：
 
@@ -124,18 +127,26 @@ QUANTIDE_ENABLE_DEV_STUBS=1 uvicorn quantide.app:app --reload
 .venv/bin/python -m pytest tests/e2e/web/test_dev_stub_mode.py -q
 ```
 
-用途：确认开发态 stub 不是"只能启动"，而是真能支撑策略页、回测报告、转仿真、转实盘和交易入口路径。
+用途：确认开发态 stub 不是"只能启动"，而是真能支撑策略页、回测报告、转仿真
+和纸面交易入口路径。
 
 ## 5. 提交前最小手工验收
 
 当改动涉及策略页、交易页、runtime 装配、gateway/tushare stub 或导航时，至少手工检查下面几项：
 
-1. 使用 `QUANTIDE_ENABLE_DEV_STUBS=1` 启动后，系统维护 gateway 页面能看到当前 effective gateway URL。
-2. 策略页能正常打开，已有回测报告时，"转仿真"和"转实盘"不会被错误地一起禁用。
+1. 使用 `QUANTIDE_ENABLE_DEV_STUBS=1` 启动后，日志能确认本地 stub 已启动；
+   CE 不要求配置真实 live gateway。
+2. 策略页能正常打开，已有回测报告时，"转仿真"不会被错误禁用；"转实盘"
+   在 CE 中应保持隐藏或不可用。
 3. `/trade/simulation` 可访问。
-4. `/trade/live` 可访问。
-5. 旧入口 `/strategy/live` 会重定向到真实交易入口，而不是 404。
-6. 如果本次改动涉及交易逻辑，至少再跑一次三模式 parity 定向用例。
+4. `/trade/live` 在 CE 中返回明确的不可用响应（当前为 HTTP 503）。
+5. 旧入口 `/strategy/live` 不得绕过 CE 的 live feature gate。
+6. 如果本次改动涉及交易逻辑，至少再跑一次 backtest/paper parity 定向用例。
+
+私有版专属的 gateway/live UI 合同用例使用 `private_only` marker，不能作为
+CE 验收证据。需要验证这些共享内部实现时，必须显式启用
+`QUANTIDE_ENABLE_EDITION_OVERRIDE=1 QUANTIDE_EDITION=zillionaire`；普通 CE
+运行不应启动 live broker，也不应恢复持久化的 live runtime。
 
 ## 6. 如何理解"验收通过"
 
@@ -147,7 +158,7 @@ QUANTIDE_ENABLE_DEV_STUBS=1 uvicorn quantide.app:app --reload
 因此，开发者应该同时关注三类证据：
 
 1. release gate 是否通过。
-2. 三模式 parity 是否通过。
+2. backtest/paper parity 是否通过。
 3. 本次改动影响到的手工 UI 流程是否可走通。
 
 ## 7. 结果去哪里看

@@ -216,7 +216,7 @@ from quantide.web.pages.trade_lightning import (
 
 def test_resolve_lightning_price_current_p1():
     """[AC-NFR1101-01] current_p1 returns current * 1.01."""
-    with patch.object(tl_mod_main, "live_quote") as mock_lq:
+    with patch.object(tl_mod_main, "market_data_hub") as mock_lq:
         mock_lq.is_running = True
         mock_lq.get_quote = MagicMock(return_value={"price": 100.0})
         got = _resolve_lightning_price("000001.SZ", "current_p1")
@@ -225,7 +225,7 @@ def test_resolve_lightning_price_current_p1():
 
 def test_resolve_lightning_price_current_no_quote():
     """[AC-NFR1101-01] When no quote, falls back to close."""
-    with patch.object(tl_mod_main, "live_quote") as mock_lq, \
+    with patch.object(tl_mod_main, "market_data_hub") as mock_lq, \
          patch.object(tl_mod_main, "daily_bars") as mock_dbars:
         mock_lq.is_running = True
         mock_lq.get_quote = MagicMock(return_value=None)

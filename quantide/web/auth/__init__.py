@@ -22,6 +22,7 @@ __all__ = [
     "AuthBeforeware",
     "AuthDatabase",
     "UserRepository",
+    "Auth",
 ]
 
 # Convenience imports for common usage patterns

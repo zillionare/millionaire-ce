@@ -26,6 +26,10 @@ from quantide.web.pages.trade_main import (
 )
 
 
+@pytest.fixture(autouse=True)
+def private_edition_trade_route_cases(monkeypatch):
+    monkeypatch.setattr(tm, "supports_live_trading", lambda: True)
+
 def _make_req(
     *,
     scope: dict | None = None,

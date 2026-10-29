@@ -145,6 +145,51 @@ class DataReadinessMonitor:
         self._check_daily_aux(today)
         self._check_limits(today)
 
+    def is_daily_ready(
+        self,
+        now: datetime.datetime,
+        *,
+        day: datetime.date | None = None,
+    ) -> bool:
+        """Return whether a completed daily bar is persisted and usable.
+
+        A current-day bar is accepted only after the exchange session has
+        ended, and the persisted store is queried again for that exact date.
+        The market close boundary is used; there is no wall-clock grace
+        period such as a fixed 15:05 trigger.
+        """
+        expected = day or now.date()
+        calendar = self._calendar_obj()
+        try:
+            # This gate is used for same-day next-open decisions.  A previous
+            # day's persisted bar may be useful for other health checks, but
+            # it must never be mistaken for today's post-persistence event.
+            if expected != now.date():
+                return False
+            if not calendar.is_trade_day(expected):
+                return False
+            if now.time() < datetime.time(15, 0):
+                return False
+            end = self._daily_obj().end
+            if end != expected:
+                return False
+            frame = self._daily_obj().get_bars_in_range(
+                expected,
+                expected,
+                assets=None,
+                adjust=None,
+                eager_mode=True,
+            )
+            if frame is None or frame.is_empty():
+                return False
+            required = {"date", "asset", "open", "high", "low", "close", "volume"}
+            if not required.issubset(set(frame.columns)):
+                return False
+            selected = frame.select(sorted(required))
+            return selected.null_count().row(0) == (0,) * len(required)
+        except Exception:
+            return False
+
     def check_quotes(self, now: datetime.datetime | None = None) -> None:
         now = now or self._clock()
         if not self._in_session(now):

@@ -82,9 +82,9 @@ class Strategy(ABC):
 
 **约束**:
 - `get_bars(frame_type)` 支持 `"1d" | "30m"`;其他 → `ValueError`
-- **可回测性是派生属性**：`frame_type="1d"` 的数据可回测；`"30m"` 等 live-only 粒度仅 paper/live 实时聚合。`BacktestRunner` 在策略调用 live-only 粒度时抛 `UnsupportedFrameTypeForBacktest`（运行时检查）
+- **可回测性**：`frame_type="1d"` 和 `"30m"` 均有历史数据，回测/paper/live 四模式可用；仅未存储的粒度（如 1m 回测）由 `BacktestRunner` 抛 `UnsupportedFrameTypeForBacktest`（运行时检查）
 - 资金从本策略 `portfolio_id` 账户扣减;`positions` / `cash` 只反映本账户（仅 BaseStrategy 有）
-- 调度路径由数据粒度决定：可回测粒度走 FR-230（回测→仿真→实盘）；live-only 粒度走 FR-240（仿真→实盘）
+- 调度路径：1d/30m 走 FR-230（回测→仿真→实盘）；无历史数据的粒度（如 1m）走 FR-240（仿真→实盘）
 
 > **决策驱动钩子不在抽象根**：`on_bar`（时序，BaseStrategy 专有）与 `on_check`（事件，RiskStrategy 专有）语义不同，分属两个基类，不上提。
 
@@ -134,7 +134,7 @@ class RiskStrategy(Strategy):  # 兄弟类,非 BaseStrategy 子类
 - **无 `portfolio_id`**;`positions` / `cash` 属性访问抛 `AttributeError`
 - 不可独立运行;必须绑定一个宿主 `BaseStrategy`。绑定关系在运行配置中建立（可热调），不在策略代码中以类属性声明
 - 宿主进入 paper/live 时自动激活;宿主停止时一并停止;可随时单独停止/重新启动（每次重启记一个新"开启区间"，超额收益按区间独立累计，FR-013/FR-360）
-- **可回测**：❌ 否。v0.2 不支持 RiskStrategy 回测。BacktestRunner 启动时检测到 RiskStrategy 实例则拒绝(抛异常 `RiskStrategyNotBacktestable`,HTTP 错误码 `RISK_STRATEGY_NOT_BACKTESTABLE`),关联 AC-013-05
+- **回测**：独立提交 RiskStrategy 作为宿主仍拒绝（`RiskStrategyNotBacktestable`）；兼容程序可作为宿主回测配置执行，见 FR-135。
 
 **关联 AC**: AC-013-01 ~ 05
 
@@ -286,6 +286,8 @@ class EnumerationResult:
 {
   "strategy_id": "user.MyStrategy",
   "parameters": { "fast": 5, "slow": 20 },
+  "risk_programs": [],
+  "allow_same_bar_repurchase": true,
   "initial_capital": 1000000.0,
   "start_date": "2022-12-29",
   "end_date": "2022-12-30",
@@ -298,6 +300,8 @@ class EnumerationResult:
 }
 ```
 
+`risk_programs` may be empty or contain multiple explicitly registered compatible adapters. Each item carries its parameters and stable priority; `allow_same_bar_repurchase` is persisted with the selection. CE installs no private risk programs. An old ID absent from the current adapter registry is returned as unavailable/blocked and cannot be silently substituted. The response/result stores the final selection and the strategy-defined `bar_interval` (`1d` or `30m`). `bar_interval` is read-only: it is not accepted as an override, and paper/live requests must match the stored strategy definition. Missing, conflicting, or unverifiable legacy interval/config records return an error and cannot start or restore.
+
 **Response 202**:
 
 ```json
@@ -306,6 +310,8 @@ class EnumerationResult:
   "strategy_id": "user.MyStrategy",
   "status": "pending",
   "run_id": "uuid",
+  "bar_interval": "1d|30m",
+  "risk_programs": [],
   "created_at": "2022-12-30T10:00:00Z"
 }
 ```
@@ -352,6 +358,8 @@ class EnumerationResult:
 ```json
 {
   "initial_capital": 1000000.0,
+  "risk_programs": [],
+  "allow_same_bar_repurchase": true,
   "slippage": 0.001,
   "commission": {
     "tax_rate": 0.001,
@@ -370,6 +378,8 @@ class EnumerationResult:
   "portfolio_id": "uuid",
   "strategy_id": "user.MyStrategy",
   "mode": "paper",
+  "bar_interval": "1d|30m",
+  "risk_programs": [],
   "status": "running",
   "started_at": "2022-12-30T10:00:00Z"
 }
@@ -388,7 +398,8 @@ class EnumerationResult:
   "initial_capital": 1000000.0,
   "slippage": 0.001,
   "commission": { "tax_rate": 0.001, "commission_rate": 0.00025, "min_commission": 5.0 },
-  "gateway_url": "http://localhost:5001"
+  "gateway_url": "http://localhost:5001",
+  "risk_programs": []
 }
 ```
 
@@ -400,7 +411,7 @@ class EnumerationResult:
 
 ##### `POST /broker/{strategy_id}/dry-run`
 
-**Request**: `{}` (沿用 live 的 `initial_capital` / `slippage` / `commission`, **不**实际下单)
+**Request**: `{}` (沿用主 runtime 的策略定义、风控选择、周期与成交时点；影子成交由回测撮合计算，主 runtime 仍实际下单)
 
 **Response 202**:
 
@@ -687,7 +698,7 @@ class EnumerationResult:
 | `asset`        | str (PK part)                                 | 标的代码                                             |
 | `shares`       | float                                         | 总持仓                                               |
 | `avail`        | float                                         | 可卖持仓 (T+1 约束) — 原 spec 名为 `sellable_shares` |
-| `price`        | float                                         | 持仓成本 (加权均价) — 原 spec 名为 `cost_basis`      |
+| `price`        | float                                         | 持仓成本 (含买入交易费用的加权均价) — 原 spec 名为 `cost_basis`      |
 | `profit`       | float                                         | 盈亏 — 实盘快速查询用, 回测/仿真不写                 |
 | `mv`           | float                                         | 市值                                                 |
 
@@ -774,7 +785,7 @@ class EnumerationResult:
 > - `host_strategy_id` (宿主策略)
 > - `asset` (标的代码)
 > - `trigger_price` (触发价)
-> - `cost_basis` (成本基准, 由 FR-185 经典方案 A 维护)
+> - `cost_basis` (含买入交易费用的成本基准, 由 FR-185 经典方案 A 维护)
 > - `reason` (`cost_stop` / `drawback` / ...)
 > - `trigger_ts` (触发时间戳, ISO 8601)
 
@@ -1003,7 +1014,7 @@ class EnumerationResult:
   - §1.3 RiskStrategy '可回测: ⏸ 暂缓' -> '❌ 否. BacktestRunner 启动拒绝'
   - §4 异常表加 `RISK_STRATEGY_NOT_BACKTESTABLE` (RiskStrategy 提交给 BacktestRunner)
   - §4 '⏸ 暂缓: 风控回测语义' 段删除
-  - §6 C10: '⏸ 暂缓' -> 'v0.2 不支持 RiskStrategy 回测 (用户决定)'
+  - §6 C10: '⏸ 暂缓' -> '独立 RiskStrategy 不作为宿主回测；兼容风控纳入宿主回测配置'
 - **2026-06-17 (本轮 4)**: GLM 评审 8 处遗漏 / 矛盾全部修复
   - §3.6 risk_events 加 `activation_id` 字段;`timestamp` -> `trigger_ts`(对齐 FR-360)
   - §3.7 excess_returns 加 `activation_id` / `up_threshold` / `down_threshold` / `barrier_hit`;公式从旧版 `(sell_price - close_price_n)/sell_price` 改为 Triple Barrier 三种退出条件

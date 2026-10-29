@@ -25,6 +25,12 @@ from quantide.web.pages.system.gateway import (
 )
 
 
+@pytest.fixture(autouse=True)
+def private_edition_gateway_helper_cases(monkeypatch):
+    """Exercise shared gateway internals as private-edition cases."""
+    monkeypatch.setattr(gw_mod, "supports_live_trading", lambda: True)
+
+
 class _FakeURLResp:
     def __init__(self, code):
         self._code = code

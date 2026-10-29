@@ -6,7 +6,7 @@ _instances: dict[type[Any], Any] = {}
 T = TypeVar("T")
 
 
-def singleton(cls: type[T]) -> type[T]:
+def singleton[T](cls: type[T]) -> type[T]:
     """单例装饰器，用于将类转换为单例模式"""
 
     @wraps(cls)

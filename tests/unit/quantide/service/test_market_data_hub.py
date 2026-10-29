@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import datetime
 import time
+from queue import Empty
+
+import pytest
 
 from quantide.core.enums import Topics
 from quantide.core.message import msg_hub
@@ -24,6 +27,43 @@ def _wait_until(predicate, timeout: float = 2.0) -> bool:
             return True
         time.sleep(0.01)
     return False
+
+
+def _clear_pull_queue(topic: str) -> None:
+    """Discard messages queued for a topic without touching other topics."""
+    with msg_hub._lock:
+        queue = msg_hub._queues.get(topic)
+    if queue is None:
+        return
+    while True:
+        try:
+            queue.get_nowait()
+        except Empty:
+            return
+
+
+@pytest.fixture(autouse=True)
+def isolate_market_data_topics():
+    """Prevent queued quote messages from leaking between hub tests."""
+    topics = (Topics.QUOTES_ALL.value, Topics.STOCK_LIMIT.value)
+    msg_hub._dispatch_queue.join()
+    with msg_hub._lock:
+        saved_subscribers = {
+            topic: msg_hub._subscribers.pop(topic, []) for topic in topics
+        }
+    for topic in topics:
+        _clear_pull_queue(topic)
+
+    yield
+
+    msg_hub._dispatch_queue.join()
+    with msg_hub._lock:
+        for topic in topics:
+            msg_hub._subscribers.pop(topic, None)
+            if saved_subscribers[topic]:
+                msg_hub._subscribers[topic] = saved_subscribers[topic]
+    for topic in topics:
+        _clear_pull_queue(topic)
 
 
 def test_parse_snapshot_builds_quote_snapshot():

@@ -12,13 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-import time
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from quantide.core.message import msg_hub
-from quantide.core.risk_events import RISK_TRIGGERED_TOPIC
 from quantide.data.models.calendar import calendar as calendar_model
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.sqlite import db
@@ -31,10 +27,6 @@ from tests.e2e.fixtures.minimal_assets import (
     TEST_DOWN_LIMIT,
     TEST_UP_LIMIT,
 )
-
-
-def _wait_dispatch():
-    time.sleep(0.3)
 
 
 @pytest.fixture
@@ -77,19 +69,19 @@ async def test_fr_115_dual_ma_strategy_runs_in_paper(paper_broker):
 @pytest.mark.e2e
 @pytest.mark.e2e_paper
 async def test_fr_185_cost_basis_f_cb_1_first_buy(paper_broker):
-    """AC-FR-185 F-CB-4: 首次建仓 (old_qty=0) 成本 = buy_price."""
+    """AC-FR-185 F-CB-4: 首次建仓成本包含买入手续费."""
     buy_task = asyncio.create_task(paper_broker.buy(TEST_ASSET, 100, price=10.0, timeout=1.0))
     await asyncio.sleep(0)
     await _publish_quote(paper_broker, TEST_ASSET, 10.0)
     await buy_task
     pos = paper_broker._positions[TEST_ASSET]
-    assert pos.price == 10.0, f"F-CB-4 first buy cost_basis should be 10.0, got {pos.price}"
+    assert pos.price == 10.05, f"F-CB-4 first buy cost_basis should be 10.05, got {pos.price}"
 
 
 @pytest.mark.e2e
 @pytest.mark.e2e_paper
 async def test_fr_185_cost_basis_f_cb_1_weighted_update(paper_broker):
-    """AC-FR-185 F-CB-1: 二次买入, 成本加权更新 = (100*10 + 100*10) / 200 = 10.0 (price 需在涨跌停内)."""
+    """AC-FR-185 F-CB-1: 二次买入成本加权且包含两笔手续费."""
     buy1 = asyncio.create_task(paper_broker.buy(TEST_ASSET, 100, price=10.0, timeout=1.0))
     await asyncio.sleep(0)
     await _publish_quote(paper_broker, TEST_ASSET, 10.0)
@@ -102,7 +94,7 @@ async def test_fr_185_cost_basis_f_cb_1_weighted_update(paper_broker):
     await buy2
     pos = paper_broker._positions[TEST_ASSET]
     assert pos.shares == 200
-    assert abs(pos.price - 10.0) < 1e-6, f"F-CB-1 weighted avg should be 10.0 (两次都 10), got {pos.price}"
+    assert abs(pos.price - 10.05) < 1e-6, f"F-CB-1 weighted avg should be 10.05, got {pos.price}"
 
 
 @pytest.mark.e2e
@@ -140,83 +132,3 @@ async def test_fr_185_cost_basis_f_cb_3_full_close(paper_broker):
     await _publish_quote(paper_broker, TEST_ASSET, 11.0)
     await sell
     assert TEST_ASSET not in paper_broker._positions
-
-
-# ===== FR-360 风控事件 e2e (走完整流程) =====
-
-@pytest.mark.e2e
-@pytest.mark.e2e_paper
-async def test_fr_360_risk_event_emitted_on_strategy_sell(paper_broker):
-    """AC-FR-360: 当 RiskStrategy 触发时, risk.triggered event 含完整 payload."""
-    captured: list[dict] = []
-    msg_hub.subscribe(RISK_TRIGGERED_TOPIC, lambda d: captured.append(d))
-
-    host_broker = PaperBroker(portfolio_id="host-e2e-strat", principal=100_000, market_data=None)
-    host_broker._clock = paper_broker._clock
-    host_broker._limits[TEST_ASSET] = {"up": TEST_UP_LIMIT, "down": TEST_DOWN_LIMIT}
-    host_broker.get_prices = MagicMock(return_value={TEST_ASSET: 9.4})
-    host_broker.sell = AsyncMock(return_value=type("R", (), {"trades": []})())
-
-    from quantide.strategies.cost_stop_loss import CostStopLossStrategy
-
-    pos = MagicMock()
-    pos.price = 10.0
-    pos.avail = 100
-    pos.asset = TEST_ASSET
-    positions = {TEST_ASSET: pos}
-
-    strategy = CostStopLossStrategy(host_broker, {"k": -5.0})
-    await strategy.on_check(positions, paper_broker._clock)
-    _wait_dispatch()
-
-    assert len(captured) == 1
-    ev = captured[0]
-    assert ev["event_id"]
-    assert ev["activation_id"] == strategy.activation_id
-    assert ev["asset"] == TEST_ASSET
-    assert ev["trigger_price"] == 9.4
-    assert ev["reason"] == "cost_stop"
-
-    msg_hub.unsubscribe(RISK_TRIGGERED_TOPIC, lambda d: captured.append(d))
-
-
-# ===== 综合: 完整 buy → 持仓 cost → 触发风控 → event 流程 =====
-
-@pytest.mark.e2e
-@pytest.mark.e2e_paper
-async def test_full_lifecycle_buy_cost_basis_risk_event(paper_broker):
-    """AC-综合: 完整 lifecycle — buy @ 10 → 持仓 cost=10 → 价跌 9.4 → 风控触发 → event 发出."""
-    captured: list[dict] = []
-    msg_hub.subscribe(RISK_TRIGGERED_TOPIC, lambda d: captured.append(d))
-
-    # 1) 买入 100 @ 10
-    buy1 = asyncio.create_task(paper_broker.buy(TEST_ASSET, 100, price=10.0, timeout=1.0))
-    await asyncio.sleep(0)
-    await _publish_quote(paper_broker, TEST_ASSET, 10.0)
-    await buy1
-
-    pos = paper_broker._positions[TEST_ASSET]
-    assert pos.shares == 100
-    assert pos.price == 10.0  # F-CB-4 首次建仓
-
-    # 2) 价跌到 9.4, 风控触发 (cost_basis=10, k=-5%, threshold=9.5, 9.4<=9.5)
-    paper_broker.settle_t1()
-    paper_broker.get_prices = MagicMock(return_value={TEST_ASSET: 9.4})
-    paper_broker.sell = AsyncMock(return_value=type("R", (), {"trades": []})())
-
-    from quantide.strategies.cost_stop_loss import CostStopLossStrategy
-    strategy = CostStopLossStrategy(paper_broker, {"k": -5.0})
-    # 用真实的 position (从 broker) 而非 MagicMock
-    real_pos = paper_broker._positions[TEST_ASSET]
-    real_pos.avail = 100
-    await strategy.on_check({TEST_ASSET: real_pos}, paper_broker._clock)
-    _wait_dispatch()
-
-    assert len(captured) == 1
-    ev = captured[0]
-    assert ev["reason"] == "cost_stop"
-    assert ev["activation_id"] == strategy.activation_id
-    # 持仓 cost_basis 在风控触发时正确传递
-    assert ev.get("cost_basis") == 10.0
-
-    msg_hub.unsubscribe(RISK_TRIGGERED_TOPIC, lambda d: captured.append(d))

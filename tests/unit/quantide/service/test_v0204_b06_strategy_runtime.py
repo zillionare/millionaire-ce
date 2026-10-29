@@ -29,6 +29,7 @@ from quantide.service.strategy_runtime import (
     StrategyRuntime,
     strategy_runtime_manager,
 )
+from quantide.config.features import FeatureUnavailableError
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +206,10 @@ class _AsyncRecorder:
         kw["_method"] = "sell_amount"
         return await self._record(**kw)
 
+    async def trade_target_pct(self, **kw):
+        kw["_method"] = "trade_target_pct"
+        return await self._record(**kw)
+
     async def cancel(self, **kw):
         kw["_method"] = "cancel"
         return await self._record(**kw)
@@ -257,6 +262,16 @@ async def test_strategy_broker_proxy_sell_amount_forwards_kwargs():
     await proxy.sell_amount("000005.SZ", 8000.0, price=12.0)
     assert broker.calls[0]["_method"] == "sell_amount"
     assert broker.calls[0]["amount"] == 8000.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_broker_proxy_trade_target_pct_forwards_execution_call():
+    broker = _AsyncRecorder()
+    proxy = StrategyBrokerProxy(broker, "sid-target")
+    result = await proxy.trade_target_pct("000006.SZ", 25.0, price=12.0)
+    assert result["method"] == "trade_target_pct"
+    assert broker.calls[0]["target_pct"] == 25.0
+    assert broker.calls[0]["strategy_id"] == "sid-target"
 
 
 @pytest.mark.asyncio
@@ -555,7 +570,6 @@ def test_deploy_to_paper_full_flow_with_mocked_dependencies(monkeypatch):
             pass
 
     monkeypatch.setattr(_threading, "Thread", _NoStartThread)
-
     fake_paper = SimpleNamespace(avail=0)
     monkeypatch.setattr(
         "quantide.service.strategy_runtime.PaperBroker.create",
@@ -758,7 +772,9 @@ def test_start_strategy_runtime_direct_success_path(monkeypatch):
     assert started  # the fake thread recorded .start() invocation
 
 
-def test_start_strategy_runtime_direct_auto_generates_ids(monkeypatch):
+def test_start_strategy_runtime_direct_auto_generates_ids(
+    monkeypatch, private_edition_feature_override
+):
     """Without passing runtime_id or strategy_id, both should be auto-generated
     based on uuid.uuid4().hex[:8]."""
     import threading as _threading
@@ -1039,3 +1055,26 @@ def test_runtime_row_reads_assets_by_portfolio_id():
     row = StrategyRuntimeManager()._runtime_to_row(runtime)
     assert row["total"] == 1_000_000
     assert row["cash"] == 1_000_000
+
+
+def test_strategy_data_alarm_deduplicates_and_recovers(monkeypatch):
+    """行情缺失只告警一次，恢复时写 blocked=False 的恢复事件。"""
+    from quantide.service.strategy_runtime import StrategyRuntimeManager
+
+    manager = StrategyRuntimeManager()
+    events = []
+    monkeypatch.setattr(
+        manager, "record_system_event", lambda **kwargs: events.append(kwargs)
+    )
+    runtime = SimpleNamespace(runtime_id="paper:p1:Demo-1", strategy_name="Demo")
+
+    manager._sync_strategy_data_alarm(runtime, True)
+    manager._sync_strategy_data_alarm(runtime, True)
+    assert len(events) == 1
+    assert events[0]["blocked"] is True
+    assert events[0]["target_id"] == "strategy_data:paper:p1:Demo-1"
+
+    manager._sync_strategy_data_alarm(runtime, False)
+    assert len(events) == 2
+    assert events[1]["blocked"] is False
+    assert events[1]["title"] == "策略行情恢复"

@@ -244,7 +244,7 @@ flowchart TD
 | 部署项 | 决策 |
 | --- | --- |
 | 启动命令 | `python -m quantide.app` 或后续包装脚本 |
-| Web 监听 | init-wizard 决定 host/port/url_prefix; 默认本机监听 |
+| Web 监听 | init-wizard 决定 host/port/url_prefix; 默认本机监听 `127.0.0.1`; 显式持久化的非本机 host 保留 |
 | 单实例 | 继承 `get_pid_file_path()` + `_check_single_instance()` |
 | 数据目录 | `~/.quantide/` 作为默认候选; 最终由 init-wizard 持久化 |
 | 配置库 | `~/.quantide/app.db` 候选; 当前代码通过 `get_app_db_path()` 解析 |
@@ -301,7 +301,7 @@ A 类降级禁用实盘、仿真、转入相关入口; 回测与网关管理仍�
 
 | 项 | 决策 |
 | --- | --- |
-| 密码 | 服务端 bcrypt hash; init-wizard 创建 admin; 改密需旧密码 |
+| 密码 | 服务端 bcrypt hash; init-wizard 创建/更新 admin; 系统启动时不预置默认管理员或默认密码; 改密需旧密码 |
 | Session | 服务端 session/cookie; 不做超时自动登出, 仅主动登出清除 |
 | localStorage | 仅存 `sidebar_collapsed`, `display_hidden_accounts`, filter, runtime defaults; 禁止密码/session token/api key |
 | CSRF | 单用户本地部署且无跨站业务入口; 不额外引入 CSRF 框架 |

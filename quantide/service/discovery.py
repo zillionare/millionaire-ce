@@ -1,5 +1,7 @@
 """策略扫描与内置示例管理 (v0.2 spec)"""
 
+# ruff: noqa: D205
+
 import importlib
 import inspect
 import json

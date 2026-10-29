@@ -539,7 +539,6 @@ async def test_gateway_broker_no_double_qfq_adjustment_on_forming_merge(monkeypa
     import polars as pl
 
     from quantide.core.runtime import gateway_broker as _gb_mod
-    from quantide.service.livequote import live_quote
 
     dates = [datetime.date(2026, 1, i) for i in range(1, 6)]
     hist = pl.DataFrame(
@@ -571,7 +570,7 @@ async def test_gateway_broker_no_double_qfq_adjustment_on_forming_merge(monkeypa
     adapter = GatewayBrokerAdapter(client)
     wrapper = GatewayBrokerWrapper(adapter)
     wrapper.set_clock(datetime.datetime(2026, 1, 5, 15, 0))
-    live_quote._daily_bars["000001.SZ"] = {
+    forming_bar = {
         "asset": "000001.SZ",
         "frame": "1d",
         "dt": datetime.date(2026, 1, 5),
@@ -582,12 +581,14 @@ async def test_gateway_broker_no_double_qfq_adjustment_on_forming_merge(monkeypa
         "volume": 0.0,
         "amount": 0.0,
     }
-    try:
-        result = wrapper.get_history(
-            "000001.SZ", count=6, end_dt=datetime.datetime(2026, 1, 5, 15, 0)
-        )
-    finally:
-        live_quote._daily_bars.pop("000001.SZ", None)
+    monkeypatch.setattr(
+        _gb_mod.market_data_hub,
+        "get_daily_bar",
+        lambda asset: forming_bar if asset == "000001.SZ" else None,
+    )
+    result = wrapper.get_history(
+        "000001.SZ", count=6, end_dt=datetime.datetime(2026, 1, 5, 15, 0)
+    )
 
     expected_hist_close = 10.0 / 1.10
     closes = result["close"].to_list()

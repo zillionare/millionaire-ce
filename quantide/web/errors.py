@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class ErrorCode(str, Enum):
+class ErrorCode(StrEnum):
     """业务错误码 (interfaces.md §1.2)."""
 
     AUTH_REQUIRED = "AUTH_REQUIRED"

@@ -166,14 +166,23 @@ class MarketDataHub:
 
     def stop(self) -> None:
         """停止订阅。"""
-        if not self._running:
-            return
-        try:
-            msg_hub.unsubscribe(Topics.QUOTES_ALL.value, self._on_quotes)
-            msg_hub.unsubscribe(Topics.STOCK_LIMIT.value, self._on_limits)
-        except Exception:  # pragma: no cover - 退订失败忽略
-            pass
+        if self._running:
+            try:
+                msg_hub.unsubscribe(Topics.QUOTES_ALL.value, self._on_quotes)
+                msg_hub.unsubscribe(Topics.STOCK_LIMIT.value, self._on_limits)
+            except Exception:  # pragma: no cover - 退订失败忽略
+                pass
         self._running = False
+        if self._stream_queue is not None:
+            try:
+                self._stream_queue.put_nowait(_STREAM_STOP)
+            except Exception:  # pragma: no cover - queue teardown race
+                pass
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the hub is subscribed to the quote bus."""
+        return self._running
 
     # ------------------------------------------------------------------
     # 订阅
@@ -272,6 +281,47 @@ class MarketDataHub:
         with self._lock:
             return self._limits.get(str(symbol), (0.0, 0.0))
 
+    def get_price_limits(self, symbol: str) -> tuple[float, float]:
+        """Compatibility spelling used by the bars and broker ports."""
+        return self.get_limits(symbol)
+
+    def get_quote(self, symbol: str) -> dict[str, Any] | None:
+        """Return a quote-shaped view of the latest hub snapshot.
+
+        This is a direct MarketDataHub view for older consumers; it does not
+        maintain a second quote cache or source.
+        """
+        snapshot = self.snapshot([symbol]).get(str(symbol))
+        if snapshot is None:
+            return None
+        return {
+            "price": snapshot.price,
+            "lastPrice": snapshot.price,
+            "open": snapshot.open,
+            "high": snapshot.high,
+            "low": snapshot.low,
+            "volume": snapshot.volume,
+            "amount": snapshot.amount,
+            "time": snapshot.ts.timestamp() * 1000 if snapshot.ts else None,
+        }
+
+    def get_daily_bar(self, symbol: str) -> dict[str, Any] | None:
+        """Return the latest snapshot in the bar-shaped compatibility format."""
+        snapshot = self.snapshot([symbol]).get(str(symbol))
+        if snapshot is None:
+            return None
+        return {
+            "asset": str(symbol),
+            "frame": "1d",
+            "dt": (snapshot.ts or datetime.datetime.now()).date(),
+            "open": snapshot.open,
+            "high": snapshot.high,
+            "low": snapshot.low,
+            "close": snapshot.price,
+            "volume": snapshot.volume,
+            "amount": snapshot.amount,
+        }
+
     def is_st(self, symbol: str) -> bool:
         """按发布者提供的证券名称识别 ST（Tushare 数据缺失时的备份）。"""
         with self._lock:
@@ -300,11 +350,15 @@ class MarketDataHub:
         self._stream_loop = asyncio.get_running_loop()
         try:
             while True:
-                yield await queue.get()
+                event = await queue.get()
+                if event is _STREAM_STOP:
+                    return
+                yield event
         finally:
             self._stream_queue = None
             self._stream_loop = None
 
 
 #: 全局单例
+_STREAM_STOP = object()
 market_data_hub = MarketDataHub()

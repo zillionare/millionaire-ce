@@ -195,7 +195,7 @@ class AuthRoutes:
                         if message and hasattr(original_response, "__iter__"):
                             response_list = list(original_response)
                             # Find Container and insert message after header
-                            for i, item in enumerate(response_list):
+                            for _i, item in enumerate(response_list):
                                 if hasattr(item, "children"):
                                     children = list(item.children)
                                     children.insert(1, message)  # Insert after header
@@ -357,7 +357,7 @@ class AuthRoutes:
             @rt(f"{prefix}/forgot", methods=["POST"])
             async def forgot_submit(req):
                 form = await req.form()
-                email = form.get("email", "").strip()
+                form.get("email", "").strip()
 
                 # TODO: Implement actual password reset logic
                 # For now, just show success message

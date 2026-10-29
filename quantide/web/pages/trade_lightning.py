@@ -14,10 +14,11 @@ from monsterui.all import *
 from starlette.responses import HTMLResponse
 
 from quantide.config.branding import get_branding
+from quantide.config.features import supports_live_trading
 from quantide.core.enums import BrokerKind
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.stocks import stock_list
-from quantide.service.livequote import live_quote
+from quantide.service.market_data_hub import market_data_hub
 from quantide.service.trade_lightning import (
     TradeLightningEntry,
     add_trade_lightning_entry,
@@ -224,6 +225,11 @@ def _reference_price_panel() -> Any:
         cls="flex gap-1 mb-2",
         id="reference-price-panel",
     )
+
+
+def TradeReferencePanel() -> Any:
+    """渲染交易页参考价格区，与闪电单控件保持独立。"""
+    return _reference_price_panel()
 
 
 def _plus_circle_icon() -> Any:
@@ -485,7 +491,6 @@ def render_trade_lightning_panel(
 def TradeLightningSidebar(portfolio_id: str) -> Any:
     """渲染交易页右侧闪电单区域。"""
     return Div(
-        _reference_price_panel(),
         render_trade_lightning_panel(portfolio_id),
         Div(id="trade-lightning-modal-container"),
         cls="flex-[0.95] space-y-0",
@@ -1085,7 +1090,7 @@ def _resolve_lightning_price(asset: str, price_ref: str) -> float:
         return round(current * (1 + pct), 2)
 
     if price_ref == "current":
-        quote = live_quote.get_quote(asset) if live_quote.is_running else None
+        quote = market_data_hub.get_quote(asset) if market_data_hub.is_running else None
         if quote:
             for key in ("price", "lastPrice", "close"):
                 try:
@@ -1154,7 +1159,10 @@ def _resolve_lightning_broker(req, portfolio_id: str):
         except Exception:
             return None
     try:
-        for kind in (BrokerKind.QMT, BrokerKind.SIMULATION):
+        kinds = (BrokerKind.SIMULATION,)
+        if supports_live_trading():
+            kinds = (BrokerKind.QMT, BrokerKind.SIMULATION)
+        for kind in kinds:
             for info in reg.list_by_kind(kind):
                 if info.get("id") == portfolio_id:
                     return reg.get(kind, portfolio_id)

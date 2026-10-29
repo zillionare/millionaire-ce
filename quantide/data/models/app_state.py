@@ -5,7 +5,12 @@
 
 import datetime
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from quantide.config.settings import Settings
+
+from quantide.config.features import supports_live_trading
 from quantide.core.init_wizard_steps import WIZARD_FINAL_STEP
 from quantide.data.models.base import Entity
 
@@ -44,8 +49,8 @@ class AppState(Entity):
     app_home: str = ""
     """应用 home 目录"""
 
-    app_host: str = "0.0.0.0"
-    """应用监听地址"""
+    app_host: str = "127.0.0.1"
+    """应用监听地址（默认仅本机）"""
 
     app_port: int = 8130
     """应用监听端口"""
@@ -81,13 +86,13 @@ class AppState(Entity):
     gateway_enabled: bool = False
     """是否启用 gateway（未启用则禁用仿真与实盘）"""
 
-    livequote_mode: str = "gateway"
-    """实时行情模式"""
-
     runtime_mode: str = "live"
     """运行模式"""
 
     runtime_broker_adapter: str = ""
+    # Deprecated compatibility field; quote data is sourced only by
+    # MarketDataHub.
+    livequote_mode: str = "gateway"
     """运行时交易适配器"""
 
     # ========== 通知配置（运行时使用，不由 init wizard 管理） ==========
@@ -237,7 +242,7 @@ class AppState(Entity):
         Returns:
             bool: True 表示可以使用实盘/仿真功能
         """
-        return self.is_fully_initialized and self.gateway_enabled
+        return supports_live_trading() and self.is_fully_initialized and self.gateway_enabled
 
     def can_use_backtest(self) -> bool:
         """检查是否可以使用回测功能

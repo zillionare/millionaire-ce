@@ -3,15 +3,14 @@
 [tool.poetry]
 name = "millionaire"
 version = "0.1.0"
-homepage = "https://github.com/zillionare/millionaire"
-description = "Millionaire — Zillionare's flagship quantitative trading platform."
-authors = ["aaron yang <aaron_yang@jieyu.ai>"]
+description = "Millionaire Community Edition quantitative trading platform."
+authors = ["Aaron Yang <aaron_yang@jieyu.ai>"]
 readme = "README.md"
 license = "MIT"
 classifiers=[
     'Development Status :: 2 - Pre-Alpha',
     'Intended Audience :: Developers',
-    'License :: Other/Proprietary License',
+    'License :: OSI Approved :: MIT License',
     'Natural Language :: English',
     'Programming Language :: Python :: 3',
     'Programming Language :: Python :: 3.13'
@@ -19,7 +18,18 @@ classifiers=[
 
 packages = [
     { include = "quantide" },
-    { include = "tests", format = "sdist" },
+]
+
+# Tests, notebooks, coverage output, and repository-only engineering notes are
+# useful in the source tree but are not part of the CE release artifacts. In
+# particular, this prevents old private risk IDs in historical tests from
+# entering an sdist while keeping those tests available to repository users.
+exclude = [
+    "tests/**",
+    "notebooks/**",
+    "htmlcov/**",
+    ".dev/**",
+    ".louke/**",
 ]
 
 [tool.poetry.dependencies]
@@ -44,6 +54,12 @@ cffi = ">=1.17.1"
 msgpack = "^1.1.2"
 tushare = "^1.4.25"
 websockets = "^15.0.1"
+uvicorn = "^0.41.0"
+lightgbm = { version = "^4.6.0", optional = true }
+baostock = { version = "^0.9.4", optional = true }
+
+[tool.poetry.extras]
+ml30m = ["lightgbm", "baostock"]
 
 [[tool.poetry.source]]
 name = "tsinghua"
@@ -94,6 +110,9 @@ ignore = [
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
 
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*.ipynb" = ["B007", "B018", "D200", "D205", "D402", "E402", "F811", "F821", "UP031"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = [
@@ -102,6 +121,7 @@ markers = [
     "e2e_paper: L1 paper E2E (test-plan §5.3, §6.3.1) — 默认 CI 跑 (虚拟时钟 + 公共 support)",
     "e2e_gateway: L2 网关契约仿真 E2E (test-plan §5.3, §6.3.2) — 默认 CI 跑 (假网关 + 公共 support)",
     "e2e_live_smoke: L3 实盘路径冒烟 E2E (test-plan §5.3, §6.3.3) — **默认 deselect**, 仅在 Windows+QMT 真机环境跑",
+    "private_only: private-edition contract; run only with an explicit zillionaire edition override",
 ]
 
 [dependency-groups]

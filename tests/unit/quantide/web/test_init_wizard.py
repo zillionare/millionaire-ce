@@ -8,6 +8,12 @@ from quantide.data.models.app_state import AppState
 from quantide.web.pages import init_wizard as init_wizard_page
 
 
+@pytest.fixture(autouse=True)
+def private_edition_wizard_cases(monkeypatch):
+    """Keep legacy gateway-form cases exercising the shared private path."""
+    monkeypatch.setattr(init_wizard_page, "supports_live_trading", lambda: True)
+
+
 class FakeRequest:
     def __init__(self, form_data, query_params=None):
         self._form_data = form_data

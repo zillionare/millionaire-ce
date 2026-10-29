@@ -18,6 +18,8 @@ from tests.e2e.support.gateway_stub import (
     running_gateway_stub,
 )
 
+pytestmark = pytest.mark.private_only
+
 
 def test_gateway_stub_keeps_prefixed_ping_compatibility() -> None:
     with running_gateway_stub(prefix="/qmt") as stub:

@@ -25,11 +25,15 @@ from quantide.core.errors import (
 from quantide.data.sqlite import db
 from quantide.service.sim_broker import PaperBroker
 
+AC_TEST_DATE = datetime.datetime(2024, 6, 3, 9, 30, 0)
+
 
 @pytest.fixture
 def paper_broker() -> PaperBroker:
     db.init(":memory:")
-    return PaperBroker(portfolio_id="paper-fr190", principal=100000.0)
+    broker = PaperBroker(portfolio_id="paper-fr190", principal=100000.0)
+    broker.set_clock(AC_TEST_DATE)
+    return broker
 
 
 @pytest.mark.asyncio

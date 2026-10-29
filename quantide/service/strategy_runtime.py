@@ -9,15 +9,21 @@ from typing import Any
 
 from loguru import logger
 
+from quantide.config.features import require_live_trading, supports_live_trading
 from quantide.config.paths import get_backtest_log_path, get_strategy_runtime_state_path
 from quantide.config.settings import get_cheat_on_close_time
 from quantide.core.enums import BrokerKind, FrameType
+from quantide.core.ports.broker import ExecutionResult
 from quantide.core.runtime import RuntimeContext
 from quantide.core.runtime.registration import register_port_backed_broker
+from quantide.data.models.calendar import calendar
+from quantide.data.models.daily_bars import daily_bars
 from quantide.data.sqlite import db
 from quantide.service.discovery import strategy_loader
 from quantide.service.registry import BrokerRegistry
+from quantide.service.risk_programs import build_live_risk_strategies
 from quantide.service.sim_broker import PaperBroker
+from quantide.service.strategy_tracking import tracking_store
 
 
 def _optional_float(value: Any) -> float | None:
@@ -45,6 +51,7 @@ class StrategyRuntime:
     account_kind: str
     status: str
     config: dict[str, Any]
+    interval: str = "1d"
     source_backtest_portfolio_id: str = ""
     symbols: list[str] = field(default_factory=list)
     principal: float = 0.0
@@ -84,8 +91,21 @@ class StrategyBrokerProxy:
     def __getattr__(self, item):
         return getattr(self._broker, item)
 
-    async def buy(self, asset, shares, price=0, order_time=None, timeout=0.5):
+    async def buy(self, asset, shares, price=0, order_time=None, timeout=0.5, **kwargs):
+        kwargs.update(
+            asset=asset,
+            shares=shares,
+            price=price,
+            order_time=order_time,
+            timeout=timeout,
+            strategy_id=self._strategy_id,
+        )
         return await self._broker.buy(
+            **kwargs,
+        )
+
+    async def sell(self, asset, shares, price=0, order_time=None, timeout=0.5, **kwargs):
+        kwargs.update(
             asset=asset,
             shares=shares,
             price=price,
@@ -93,19 +113,25 @@ class StrategyBrokerProxy:
             timeout=timeout,
             strategy_id=self._strategy_id,
         )
-
-    async def sell(self, asset, shares, price=0, order_time=None, timeout=0.5):
         return await self._broker.sell(
+            **kwargs,
+        )
+
+    async def buy_percent(self, asset, percent, price=0, order_time=None, timeout=0.5, **kwargs):
+        kwargs.update(
             asset=asset,
-            shares=shares,
+            percent=percent,
             price=price,
             order_time=order_time,
             timeout=timeout,
             strategy_id=self._strategy_id,
         )
-
-    async def buy_percent(self, asset, percent, price=0, order_time=None, timeout=0.5):
         return await self._broker.buy_percent(
+            **kwargs,
+        )
+
+    async def sell_percent(self, asset, percent, price=0, order_time=None, timeout=0.5, **kwargs):
+        kwargs.update(
             asset=asset,
             percent=percent,
             price=price,
@@ -113,29 +139,25 @@ class StrategyBrokerProxy:
             timeout=timeout,
             strategy_id=self._strategy_id,
         )
-
-    async def sell_percent(self, asset, percent, price=0, order_time=None, timeout=0.5):
         return await self._broker.sell_percent(
+            **kwargs,
+        )
+
+    async def buy_amount(self, asset, amount, price=0, order_time=None, timeout=0.5, **kwargs):
+        kwargs.update(
             asset=asset,
-            percent=percent,
+            amount=amount,
             price=price,
             order_time=order_time,
             timeout=timeout,
             strategy_id=self._strategy_id,
         )
-
-    async def buy_amount(self, asset, amount, price=0, order_time=None, timeout=0.5):
         return await self._broker.buy_amount(
-            asset=asset,
-            amount=amount,
-            price=price,
-            order_time=order_time,
-            timeout=timeout,
-            strategy_id=self._strategy_id,
+            **kwargs,
         )
 
-    async def sell_amount(self, asset, amount, price=0, order_time=None, timeout=0.5):
-        return await self._broker.sell_amount(
+    async def sell_amount(self, asset, amount, price=0, order_time=None, timeout=0.5, **kwargs):
+        kwargs.update(
             asset=asset,
             amount=amount,
             price=price,
@@ -143,6 +165,172 @@ class StrategyBrokerProxy:
             timeout=timeout,
             strategy_id=self._strategy_id,
         )
+        return await self._broker.sell_amount(
+            **kwargs,
+        )
+
+    async def trade_target_pct(
+        self, asset, target_pct, price=0, order_time=None, timeout=0.5, **kwargs
+    ):
+        kwargs.update(
+            asset=asset,
+            target_pct=target_pct,
+            price=price,
+            order_time=order_time,
+            timeout=timeout,
+            strategy_id=self._strategy_id,
+        )
+        return await self._broker.trade_target_pct(**kwargs)
+
+
+class NextOpenBrokerProxy:
+    """Turn strategy orders into durable next-trading-day-open intents."""
+
+    _ORDER_METHODS = {
+        "buy",
+        "sell",
+        "buy_percent",
+        "sell_percent",
+        "buy_amount",
+        "sell_amount",
+        "trade_target_pct",
+    }
+
+    def __init__(
+        self,
+        broker: Any,
+        *,
+        runtime_id: str,
+        portfolio_id: str,
+        strategy_id: str,
+        signal_date: datetime.date,
+    ) -> None:
+        self._broker = broker
+        self._runtime_id = runtime_id
+        self._portfolio_id = portfolio_id
+        self._strategy_id = strategy_id
+        self._signal_date = signal_date
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._broker, item)
+
+    def _target_date(self) -> datetime.date:
+        try:
+            return calendar.day_shift(self._signal_date, 1)
+        except Exception:
+            return self._signal_date + datetime.timedelta(days=1)
+
+    def _enqueue(self, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]):
+        key_payload = {
+            "method": method,
+            "args": list(args),
+            # order_time identifies when the caller happened to retry, not
+            # the order intent.  Excluding it makes persistence idempotent
+            # for keyword and positional calls alike.
+            "kwargs": {key: value for key, value in kwargs.items() if key != "order_time"},
+            "signal_date": self._signal_date.isoformat(),
+        }
+        intent_key = json.dumps(key_payload, sort_keys=True, default=str)
+        tracking_store.enqueue_next_open_intent(
+            runtime_id=self._runtime_id,
+            portfolio_id=self._portfolio_id,
+            strategy_id=self._strategy_id,
+            signal_date=self._signal_date,
+            target_date=self._target_date(),
+            method=method,
+            args=list(args),
+            kwargs=kwargs,
+            intent_key=intent_key,
+        )
+        return ExecutionResult.empty()
+
+    def __getattribute__(self, item: str) -> Any:
+        if item in object.__getattribute__(self, "_ORDER_METHODS"):
+            async def queued(*args, **kwargs):
+                return object.__getattribute__(self, "_enqueue")(item, args, kwargs)
+
+            return queued
+        return object.__getattribute__(self, item)
+
+
+class NextOpenBarBrokerProxy:
+    """Persist 30m strategy orders until the next eligible bar boundary."""
+
+    _ORDER_METHODS = {
+        "buy",
+        "sell",
+        "buy_percent",
+        "sell_percent",
+        "buy_amount",
+        "sell_amount",
+        "trade_target_pct",
+    }
+
+    def __init__(
+        self,
+        broker: Any,
+        *,
+        runtime_id: str,
+        portfolio_id: str,
+        strategy_id: str,
+        signal_bar: datetime.datetime,
+    ) -> None:
+        self._broker = broker
+        self._runtime_id = runtime_id
+        self._portfolio_id = portfolio_id
+        self._strategy_id = strategy_id
+        self._signal_bar = signal_bar.replace(tzinfo=None)
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._broker, item)
+
+    def _target_bar(self) -> datetime.datetime:
+        try:
+            next_completed = calendar.shift(self._signal_bar, 1, FrameType.MIN30)
+        except Exception as exc:
+            raise RuntimeError(
+                "无法确定 30m next_open 的下一个交易时段，拒绝以内存队列下单"
+            ) from exc
+        if not isinstance(next_completed, datetime.datetime):
+            raise RuntimeError("30m next_open target bar 无效，拒绝下单")
+        # Calendar minute frames are bar-end timestamps: 13:30 is the end of
+        # the first afternoon bar, whose executable next-open is 13:00.
+        return (next_completed - datetime.timedelta(minutes=30)).replace(tzinfo=None)
+
+    def _enqueue(self, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]):
+        target_bar = self._target_bar()
+        key_payload = {
+            "interval": "30m",
+            "method": method,
+            "args": list(args),
+            # order_time identifies a retry, not the order intent.
+            "kwargs": {key: value for key, value in kwargs.items() if key != "order_time"},
+            "signal_bar": self._signal_bar.isoformat(timespec="seconds"),
+            "target_bar": target_bar.isoformat(timespec="seconds"),
+        }
+        intent_key = json.dumps(key_payload, sort_keys=True, default=str)
+        tracking_store.enqueue_next_open_intent(
+            runtime_id=self._runtime_id,
+            portfolio_id=self._portfolio_id,
+            strategy_id=self._strategy_id,
+            signal_date=self._signal_bar.date(),
+            target_date=target_bar.date(),
+            signal_bar=self._signal_bar,
+            target_bar=target_bar,
+            method=method,
+            args=list(args),
+            kwargs=kwargs,
+            intent_key=intent_key,
+        )
+        return ExecutionResult.empty()
+
+    def __getattribute__(self, item: str) -> Any:
+        if item in object.__getattribute__(self, "_ORDER_METHODS"):
+            async def queued(*args, **kwargs):
+                return object.__getattribute__(self, "_enqueue")(item, args, kwargs)
+
+            return queued
+        return object.__getattribute__(self, item)
 
 
 class StrategyRuntimeManager:
@@ -156,6 +344,8 @@ class StrategyRuntimeManager:
         self._blocked_accounts: dict[str, dict[str, Any]] = {}
         self._blocked_strategies: dict[str, dict[str, Any]] = {}
         self._risk_events: list[dict[str, Any]] = []
+        #: 已发出“策略行情缺失”告警的 runtime，用于恢复时消警
+        self._data_missing_alarms: set[str] = set()
         self._runtime: RuntimeContext | None = None
         self._registry: BrokerRegistry | None = None
         self._adapters: Any = None
@@ -202,6 +392,24 @@ class StrategyRuntimeManager:
         initial_cash: float,
         save_logs: bool = False,
     ) -> None:
+        if interval not in {"1d", "30m"}:
+            raise ValueError(f"不支持的策略周期: {interval!r}")
+        strategy_cls = strategy_loader.load_from_cache().get(strategy_name)
+        config = dict(config or {})
+        if "risk_programs" in config:
+            from quantide.service.risk_programs import normalize_risk_programs
+
+            config["risk_programs"] = normalize_risk_programs(
+                config["risk_programs"],
+                host_strategy_cls=strategy_cls,
+                frame_type=interval,
+            )
+        if strategy_cls is not None:
+            from quantide.service.runner import BacktestRunner
+
+            BacktestRunner.validate_strategy_interval(
+                strategy_cls, config, interval
+            )
         cheat = bool(config.get("cheat_on_close", False))
         cheat_tm = get_cheat_on_close_time() if cheat else ""
         run = BacktestRun(
@@ -254,6 +462,14 @@ class StrategyRuntimeManager:
                     self._save_specs()
             if portfolio_id in self._backtest_runtimes:
                 del self._backtest_runtimes[portfolio_id]
+        if error:
+            self.record_system_event(
+                title="回测运行失败",
+                message=f"回测 {portfolio_id} 失败：{error}",
+                severity="critical",
+                blocked=True,
+                target_id=f"backtest:{portfolio_id}",
+            )
 
     def get_backtest_run(self, portfolio_id: str) -> BacktestRun | None:
         with self._lock:
@@ -292,10 +508,13 @@ class StrategyRuntimeManager:
         config: dict[str, Any] | None = None,
     ) -> StrategyRuntime:
         run = self._resolve_backtest_run(portfolio_id)
+        if run.status == "failed":
+            raise RuntimeError(f"回测不可投放：{run.error or '回测已失败'}")
         existing = self.get_active_backtest_deployment(run.portfolio_id, "paper")
         if existing is not None:
             return existing
         effective_config = config if config is not None else run.config
+        self._validate_config_interval(effective_config, run.interval)
         account_id = f"paper-{run.strategy_name}-{uuid.uuid4().hex[:8]}"
         config = effective_config or {}
         broker = PaperBroker.create(
@@ -344,11 +563,15 @@ class StrategyRuntimeManager:
         market_data: Any,
         config: dict[str, Any] | None = None,
     ) -> StrategyRuntime:
+        require_live_trading()
         run = self._resolve_backtest_run(portfolio_id)
+        if run.status == "failed":
+            raise RuntimeError(f"回测不可投放：{run.error or '回测已失败'}")
         existing = self.get_active_backtest_deployment(run.portfolio_id, "live")
         if existing is not None:
             return existing
         effective_config = config if config is not None else run.config
+        self._validate_config_interval(effective_config, run.interval)
         broker = self._gateway_broker
         account_kind = "gateway"
         account_id = "gateway"
@@ -380,6 +603,13 @@ class StrategyRuntimeManager:
             if spec is not None:
                 spec["status"] = "stopped"
                 self._save_specs()
+        self._data_missing_alarms.discard(f"strategy_data:{runtime_id}")
+        try:
+            from quantide.service.strategy_tasks import strategy_task_manager
+
+            strategy_task_manager.detach(runtime_id)
+        except Exception as exc:
+            logger.warning("策略任务卸载失败 {}: {}", runtime_id, exc)
 
     def start_strategy_runtime(self, runtime_id: str) -> StrategyRuntime:
         with self._lock:
@@ -621,6 +851,11 @@ class StrategyRuntimeManager:
         rows.sort(key=lambda x: (x["mode"], x["portfolio_id"], x["strategy_id"]))
         return rows
 
+    def get_runtime(self, runtime_id: str) -> StrategyRuntime | None:
+        """按 runtime_id 获取运行时实例。"""
+        with self._lock:
+            return self._strategy_runtimes.get(runtime_id)
+
     def backtest_deployment_modes(self, portfolio_id: str) -> dict[str, dict[str, Any]]:
         """返回某个回测当前活跃的投放模式。
 
@@ -746,21 +981,66 @@ class StrategyRuntimeManager:
             config = dict(getattr(strategy_cls, "PARAMS", {})) if strategy_cls else {}
             cheat = bool(config.get("cheat_on_close", False))
             cheat_tm = get_cheat_on_close_time() if cheat else ""
+        if spec is not None:
+            if "interval" not in spec or not str(spec.get("interval") or "").strip():
+                raise RuntimeError("无法验证持久化策略周期：记录缺少 interval")
+            resolved_interval = str(spec["interval"]).strip().lower()
+        elif strategy_cls is not None:
+            try:
+                from quantide.service.runner import BacktestRunner
+
+                resolved_interval = BacktestRunner.strategy_interval(strategy_cls)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"无法验证策略 {strategy_name!r} 的周期声明"
+                ) from exc
+        else:
+            raise RuntimeError(f"无法验证策略 {strategy_name!r} 的周期声明")
+        if resolved_interval not in {"1d", "30m"}:
+            raise RuntimeError(
+                f"无法验证持久化策略周期: {resolved_interval!r}"
+            )
         return BacktestRun(
             runtime_id=runtime_id,
             portfolio_id=portfolio_id,
             strategy_name=strategy_name,
             config=config,
-            interval="1m",
+            interval=resolved_interval,
             start_date=str(portfolio.start),
             end_date=str(portfolio.end),
             initial_cash=0,
-            status="finished",
+            status=str(spec.get("status") or "finished") if spec is not None else "finished",
+            error=str(spec.get("error") or "") if spec is not None else "",
             save_logs=get_backtest_log_path(portfolio_id).exists(),
             log_path=str(get_backtest_log_path(portfolio_id)),
             cheat_on_close=cheat,
             cheat_on_close_time=cheat_tm,
         )
+
+    @staticmethod
+    def _validate_config_interval(config: dict[str, Any] | None, interval: str) -> None:
+        configured = (config or {}).get("bar_interval")
+        if configured is not None and str(configured).strip().lower() != interval:
+            raise ValueError(
+                f"bar_interval override {configured!r} conflicts with persisted strategy interval {interval!r}"
+            )
+
+    def validate_runtime_interval(
+        self, spec: dict[str, Any], strategy_cls: Any | None = None
+    ) -> str:
+        persisted = str(spec.get("interval") or "").strip().lower()
+        if persisted not in {"1d", "30m"}:
+            raise ValueError(f"无法验证持久化策略周期: {persisted!r}")
+        self._validate_config_interval(spec.get("config") or {}, persisted)
+        if strategy_cls is not None:
+            from quantide.service.runner import BacktestRunner
+
+            declared = BacktestRunner.strategy_interval(strategy_cls)
+            if declared != persisted:
+                raise ValueError(
+                    f"persisted interval {persisted!r} conflicts with strategy declaration {declared!r}"
+                )
+        return persisted
 
     def _start_strategy_runtime(
         self,
@@ -778,8 +1058,15 @@ class StrategyRuntimeManager:
         strategy_id: str | None = None,
         persist: bool = True,
     ) -> StrategyRuntime:
+        if mode == "live":
+            require_live_trading()
         strategy_id = strategy_id or f"{strategy_name}-{uuid.uuid4().hex[:8]}"
         runtime_id = runtime_id or f"{mode}:{portfolio_id}:{strategy_id}"
+        strategy_cls = strategy_loader.load_from_cache().get(strategy_name)
+        if strategy_cls is not None:
+            from quantide.service.runner import BacktestRunner
+
+            BacktestRunner.validate_strategy_interval(strategy_cls, config, interval)
         account_key = self._account_key(mode, portfolio_id)
         account_block = self._blocked_accounts.get(account_key)
         if account_block is not None:
@@ -815,6 +1102,7 @@ class StrategyRuntimeManager:
             account_kind=account_kind,
             status="running",
             config=config,
+            interval=interval,
             symbols=symbols,
             principal=principal,
             stop_event=stop_event,
@@ -844,6 +1132,12 @@ class StrategyRuntimeManager:
                     "interval": interval,
                 }
                 self._save_specs()
+        try:
+            from quantide.service.strategy_tasks import strategy_task_manager
+
+            strategy_task_manager.attach(runtime)
+        except Exception as exc:
+            logger.warning("策略任务挂载失败 {}: {}", runtime_id, exc)
         runtime.thread.start()
         return runtime
 
@@ -868,6 +1162,14 @@ class StrategyRuntimeManager:
             except Exception:
                 strategy_cls = None
             cheat_on_close = bool(getattr(strategy_cls, "cheat_on_close", False))
+        if str(config.get("fill_timing", "")).strip().lower() in {
+            "next_open",
+            "open",
+        }:
+            # The runtime-owned durable queue already controls the delay.  The
+            # gateway must submit when the queue is drained rather than put
+            # the same order into its legacy in-memory deferred queue again.
+            cheat_on_close = True
         live_execution_window = str(config.get("live_execution_window", "auction"))
         live_execution_slippage = float(config.get("live_execution_slippage", 0.001))
         setter = getattr(runtime.broker, "set_strategy_runtime_config", None)
@@ -883,26 +1185,65 @@ class StrategyRuntimeManager:
         strategies = strategy_loader.load_from_cache()
         strategy_cls = strategies.get(runtime.strategy_name)
         if strategy_cls is None:
-            runtime.status = "failed"
-            runtime.error = f"策略不存在: {runtime.strategy_name}"
-            runtime.updated_at = datetime.datetime.now()
+            self._mark_runtime_failed(
+                runtime, RuntimeError(f"策略不存在: {runtime.strategy_name}")
+            )
             return
-        if runtime.mode == "live":
-            self._apply_live_broker_config(runtime)
+        try:
+            if interval in {"1d", "30m"} or isinstance(strategy_cls, type):
+                self.validate_runtime_interval(
+                    {"interval": interval, "config": runtime.config}, strategy_cls
+                )
+            if runtime.mode == "live":
+                self._apply_live_broker_config(runtime)
+        except Exception as exc:
+            self._mark_runtime_failed(runtime, exc)
+            logger.exception("strategy runtime failed during preflight: {}", exc)
+            return
         broker = runtime.broker
         if runtime.mode == "live":
             broker = StrategyBrokerProxy(runtime.broker, runtime.strategy_id)
-        strategy = strategy_cls(broker, runtime.config)
-        risk_strategy = self._build_live_risk_strategy(
-            strategy_cls, broker, runtime.config
+        strategy: Any = None
+        risk_strategies: list[Any] = []
+        try:
+            strategy = strategy_cls(broker, runtime.config)
+            frame = FrameType.MIN30 if interval == "30m" else FrameType.DAY
+            risk_strategies = self._build_live_risk_strategies(
+                strategy_cls, broker, runtime.config, frame_type=frame
+            )
+        except Exception as exc:
+            self._mark_runtime_failed(runtime, exc)
+            logger.exception("strategy runtime failed during initialization: {}", exc)
+            return
+        fill_timing_value = (runtime.config or {}).get(
+            "fill_timing", getattr(strategy_cls, "fill_timing", None)
         )
-        frame = FrameType.MIN1 if interval == "1m" else FrameType.DAY
+        if fill_timing_value is None:
+            defaults = getattr(strategy_cls, "default_config", None)
+            if callable(defaults):
+                fill_timing_value = defaults().get("fill_timing")
+        fill_timing = str(fill_timing_value or "").strip().lower()
+        daily_next_open = interval == "1d" and fill_timing in {"next_open", "open"}
         strategy.interval = frame.value
         risk_day: datetime.date | None = None
+        last_daily_decision: datetime.date | None = None
+        last_30m_bar: datetime.datetime | None = None
+        next_open_30m = interval == "30m" and fill_timing in {"next_open", "open"}
+        with self._lock:
+            persisted_decision = str(
+                (self._runtime_specs.get(runtime.runtime_id) or {}).get(
+                    "last_decision_date", ""
+                )
+            )
+        if persisted_decision:
+            try:
+                last_daily_decision = datetime.date.fromisoformat(persisted_decision)
+            except ValueError:
+                last_daily_decision = None
         try:
             await strategy.init()
             await strategy.on_start()
-            if risk_strategy is not None:
+            for risk_strategy in risk_strategies:
                 await risk_strategy.init()
                 await risk_strategy.on_start()
             while runtime.stop_event is not None and not runtime.stop_event.is_set():
@@ -914,65 +1255,325 @@ class StrategyRuntimeManager:
                 # the strategy pulls its data through ``get_bars``/``get_history``.
                 self._build_quotes(runtime.symbols, market_data)
                 strategy._current_time = now
-                if risk_strategy is not None and risk_day != now.date():
+                if risk_strategies and risk_day != now.date():
                     if risk_day is not None:
-                        await risk_strategy.on_day_close(now)
-                    await risk_strategy.on_day_open(now)
+                        for risk_strategy in risk_strategies:
+                            await risk_strategy.on_day_close(now)
+                    for risk_strategy in risk_strategies:
+                        await risk_strategy.on_day_open(now)
                     risk_day = now.date()
-                # 日频策略按信号日去重（策略内部保证每个信号日只决策一次），
-                # 因此这里可以持续调用；集合竞价窗口由撮合侧按竞价价处理。
-                await strategy.on_bar(now)
-                if risk_strategy is not None:
+                # Risk programs must get the first chance to reduce an open
+                # position.  The host may deliberately repurchase on the same
+                # bar when allow_same_bar_repurchase is true.
+                for risk_strategy in risk_strategies:
                     await risk_strategy.on_check(broker.positions, now)
+                if interval == "30m":
+                    completed_bar = self._latest_completed_30m_bar(now)
+                    if next_open_30m:
+                        # Drain persisted orders before replaying the current
+                        # bar.  A restart therefore submits an old target bar
+                        # first, and the replayed signal is deduplicated by its
+                        # deterministic (runtime, signal bar, order) key.
+                        await self.process_next_open_30m_intents(
+                            runtime.runtime_id, now
+                        )
+                    dispatch_bar = (
+                        completed_bar is not None
+                        and completed_bar != last_30m_bar
+                    )
+                    if dispatch_bar:
+                        if next_open_30m:
+                            next_open_bar_broker = NextOpenBarBrokerProxy(
+                                broker,
+                                runtime_id=runtime.runtime_id,
+                                portfolio_id=runtime.portfolio_id,
+                                strategy_id=runtime.strategy_id,
+                                signal_bar=completed_bar,
+                            )
+                            original_broker = strategy.broker
+                            strategy.broker = next_open_bar_broker
+                        else:
+                            original_broker = None
+                        try:
+                            strategy._current_time = completed_bar
+                            await strategy.on_bar(completed_bar)
+                        finally:
+                            if next_open_30m:
+                                strategy.broker = original_broker
+                        last_30m_bar = completed_bar
+                elif daily_next_open:
+                    decision_day = self._next_open_decision_day(now)
+                    if decision_day is not None and decision_day != last_daily_decision:
+                        original_broker = strategy.broker
+                        strategy.broker = NextOpenBrokerProxy(
+                            broker,
+                            runtime_id=runtime.runtime_id,
+                            portfolio_id=runtime.portfolio_id,
+                            strategy_id=runtime.strategy_id,
+                            signal_date=decision_day,
+                        )
+                        try:
+                            await strategy.on_bar(now)
+                        finally:
+                            strategy.broker = original_broker
+                        last_daily_decision = decision_day
+                        with self._lock:
+                            spec = self._runtime_specs.get(runtime.runtime_id)
+                            if spec is not None:
+                                spec["last_decision_date"] = decision_day.isoformat()
+                                self._save_specs()
+                else:
+                    # Existing continuous callback behavior for non-queued
+                    # strategies is intentionally unchanged.
+                    await strategy.on_bar(now)
+                window_check = getattr(strategy, "_in_decision_window", None)
+                if window_check is None or window_check(now):
+                    self._sync_strategy_data_alarm(
+                        runtime, bool(getattr(strategy, "_data_missing", False))
+                    )
                 runtime.updated_at = datetime.datetime.now()
                 await asyncio.sleep(2)
             if runtime.status in {"running", "stopping"}:
                 runtime.status = "stopped"
+            try:
+                from quantide.service.strategy_tasks import strategy_task_manager
+
+                strategy_task_manager.detach(runtime.runtime_id)
+            except Exception:
+                pass
         except Exception as exc:
-            runtime.status = "failed"
-            runtime.error = str(exc)
+            self._mark_runtime_failed(runtime, exc)
             logger.exception("strategy runtime failed: {}", exc)
-            self._record_risk_event(
-                scope="strategy",
-                target_id=runtime.runtime_id,
-                title="策略运行失败",
-                message=f"策略运行时 {runtime.runtime_id} 失败：{runtime.error}",
-                severity="critical",
-                blocked=False,
-            )
         finally:
             runtime.updated_at = datetime.datetime.now()
+            try:
+                from quantide.service.strategy_tasks import strategy_task_manager
+
+                strategy_task_manager.detach(runtime.runtime_id)
+            except Exception:
+                pass
             with self._lock:
                 spec = self._runtime_specs.get(runtime.runtime_id)
                 if spec is not None:
                     spec["status"] = runtime.status
                     self._save_specs()
-            if risk_strategy is not None:
+            for risk_strategy in risk_strategies:
                 try:
                     await risk_strategy.on_stop()
                 except Exception:
                     pass
+            if strategy is not None:
+                try:
+                    await strategy.on_stop()
+                except Exception:
+                    pass
+
+    def _mark_runtime_failed(self, runtime: StrategyRuntime, exc: Exception) -> None:
+        """Persist a runtime failure and expose it through the risk event path."""
+        runtime.status = "failed"
+        runtime.error = str(exc)
+        runtime.updated_at = datetime.datetime.now()
+        with self._lock:
+            spec = self._runtime_specs.get(runtime.runtime_id)
+            if spec is not None:
+                spec["status"] = "failed"
+                spec["error"] = runtime.error
+                self._save_specs()
+        missing_dependency = "requires the lightgbm package" in runtime.error
+        self.record_system_event(
+            title="策略运行失败",
+            message=f"策略运行时 {runtime.runtime_id} 失败：{runtime.error}",
+            severity="critical",
+            blocked=missing_dependency,
+            target_id=runtime.runtime_id,
+        )
+
+    def _next_open_decision_day(self, now: datetime.datetime) -> datetime.date | None:
+        """Find today's persisted, ready daily signal day.
+
+        A restart before the next open may process an already-persisted intent,
+        but it must not recreate yesterday's signal after the next open.  The
+        candidate therefore has to be today's bar and pass the post-close
+        persistence gate.
+        """
+        from quantide.service.data_readiness import data_readiness_monitor
+
+        try:
+            candidate = daily_bars.end
+        except Exception:
+            candidate = None
+        if not isinstance(candidate, datetime.date) or candidate != now.date():
+            return None
+        if not data_readiness_monitor.is_daily_ready(now, day=candidate):
+            return None
+        return candidate
+
+    @staticmethod
+    def _latest_completed_30m_bar(now: datetime.datetime) -> datetime.datetime | None:
+        """Return the latest session bar boundary that is fully closed.
+
+        Calendar ticks encode the split morning/afternoon sessions, so flooring
+        through this API never manufactures a lunch or overnight bar.  Before
+        10:00 there is no completed 30m bar for today's session.
+        """
+        if now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        tm = now.time()
+        if tm < datetime.time(10, 0):
+            return None
+        try:
+            if not calendar.is_trade_day(now):
+                return None
+            candidate = calendar.floor(now, FrameType.MIN30)
+        except Exception:
+            return None
+        if not isinstance(candidate, datetime.datetime):
+            return None
+        candidate = candidate.replace(tzinfo=None)
+        if candidate.date() != now.date():
+            return None
+        return candidate if candidate <= now else None
+
+    @staticmethod
+    def _next_eligible_30m_bar(signal_bar: datetime.datetime) -> datetime.datetime:
+        """Return the next real 30m boundary, crossing session gaps safely."""
+        try:
+            next_completed = calendar.shift(signal_bar, 1, FrameType.MIN30)
+        except Exception as exc:
+            raise RuntimeError("无法确定 30m next_open 的目标 bar") from exc
+        if not isinstance(next_completed, datetime.datetime):
+            raise RuntimeError("30m next_open 的目标 bar 无效")
+        return (next_completed - datetime.timedelta(minutes=30)).replace(tzinfo=None)
+
+    async def process_next_open_30m_intents(
+        self, runtime_id: str, completed_bar: datetime.datetime
+    ) -> int:
+        """Submit durable 30m intents whose target bar has completed.
+
+        The row remains pending until the broker call returns.  A processed
+        row is never selected again, including after a new manager/store is
+        constructed for a restarted process.
+        """
+        runtime = self.get_runtime(runtime_id)
+        if runtime is None or runtime.status not in {"running", "stopping"}:
+            return 0
+        if str(getattr(runtime, "interval", "")) != "30m":
+            return 0
+        boundary = completed_bar.replace(tzinfo=None)
+        in_flight = tracking_store.list_next_open_intents(
+            runtime_id=runtime_id, status="processing"
+        )
+        if in_flight:
+            raise RuntimeError(
+                "30m next_open 存在崩溃后未确认的 processing intent，拒绝重提交"
+            )
+        try:
+            if not calendar.is_trade_day(boundary):
+                return 0
+        except Exception:
+            # Test doubles and a not-yet-loaded calendar are handled by the
+            # same fail-closed target calculation in the enqueue path.
+            pass
+        tm = boundary.time()
+        if (
+            tm < datetime.time(9, 30)
+            or datetime.time(11, 30) < tm < datetime.time(13, 0)
+            or tm > datetime.time(15, 0)
+        ):
+            return 0
+        broker = runtime.broker
+        if runtime.mode == "live":
+            broker = StrategyBrokerProxy(runtime.broker, runtime.strategy_id)
+        submitted = 0
+        rows = tracking_store.list_next_open_intents(
+            runtime_id=runtime_id, target_bar=boundary
+        )
+        for row in rows:
+            claimed = tracking_store.claim_next_open_intent(row["intent_id"])
+            if claimed is None:
+                continue
+            row = claimed
             try:
-                await strategy.on_stop()
-            except Exception:
-                pass
+                kwargs = dict(row.get("kwargs") or {})
+                target_time = datetime.datetime.fromisoformat(str(row["target_bar"]))
+                # Preserve the target boundary for an on-time drain, while a
+                # restarted process submits with the actual late arrival time.
+                kwargs["order_time"] = max(target_time, boundary)
+                method = getattr(broker, str(row["method"]))
+                await method(*(row.get("args") or []), **kwargs)
+                tracking_store.mark_next_open_intent(
+                    row["intent_id"], status="processed"
+                )
+                submitted += 1
+            except Exception as exc:
+                tracking_store.mark_next_open_intent(
+                    row["intent_id"], status="failed", error=str(exc)
+                )
+                logger.warning("30m next_open intent 执行失败 {}: {}", row["intent_id"], exc)
+        return submitted
+
+    async def process_next_open_intents(
+        self, runtime_id: str, now: datetime.datetime | None = None
+    ) -> int:
+        """Submit due durable intents once at the next trading day's open."""
+        runtime = self.get_runtime(runtime_id)
+        current = now or datetime.datetime.now()
+        if runtime is None or runtime.status not in {"running", "stopping"}:
+            return 0
+        if current.time() < datetime.time(9, 25):
+            return 0
+        in_flight = tracking_store.list_next_open_intents(
+            runtime_id=runtime_id, status="processing"
+        )
+        if in_flight:
+            raise RuntimeError(
+                "next_open 存在崩溃后未确认的 processing intent，拒绝重提交"
+            )
+        # The persisted target date is the source of truth here.  A freshly
+        # installed process may not have the calendar row for that date yet;
+        # rejecting the durable intent in that case would strand an order.
+        broker = runtime.broker
+        if runtime.mode == "live":
+            broker = StrategyBrokerProxy(runtime.broker, runtime.strategy_id)
+        submitted = 0
+        rows = tracking_store.list_next_open_intents(
+            runtime_id=runtime_id, target_date=current.date()
+        )
+        for row in rows:
+            try:
+                kwargs = dict(row.get("kwargs") or {})
+                kwargs["order_time"] = current
+                method = getattr(broker, str(row["method"]))
+                await method(*(row.get("args") or []), **kwargs)
+                tracking_store.mark_next_open_intent(
+                    row["intent_id"], status="processed"
+                )
+                submitted += 1
+            except Exception as exc:
+                tracking_store.mark_next_open_intent(
+                    row["intent_id"], status="failed", error=str(exc)
+                )
+                logger.warning("next_open intent 执行失败 {}: {}", row["intent_id"], exc)
+        return submitted
 
     def _build_live_risk_strategy(
         self, strategy_cls: Any, broker: Any, config: dict[str, Any]
     ) -> Any:
-        """Attach the live counterpart of the declared triple-barrier overlay."""
-        if getattr(strategy_cls, "RISK_OVERLAY", None) != "triple_barrier":
-            return None
-        if "use_broker_barriers" in config:
-            enabled = bool(config["use_broker_barriers"])
-        else:
-            defaults = getattr(strategy_cls, "default_config", None)
-            enabled = bool(defaults().get("use_broker_barriers", False)) if callable(defaults) else False
-        if not enabled:
-            return None
-        from quantide.strategies.triple_barrier_risk import TripleBarrierRiskStrategy
+        """Backward-compatible singular wrapper for callers outside the loop."""
+        strategies = self._build_live_risk_strategies(strategy_cls, broker, config)
+        return strategies[0] if strategies else None
 
-        return TripleBarrierRiskStrategy(broker, config)
+    def _build_live_risk_strategies(
+        self,
+        strategy_cls: Any,
+        broker: Any,
+        config: dict[str, Any],
+        frame_type: FrameType | str = FrameType.DAY,
+    ) -> list[Any]:
+        """Build only explicitly adapted selected risk programs."""
+        return build_live_risk_strategies(
+            strategy_cls, broker, config, frame_type=frame_type
+        )
 
     def _build_quotes(self, symbols: list[str], market_data: Any) -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
@@ -1060,6 +1661,44 @@ class StrategyRuntimeManager:
             if str(spec.get("status") or "").lower() != "running":
                 continue
             runtime_id = str(spec.get("runtime_id") or "")
+            if str(spec.get("mode") or "").lower() == "live" and not supports_live_trading():
+                reason = "CE edition 暂不支持实盘交易，未恢复该实盘运行时"
+                spec["status"] = "blocked"
+                spec["block_scope"] = "edition"
+                spec["block_reason"] = reason
+                spec["error"] = reason
+                self._save_specs()
+                self._record_risk_event(
+                    scope="system",
+                    target_id=runtime_id,
+                    title="重启恢复阻止：实盘功能不可用",
+                    message=reason,
+                    severity="critical",
+                    blocked=True,
+                )
+                continue
+            from quantide.service.risk_programs import unavailable_risk_program_ids
+
+            unavailable = unavailable_risk_program_ids(
+                (spec.get("config") or {}).get("risk_programs") or [],
+                frame_type=str(spec.get("interval") or "1d"),
+            )
+            if unavailable:
+                reason = "风险程序不可用/已阻止：" + ", ".join(unavailable)
+                spec["status"] = "blocked"
+                spec["block_scope"] = "strategy"
+                spec["block_reason"] = reason
+                spec["error"] = reason
+                self._save_specs()
+                self._record_risk_event(
+                    scope="strategy",
+                    target_id=runtime_id,
+                    title="重启恢复阻止：风险程序不可用",
+                    message=f"运行时 {runtime_id} 未恢复：{reason}",
+                    severity="critical",
+                    blocked=True,
+                )
+                continue
             account_key = self._account_key(str(spec.get("mode") or ""), str(spec.get("portfolio_id") or ""))
             account_block = self._blocked_accounts.get(account_key)
             strategy_block = self._blocked_strategies.get(runtime_id)
@@ -1121,6 +1760,42 @@ class StrategyRuntimeManager:
         runtime.status = "blocked"
         runtime.error = reason
         runtime.updated_at = datetime.datetime.now()
+        getattr(self, "_data_missing_alarms", set()).discard(
+            f"strategy_data:{runtime.runtime_id}"
+        )
+        try:
+            from quantide.service.strategy_tasks import strategy_task_manager
+
+            strategy_task_manager.detach(runtime.runtime_id)
+        except Exception:
+            pass
+
+    def _sync_strategy_data_alarm(
+        self, runtime: StrategyRuntime, missing: bool
+    ) -> None:
+        """策略行情缺失/恢复时写系统风险事件（避免静默跳过选股）。"""
+        target = f"strategy_data:{runtime.runtime_id}"
+        if missing and target not in self._data_missing_alarms:
+            self._data_missing_alarms.add(target)
+            self.record_system_event(
+                title="策略行情缺失",
+                message=(
+                    f"{runtime.strategy_name or runtime.runtime_id} "
+                    f"今日行情/覆盖不足，已跳过选股。"
+                ),
+                severity="critical",
+                blocked=True,
+                target_id=target,
+            )
+        elif not missing and target in self._data_missing_alarms:
+            self._data_missing_alarms.discard(target)
+            self.record_system_event(
+                title="策略行情恢复",
+                message=f"{runtime.strategy_name or runtime.runtime_id} 行情已恢复。",
+                severity="info",
+                blocked=False,
+                target_id=target,
+            )
 
     def _record_risk_event(
         self,
@@ -1147,6 +1822,8 @@ class StrategyRuntimeManager:
         self._save_specs()
 
     def _start_from_spec(self, spec: dict[str, Any]) -> StrategyRuntime:
+        if str(spec.get("mode") or "").lower() == "live":
+            require_live_trading()
         if self._registry is None:
             raise RuntimeError("registry 未初始化")
         account_kind = str(spec.get("account_kind") or "")
@@ -1158,6 +1835,9 @@ class StrategyRuntimeManager:
             broker = self._registry.get(account_kind, portfolio_id)
         if broker is None:
             raise RuntimeError(f"账户不存在: {account_kind}:{portfolio_id}")
+        if "interval" not in spec or not str(spec.get("interval") or "").strip():
+            raise RuntimeError("持久化运行时缺少不可变策略周期")
+        interval = str(spec["interval"]).strip().lower()
         if account_kind == BrokerKind.SIMULATION.value:
             port = getattr(broker, "port", None)
             apply_fee_config = getattr(port, "apply_fee_config", None)
@@ -1178,7 +1858,7 @@ class StrategyRuntimeManager:
             portfolio_id=portfolio_id,
             source_backtest_portfolio_id=str(spec.get("source_backtest_portfolio_id") or ""),
             account_kind=account_kind,
-            interval=str(spec.get("interval") or "1m"),
+            interval=interval,
             market_data=self._market_data,
             principal=float(spec.get("principal") or 0),
             runtime_id=str(spec.get("runtime_id") or ""),

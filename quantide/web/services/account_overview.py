@@ -13,7 +13,6 @@ AC-FR0410-2: 最大 N 亏损 / 最大 M 盈利个股.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 
 @dataclass

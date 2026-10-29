@@ -1,7 +1,7 @@
 """FR-185 持仓成本基准（加权均价经典方案 A）单元测试.
 
 按 spec-strategy.md §FR-185 + interfaces.md §4.4 positions 表:
-- F-CB-1: 买入时加权更新 cost_basis = (old_qty * old_price + buy_qty * buy_price) / new_qty
+- F-CB-1: 买入时按含本笔手续费的总成本加权更新 cost_basis
 - F-CB-2: 部分卖出时 cost_basis 不变 (剩余持仓成本保留)
 - F-CB-3: 全部卖出时清仓 (持仓记录从 _positions 删除)
 - F-CB-4: 首次建仓 cost_basis = buy_price
@@ -88,9 +88,9 @@ def _make_trade(
 
 
 def test_f_cb_4_first_build(paper_broker):
-    """AC-185-04: 首次建仓 cost_basis ← buy_price.
+    """AC-185-04: 无手续费时首次建仓 cost_basis ← buy_price.
 
-    步骤: 空仓 → BUY 100 股 @ 10.0 → 期望 pos.price == 10.0, shares == 100.
+    步骤: 空仓 → BUY 100 股 @ 10.0 (fee=0) → 期望 pos.price == 10.0, shares == 100.
     """
     paper_broker.set_clock(AC_TEST_DATE)
     paper_broker._apply_trade_to_portfolio(
@@ -102,8 +102,22 @@ def test_f_cb_4_first_build(paper_broker):
     assert pos.price == 10.0, f"F-CB-4 first build: cost_basis 应等于首次买入价 10.0, 实际 {pos.price}"
 
 
+def test_f_cb_buy_cost_basis_includes_transaction_fee(paper_broker):
+    """买入成本基准按成交额加本笔手续费计算。"""
+    paper_broker.set_clock(AC_TEST_DATE)
+    paper_broker._apply_trade_to_portfolio(
+        _make_trade("AAPL", shares=100, price=10.0, side=OrderSide.BUY, fee=5.0)
+    )
+    assert paper_broker._positions["AAPL"].price == pytest.approx(10.05)
+
+    paper_broker._apply_trade_to_portfolio(
+        _make_trade("AAPL", shares=100, price=12.0, side=OrderSide.BUY, fee=3.0)
+    )
+    assert paper_broker._positions["AAPL"].price == pytest.approx(11.04)
+
+
 def test_f_cb_1_buy_weighted_average(paper_broker):
-    """AC-185-01: 买入加权更新 cost_basis = (old_qty * old + buy_qty * buy) / new_qty.
+    """AC-185-01: 买入按含手续费的总成本加权更新 cost_basis.
 
     步骤:
     - T1: 空仓 → BUY 100 @ 10.0 (cost_basis = 10.0)

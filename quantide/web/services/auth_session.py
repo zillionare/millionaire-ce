@@ -12,7 +12,7 @@ import hmac
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 _SALT_BYTES = 16
@@ -124,7 +124,7 @@ def create_session(username: str) -> AuthenticatedSession:
     return AuthenticatedSession(
         username=username,
         session_token=token,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

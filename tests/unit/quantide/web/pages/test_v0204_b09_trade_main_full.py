@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import polars as pl
+import pytest
 
 from quantide.core.enums import BrokerKind
 from quantide.web.pages import trade_main as tm
@@ -31,6 +32,11 @@ from quantide.web.pages.trade_main import (
     _resolve_trade_reference_dates,
 )
 
+
+@pytest.fixture(autouse=True)
+def private_edition_trade_main_cases(monkeypatch):
+    """Keep the QMT helper assertions explicit while CE hides the path."""
+    monkeypatch.setattr(tm, "supports_live_trading", lambda: True)
 
 # ---------------------------------------------------------------------------
 # _extract_recent_trade_dates - empty calendar + Timestamp .date() path

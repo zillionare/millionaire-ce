@@ -1,8 +1,11 @@
 """[AC-NFR1101-01] trade_main page helpers."""
 
 import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
 import polars as pl
+from fasthtml.common import to_xml
+
 from quantide.web.pages import trade_main as tm
 
 
@@ -15,7 +18,7 @@ def test_maybe_start_live_quote_returns_none():
 def test_resolve_live_current_price_with_quote():
     """When live_quote has current price, returns it."""
     with patch.object(tm, "_maybe_start_live_quote"), \
-         patch.object(tm.live_quote, "get_quote", return_value={"price": 10.5}):
+        patch.object(tm.market_data_hub, "get_quote", return_value={"price": 10.5}):
         out = tm._resolve_live_current_price("000001.SZ")
     assert out == 10.5
 
@@ -45,3 +48,12 @@ def test_resolve_trade_reference_close_fallback():
     with patch.object(tm, "_load_trade_reference_bars", return_value=pl.DataFrame()):
         out = _resolve_trade_reference_close("000001.SZ")
     assert out == 0.0
+
+
+def test_asset_info_bar_shows_pnl_percentage_without_absolute_pnl():
+    """资产信息栏显示基于本金的盈亏比例，不显示盈亏绝对值。"""
+    html = to_xml(tm.AssetInfoBar(110_000, 20_000, 90_000, 100_000))
+
+    assert "盈亏比例" in html
+    assert "+10.00%" in html
+    assert "10000.00" not in html

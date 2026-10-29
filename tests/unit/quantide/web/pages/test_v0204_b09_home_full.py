@@ -29,6 +29,10 @@ from quantide.web.pages.home import (
 )
 
 
+@pytest.fixture(autouse=True)
+def private_edition_home_cases(monkeypatch):
+    monkeypatch.setattr(home_mod, "supports_live_trading", lambda: True)
+
 # ---------------------------------------------------------------------------
 # AccountTabs (line 92)
 # ---------------------------------------------------------------------------

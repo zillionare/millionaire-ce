@@ -723,7 +723,7 @@ class ParquetStorage:
 
         for i, date in enumerate(missing_dates, start=1):
             try:
-                def _phase_callback(phase: str):
+                def _phase_callback(phase: str, *, date=date, i=i):
                     payload = {
                         "phase": phase,
                         "current_date": date.strftime("%Y-%m-%d"),
@@ -1054,15 +1054,20 @@ class ParquetStorage:
         """
         # 内部 _partition_by 使用 partition_key_* 命名
         if self._partition_by is None:
-            key_fn = lambda d: d.strftime("%Y-%m")
+            def key_fn(d):
+                return d.strftime("%Y-%m")
         elif self._partition_by == "partition_key_year":
-            key_fn = lambda d: d.year
+            def key_fn(d):
+                return d.year
         elif self._partition_by == "partition_key_month":
-            key_fn = lambda d: d.strftime("%Y-%m")
+            def key_fn(d):
+                return d.strftime("%Y-%m")
         elif self._partition_by == "partition_key_day":
-            key_fn = lambda d: d
+            def key_fn(d):
+                return d
         else:
-            key_fn = lambda d: d.strftime("%Y-%m")
+            def key_fn(d):
+                return d.strftime("%Y-%m")
 
         groups: dict[object, list[datetime.date]] = {}
         for dt in dates:

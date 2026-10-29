@@ -6,11 +6,7 @@ RuntimeBootstrap._resolve_mode and the basic structure.
 
 from __future__ import annotations
 
-import datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from quantide.core.runtime import AdapterRegistry
 from quantide.core.runtime.modes import RuntimeBootstrap, RuntimeContext
@@ -92,7 +88,10 @@ def test_bootstrap_init_with_explicit_clock():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_mode_returns_live_when_raw_is_live(monkeypatch):
+def test_resolve_mode_coerces_live_to_paper_in_ce(monkeypatch):
+    monkeypatch.setattr(
+        "quantide.core.runtime.modes.supports_live_trading", lambda: False
+    )
     fake_settings = SimpleNamespace(
         runtime_mode="live", livequote_mode="gateway", gateway_enabled=True
     )
@@ -100,7 +99,7 @@ def test_resolve_mode_returns_live_when_raw_is_live(monkeypatch):
         "quantide.core.runtime.modes.get_settings", lambda: fake_settings
     )
     rb = RuntimeBootstrap()
-    assert rb._resolve_mode() == "live"
+    assert rb._resolve_mode() == "paper"
 
 
 def test_resolve_mode_returns_paper_when_raw_is_paper(monkeypatch):
@@ -125,8 +124,8 @@ def test_resolve_mode_returns_backtest_when_raw_is_backtest(monkeypatch):
     assert rb._resolve_mode() == "backtest"
 
 
-def test_resolve_mode_falls_back_to_backtest_when_livequote_none(monkeypatch):
-    """When runtime_mode is unknown but livequote_mode is 'none', returns 'backtest'."""
+def test_resolve_mode_uses_gateway_state_when_runtime_mode_is_unknown(monkeypatch):
+    """The retired quote mode no longer controls runtime mode selection."""
     fake_settings = SimpleNamespace(
         runtime_mode="weird", livequote_mode="none", gateway_enabled=True
     )
@@ -134,7 +133,7 @@ def test_resolve_mode_falls_back_to_backtest_when_livequote_none(monkeypatch):
         "quantide.core.runtime.modes.get_settings", lambda: fake_settings
     )
     rb = RuntimeBootstrap()
-    assert rb._resolve_mode() == "backtest"
+    assert rb._resolve_mode() == "live"
 
 
 def test_resolve_mode_falls_back_to_live_by_default(monkeypatch):

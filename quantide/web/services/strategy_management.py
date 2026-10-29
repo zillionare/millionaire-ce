@@ -13,11 +13,11 @@ AC-FR0013: 删除自定义策略 (二次确认, 实盘中禁用).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
+from enum import StrEnum
 
 
-class StrategyType(str, Enum):
+class StrategyType(StrEnum):
     """策略类型."""
 
     DAY = "day"
@@ -25,7 +25,7 @@ class StrategyType(str, Enum):
     RISK = "risk"
 
 
-class StrategySource(str, Enum):
+class StrategySource(StrEnum):
     """策略来源."""
 
     BUILTIN = "builtin"

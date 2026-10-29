@@ -3,9 +3,9 @@
 Coverage targets:
 - Strategy discovery/metadata and parameter contract.
 - The five alpha-feature groups and industry-based board override.
-- Triple-barrier labeling including same-day dual-hit resolution.
-- LightGBM / Prior-Ridge selection, exclusions, and barrier metadata.
-- ``on_bar`` buy/sell ordering, T+1, stop-loss, take-profit, and time exit.
+ - Future close-return labeling without signal-time lookahead.
+ - LightGBM / Prior-Ridge selection and eligibility exclusions.
+ - ``on_bar`` daily top-K rebalance behavior.
 - Web stock-selection modal, list button, and POST re-run route.
 """
 
@@ -21,10 +21,13 @@ from fasthtml.common import to_xml
 
 from quantide.core.strategy import BaseStrategy
 from quantide.core.strategy_discovery import StrategyDiscovery
+from quantide.factors.alpha import compute_alpha_features, standardize_features
 from quantide.strategies.example import ml_momentum_reversal
 from quantide.strategies.example.ml_momentum_reversal import (
     MLMomentumReversalStrategy,
-    compute_triple_barrier_labels,
+    _fit_ml_model,
+    _format_candidate_rows,
+    compute_future_close_return_labels,
 )
 from quantide.web.pages import strategy as strategy_page
 from tests.unit.quantide.factors.panel_builder import _make_synthetic_panel
@@ -42,7 +45,7 @@ except ImportError:  # pragma: no cover - exercised only without the optional de
 # ---------------------------------------------------------------------------
 
 
-def _barrier_panel(rows: list[tuple[float, float, float, float]]) -> pl.DataFrame:
+def _ohlc_panel(rows: list[tuple[float, float, float, float]]) -> pl.DataFrame:
     """Build a single-asset OHLC panel from ``(open, high, low, close)`` rows."""
     start = dt.date(2024, 1, 2)
     return pl.DataFrame(
@@ -104,13 +107,10 @@ def test_strategy_discovery_finds_clean_metadata() -> None:
 def test_default_config_and_params_expose_required_keys() -> None:
     required = {
         "top_k",
-        "keep_top_n",
         "universe_size",
         "train_window",
-        "horizon",
+        "future_return_horizon",
         "retrain_days",
-        "stop_loss_pct",
-        "take_profit_pct",
         "use_lightgbm",
     }
     assert required <= set(MLMomentumReversalStrategy.PARAMS)
@@ -129,127 +129,46 @@ def test_default_config_and_params_expose_required_keys() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 3. Triple barrier labeling
+# 3. Future close-return labeling
 # ---------------------------------------------------------------------------
 
 
-def test_triple_barrier_upper_hit_returns_positive_barrier() -> None:
+def test_future_close_return_label_uses_n_trading_day_close() -> None:
     rows = [
         (100.0, 101.0, 99.0, 100.0),
-        (101.0, 116.0, 100.0, 112.0),
-        (110.0, 113.0, 108.0, 111.0),
-        (111.0, 113.0, 109.0, 112.0),
-        (112.0, 114.0, 110.0, 113.0),
-        (113.0, 115.0, 111.0, 114.0),
+        (100.0, 102.0, 99.0, 102.0),
+        (102.0, 104.0, 101.0, 104.0),
+        (104.0, 106.0, 103.0, 106.0),
+        (106.0, 108.0, 105.0, 108.0),
     ]
-    labeled = compute_triple_barrier_labels(_barrier_panel(rows), horizon=3)
+    labeled = compute_future_close_return_labels(_ohlc_panel(rows), horizon=3)
 
     first = labeled.row(0, named=True)
-    assert first["tb_hit"] == "up"
-    assert first["tb_ret"] == pytest.approx(0.15)
-    assert first["tb_hold_days"] == 1
-    assert first["fwd_ret"] == pytest.approx(0.15)
-
-
-def test_triple_barrier_lower_hit_returns_negative_barrier() -> None:
-    rows = [
-        (100.0, 101.0, 99.0, 100.0),
-        (101.0, 102.0, 93.0, 95.0),
-        (95.0, 97.0, 94.0, 96.0),
-        (96.0, 98.0, 95.0, 97.0),
-        (97.0, 99.0, 96.0, 98.0),
-        (98.0, 100.0, 97.0, 99.0),
-    ]
-    labeled = compute_triple_barrier_labels(_barrier_panel(rows), horizon=3)
-
-    first = labeled.row(0, named=True)
-    assert first["tb_hit"] == "down"
-    assert first["tb_ret"] == pytest.approx(-0.06)
-    assert first["tb_hold_days"] == 1
-
-
-@pytest.mark.parametrize(
-    ("open_price", "expected_hit", "expected_ret"),
-    [(114.0, "up", 0.15), (95.0, "down", -0.06)],
-)
-def test_same_day_dual_hit_resolves_by_open_proximity(
-    open_price: float,
-    expected_hit: str,
-    expected_ret: float,
-) -> None:
-    rows = [
-        (100.0, 101.0, 99.0, 100.0),
-        (open_price, 116.0, 93.0, 100.0),
-        (100.0, 102.0, 99.0, 101.0),
-        (101.0, 103.0, 100.0, 102.0),
-        (102.0, 104.0, 101.0, 103.0),
-        (103.0, 105.0, 102.0, 104.0),
-    ]
-    labeled = compute_triple_barrier_labels(_barrier_panel(rows), horizon=3)
-
-    first = labeled.row(0, named=True)
-    assert first["tb_hit"] == expected_hit
-    assert first["tb_ret"] == pytest.approx(expected_ret)
-
-
-def test_same_day_dual_hit_tie_resolves_down() -> None:
-    # Use exactly representable binary fractions so the open is equidistant
-    # from both barriers: upper 112.5, lower 93.75, midpoint 103.125.
-    rows = [
-        (100.0, 101.0, 99.0, 100.0),
-        (103.125, 113.0, 93.0, 100.0),
-        (100.0, 102.0, 99.0, 101.0),
-        (101.0, 103.0, 100.0, 102.0),
-        (102.0, 104.0, 101.0, 103.0),
-        (103.0, 105.0, 102.0, 104.0),
-    ]
-    labeled = compute_triple_barrier_labels(
-        _barrier_panel(rows),
-        horizon=3,
-        up_barrier_pct=0.125,
-        down_barrier_pct=0.0625,
+    assert first["future_n_trading_day_close_return"] == pytest.approx(
+        106.0 / 100.0 - 1.0
     )
 
-    first = labeled.row(0, named=True)
-    assert first["tb_hit"] == "down"
-    assert first["tb_ret"] == pytest.approx(-0.0625)
 
-
-def test_triple_barrier_time_expiry_uses_forward_close() -> None:
-    rows = [
-        (100.0, 101.0, 99.0, 100.0),
-        (100.0, 101.0, 99.0, 101.0),
-        (101.0, 102.0, 100.0, 102.0),
-        (102.0, 103.0, 101.0, 103.0),
-        (103.0, 104.0, 102.0, 104.0),
-        (104.0, 105.0, 103.0, 105.0),
-    ]
-    labeled = compute_triple_barrier_labels(_barrier_panel(rows), horizon=3)
-
-    first = labeled.row(0, named=True)
-    assert first["tb_hit"] == "expire"
-    assert first["tb_ret"] == pytest.approx(103.0 / 100.0 - 1.0)
-    assert first["tb_hold_days"] == 3
-
-
-def test_triple_barrier_has_no_lookahead_on_last_horizon_rows() -> None:
+def test_future_close_return_label_has_no_lookahead_on_last_horizon_rows() -> None:
     horizon = 3
-    labeled = compute_triple_barrier_labels(
+    labeled = compute_future_close_return_labels(
         _make_synthetic_panel(), horizon=horizon
     )
 
     null_counts = labeled.group_by("asset").agg(
-        pl.col("tb_ret").is_null().sum().alias("null_count")
+        pl.col("future_n_trading_day_close_return")
+        .is_null()
+        .sum()
+        .alias("null_count")
     )
     assert null_counts["null_count"].to_list() == [horizon] * labeled[
         "asset"
     ].n_unique()
 
-    non_null = labeled.filter(pl.col("tb_ret").is_not_null())
-    hold_days = non_null["tb_hold_days"]
-    assert hold_days.min() >= 1
-    assert hold_days.max() <= horizon
-    assert non_null["tb_hit"].is_in(["up", "down", "expire"]).all()
+    non_null = labeled.filter(
+        pl.col("future_n_trading_day_close_return").is_not_null()
+    )
+    assert non_null.height > 0
 
 
 # ---------------------------------------------------------------------------
@@ -259,13 +178,10 @@ def test_triple_barrier_has_no_lookahead_on_last_horizon_rows() -> None:
 
 _SELECTION_CONFIG = {
     "top_k": 5,
-    "keep_top_n": 15,
     "universe_size": 1000,
     "train_window": 45,
-    "horizon": 3,
+    "future_return_horizon": 3,
     "retrain_days": 5,
-    "stop_loss_pct": 0.06,
-    "take_profit_pct": 0.15,
     "use_lightgbm": True,
 }
 
@@ -278,14 +194,10 @@ _CANDIDATE_KEYS = {
     "ml_score",
     "kline_pattern",
     "signal_reason",
-    "tp_price",
-    "sl_price",
-    "barrier_horizon",
-    "tb_barrier_text",
 }
 
 
-def test_select_stocks_lightgbm_contract_and_barrier_metadata() -> None:
+def test_select_stocks_lightgbm_contract_has_no_exit_metadata() -> None:
     panel = _make_synthetic_panel()
     picks = MLMomentumReversalStrategy.select_stocks(
         bars_df=panel, config=_SELECTION_CONFIG
@@ -306,16 +218,9 @@ def test_select_stocks_lightgbm_contract_and_barrier_metadata() -> None:
 
     for item in picks:
         assert _CANDIDATE_KEYS <= set(item)
-        assert item["barrier_horizon"] == 3
-        assert item["tp_price"] == pytest.approx(
-            round(item["close"] * 1.15, 2)
-        )
-        assert item["sl_price"] == pytest.approx(
-            round(item["close"] * 0.94, 2)
-        )
-        assert "+15%" in item["tb_barrier_text"]
-        assert "-6%" in item["tb_barrier_text"]
-        assert "3日" in item["tb_barrier_text"]
+        assert "tb_barrier_text" not in item
+        assert "tp_price" not in item
+        assert "sl_price" not in item
 
 
 def test_select_stocks_prior_ridge_when_lightgbm_disabled() -> None:
@@ -327,6 +232,47 @@ def test_select_stocks_prior_ridge_when_lightgbm_disabled() -> None:
 
     assert len(picks) == _SELECTION_CONFIG["top_k"]
     assert {item["model_engine"] for item in picks} == {"Prior-Ridge"}
+
+
+def test_fit_ml_model_reuses_labels_without_dropping_selected_features() -> None:
+    panel = _make_synthetic_panel()
+    feature_cols = ["rs_board_5d", "ma20_slope"]
+    normalized = standardize_features(
+        compute_alpha_features(panel), feature_cols=feature_cols
+    )
+    cache_key = ("label-cache-regression", id(normalized))
+
+    first_model, first_engine = _fit_ml_model(
+        normalized,
+        use_lightgbm=False,
+        feature_cols=[feature_cols[0]],
+        label_cache_key=cache_key,
+    )
+    second_model, second_engine = _fit_ml_model(
+        normalized,
+        use_lightgbm=False,
+        feature_cols=[feature_cols[1]],
+        label_cache_key=cache_key,
+    )
+
+    assert first_engine == second_engine == "Prior-Ridge"
+    assert first_model is not None and second_model is not None
+    assert first_model.shape == (1,)
+    assert second_model.shape == (1,)
+
+
+def test_select_stocks_accepts_missing_optional_limit_inputs() -> None:
+    panel = _make_synthetic_panel().drop(["up_limit", "down_limit"])
+    picks = MLMomentumReversalStrategy.select_stocks(
+        bars_df=panel,
+        config={
+            **_SELECTION_CONFIG,
+            "use_lightgbm": False,
+            "features": ["upper_shadow_limit", "ma20_slope"],
+        },
+    )
+
+    assert len(picks) == _SELECTION_CONFIG["top_k"]
 
 
 def test_select_stocks_excludes_st_stocks() -> None:
@@ -343,7 +289,7 @@ def test_select_stocks_excludes_st_stocks() -> None:
 
     assets = {item["asset"] for item in picks}
     assert "600001.SH" not in assets
-    assert len(picks) == 11
+    assert len(picks) <= 20
 
 
 def test_select_stocks_excludes_up_limit_locked_stocks() -> None:
@@ -355,7 +301,27 @@ def test_select_stocks_excludes_up_limit_locked_stocks() -> None:
 
     assets = {item["asset"] for item in picks}
     assert "300001.SZ" not in assets
-    assert len(picks) == 11
+    assert len(picks) <= 20
+
+
+def test_top_k_is_only_an_upper_bound_after_eligibility_filtering() -> None:
+    """Invalid ST/suspended/limit rows are removed before applying top_k."""
+    scored = pl.DataFrame(
+        {
+            "asset": ["GOOD.SZ", "ST.SZ", "SUSPENDED.SZ", "LOCKED.SZ"],
+            "close": [10.0, 10.0, 10.0, 10.0],
+            "volume": [1000.0, 1000.0, 0.0, 1000.0],
+            "is_st": [False, True, False, False],
+            "up_limit": [11.0, 11.0, 11.0, 10.0],
+            "ml_score": [1.0, 4.0, 3.0, 2.0],
+        }
+    )
+
+    picks = _format_candidate_rows(
+        scored, dt.date(2024, 1, 2), "Prior-Ridge", limit=3
+    )
+
+    assert [item["asset"] for item in picks] == ["GOOD.SZ"]
 
 
 def test_filter_universe_market_cap_trim_then_st_and_suspension(monkeypatch) -> None:
@@ -418,7 +384,7 @@ def test_filter_universe_falls_back_to_liquidity_without_market_cap(
 
 
 # ---------------------------------------------------------------------------
-# 5. on_bar execution: buys, T+1, barriers, time exit
+# 5. on_bar execution: daily top-K rebalance
 # ---------------------------------------------------------------------------
 
 
@@ -490,35 +456,14 @@ async def test_on_bar_buys_top_ranked_candidates_into_open_slots() -> None:
         assert amount == pytest.approx(49_000.0)
 
 
-async def test_on_bar_defers_price_barrier_to_broker_overlay() -> None:
-    """With broker barriers enabled, the strategy leaves price exits to the overlay."""
-    position = SimpleNamespace(shares=100, avail=100, price=10.0, mv=900.0)
-    broker = _FakeBroker(cash=0.0, positions={"600001.SH": position})
-    strategy = _make_strategy(
-        broker, {"use_lightgbm": False, "use_broker_barriers": True}
-    )
-    strategy._rank_for_bar = lambda tm: (
-        [],
-        {"600001.SH": 9.0},
-        {"600001.SH": 1},
-    )
-
-    await strategy.on_bar(dt.datetime(2024, 6, 3, 10, 0))
-
-    assert broker.sell_calls == []
-    assert not any("止损" in message for message in strategy.logs)
-
-
-async def test_on_bar_keeps_rank_exit_when_broker_barriers_enabled() -> None:
+async def test_on_bar_sells_every_available_holding_absent_from_top_k() -> None:
     position = SimpleNamespace(shares=100, avail=100, price=10.0, mv=1000.0)
     broker = _FakeBroker(cash=0.0, positions={"600001.SH": position})
-    strategy = _make_strategy(
-        broker, {"use_lightgbm": False, "use_broker_barriers": True}
-    )
+    strategy = _make_strategy(broker, {"top_k": 1, "use_lightgbm": False})
     strategy._rank_for_bar = lambda tm: (
-        [],
-        {"600001.SH": 10.0, "600002.SH": 10.0},
-        {"600001.SH": 99, "600002.SH": 1},
+        [_ranked_item("600002.SH", -10.0, 1)],
+        {"600002.SH": 10.0},
+        {"600002.SH": 1},
     )
 
     await strategy.on_bar(dt.datetime(2024, 6, 3, 14, 58))
@@ -526,32 +471,38 @@ async def test_on_bar_keeps_rank_exit_when_broker_barriers_enabled() -> None:
     assert [(asset, shares) for asset, shares, _kw in broker.sell_calls] == [
         ("600001.SH", 100)
     ]
-    assert any("排名跌出" in message for message in strategy.logs)
+    assert any("不在今日Top-1" in message for message in strategy.logs)
 
 
-async def test_on_bar_skips_alpha_exit_when_disabled() -> None:
-    """use_alpha_exit=False 时不做 alpha 排名卖出（只留三重障碍）。"""
-    position = SimpleNamespace(shares=100, avail=100, price=10.0, mv=1000.0)
-    broker = _FakeBroker(cash=0.0, positions={"600001.SH": position})
-    strategy = _make_strategy(
-        broker,
-        {"use_lightgbm": False, "use_broker_barriers": True, "use_alpha_exit": False},
-    )
+async def test_on_bar_keeps_selected_holding_and_buys_new_top_k_asset() -> None:
+    held = SimpleNamespace(shares=100, avail=100, price=10.0, mv=1000.0)
+    broker = _FakeBroker(cash=100_000.0, positions={"600001.SH": held})
+    strategy = _make_strategy(broker, {"top_k": 2, "use_lightgbm": False})
     strategy._rank_for_bar = lambda tm: (
-        [],
-        {"600001.SH": 10.0, "600002.SH": 10.0},
-        {"600001.SH": 99, "600002.SH": 1},
+        [
+            _ranked_item("600001.SH", -100.0, 1),
+            _ranked_item("600002.SH", -200.0, 2),
+        ],
+        {"600001.SH": 10.0, "600002.SH": 20.0},
+        {"600001.SH": 1, "600002.SH": 2},
     )
 
-    await strategy.on_bar(dt.datetime(2024, 6, 3, 10, 0))
+    await strategy.on_bar(dt.datetime(2024, 6, 3, 14, 58))
 
     assert broker.sell_calls == []
-    assert not any("排名跌出" in message for message in strategy.logs)
+    assert [asset for asset, _amount, _kwargs in broker.buy_calls] == ["600002.SH"]
 
 
-def test_default_config_exposes_alpha_exit_switch() -> None:
-    assert "use_alpha_exit" in ml_momentum_reversal.MLMomentumReversalStrategy.PARAMS
-    assert ml_momentum_reversal.MLMomentumReversalStrategy.PARAMS["use_alpha_exit"] is True
+def test_strategy_has_no_risk_overlay_or_barrier_parameters() -> None:
+    strategy_cls = ml_momentum_reversal.MLMomentumReversalStrategy
+    assert not hasattr(strategy_cls, "RISK_OVERLAY")
+    assert not {
+        "keep_top_n",
+        "stop_loss_pct",
+        "take_profit_pct",
+        "use_broker_barriers",
+        "use_alpha_exit",
+    } & set(strategy_cls.default_config())
 
 
 # ---------------------------------------------------------------------------
@@ -584,10 +535,7 @@ def _sample_picks() -> list[dict[str, object]]:
             "signal_reason": "板块超额+5.0% | MA20斜率向上(+1.0%) | 日内资金净流入",
             "as_of_date": "2024-12-31",
             "model_engine": "LightGBM",
-            "tp_price": 11.5,
-            "sl_price": 9.4,
-            "barrier_horizon": 3,
-            "tb_barrier_text": "止盈:11.50(+15%) / 止损:9.40(-6%) / 3日",
+            "future_return_horizon": 3,
         }
     ]
 
@@ -628,7 +576,7 @@ def test_build_strategy_rows_renders_stock_selection_button(monkeypatch) -> None
     assert 'hx-get="/strategy/MLMomentumReversalStrategy/select/modal"' in html
 
 
-def test_strategy_select_modal_renders_triple_barrier_table(monkeypatch) -> None:
+def test_strategy_select_modal_renders_future_return_target(monkeypatch) -> None:
     _install_selection_mocks(monkeypatch, _sample_picks())
 
     html = to_xml(
@@ -639,7 +587,7 @@ def test_strategy_select_modal_renders_triple_barrier_table(monkeypatch) -> None
     assert "600001.SH" in html
     assert "示例股份" in html
     assert "低开阳线弱转强" in html
-    assert "止盈:11.50(+15%) / 止损:9.40(-6%) / 3日" in html
+    assert "未来3日收盘收益（仅训练）" in html
     assert "0.812" in html
     assert "模型引擎: LightGBM" in html
 
@@ -653,9 +601,7 @@ async def test_run_strategy_select_uses_submitted_params(monkeypatch) -> None:
             "param_top_k": "3",
             "param_universe_size": "50",
             "param_train_window": "30",
-            "param_horizon": "3",
-            "param_take_profit_pct": "0.15",
-            "param_stop_loss_pct": "0.06",
+            "param_future_return_horizon": "3",
             "param_use_lightgbm": "true",
         }
     )
@@ -671,7 +617,7 @@ async def test_run_strategy_select_uses_submitted_params(monkeypatch) -> None:
     assert calls[0]["as_of_date"] == "2024-12-31"
     assert 'id="stock-selection-table"' in html
     assert "600001.SH" in html
-    assert "止盈:11.50(+15%) / 止损:9.40(-6%) / 3日" in html
+    assert "未来3日收盘收益（仅训练）" in html
 
 
 def test_strategy_select_modal_warns_when_requested_date_exceeds_local_data(

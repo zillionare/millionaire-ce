@@ -199,7 +199,7 @@ def test_resolve_sizing_price_returns_up_limit_for_buy():
         timeout=0.5,
         extra={},
     )
-    with patch.object(gb_mod.live_quote, "get_price_limits", return_value=(9.0, 11.0)):
+    with patch.object(gb_mod.market_data_hub, "get_price_limits", return_value=(9.0, 11.0)):
         result = adapter._resolve_sizing_price(request, execution_price=10.0)
     assert result == 11.0
 
@@ -217,7 +217,7 @@ def test_resolve_sizing_price_returns_down_limit_for_sell():
         timeout=0.5,
         extra={},
     )
-    with patch.object(gb_mod.live_quote, "get_price_limits", return_value=(9.0, 11.0)):
+    with patch.object(gb_mod.market_data_hub, "get_price_limits", return_value=(9.0, 11.0)):
         result = adapter._resolve_sizing_price(request, execution_price=10.0)
     assert result == 9.0
 

@@ -177,9 +177,39 @@ def paper_broker_cleanup_probe():
 
 @pytest.fixture(autouse=True)
 def close_unit_paper_brokers(paper_broker_cleanup_probe):
-    """Release global MessageHub subscriptions owned by unit-test PaperBrokers."""
+    """Release broker subscriptions and isolate the global market-data hub."""
+    from quantide.service.market_data_hub import market_data_hub
+
+    market_data_hub._snapshots.clear()
+    market_data_hub._limits.clear()
+    market_data_hub._subscribed.clear()
     yield
     _close_subscribed_paper_brokers()
+    market_data_hub._snapshots.clear()
+    market_data_hub._limits.clear()
+    market_data_hub._subscribed.clear()
+
+
+@pytest.fixture(autouse=True)
+def restore_global_calendar_state():
+    """Restore the singleton calendar after tests that load or mutate it."""
+    from quantide.data.models.calendar import calendar
+
+    state = (
+        calendar._path,
+        calendar._data,
+        calendar.day_frames,
+        calendar.week_frames,
+        calendar.month_frames,
+    )
+    yield
+    (
+        calendar._path,
+        calendar._data,
+        calendar.day_frames,
+        calendar.week_frames,
+        calendar.month_frames,
+    ) = state
 
 
 @pytest.fixture(scope="session")
@@ -213,3 +243,11 @@ def env_manifest() -> dict:
 def env_universe() -> "DataFrame":
     """Just the universe, for tests that need asset metadata only."""
     return pl.read_json(UNIVERSE_PATH)
+
+
+@pytest.fixture
+def private_edition_feature_override(monkeypatch):
+    """Explicitly enable private-edition-only runtime paths for one test."""
+    monkeypatch.setenv("QUANTIDE_ENABLE_EDITION_OVERRIDE", "1")
+    monkeypatch.setenv("QUANTIDE_EDITION", "zillionaire")
+    return "zillionaire"

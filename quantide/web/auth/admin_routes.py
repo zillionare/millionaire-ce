@@ -777,7 +777,7 @@ class AdminRoutes:
 
 
 def InfoRow(label, value):
-    """Helper for info display"""
+    """Display an information row."""
     return Div(
         P(label, cls="text-sm text-muted-foreground"), P(str(value), cls="font-medium")
     )

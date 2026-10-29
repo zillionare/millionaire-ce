@@ -31,7 +31,7 @@ from tests.e2e.support.gateway_stub import (
     running_gateway_stub,
 )
 
-pytestmark = [pytest.mark.e2e, pytest.mark.release_gate]
+pytestmark = [pytest.mark.e2e, pytest.mark.release_gate, pytest.mark.private_only]
 
 ASSETS_ROOT = Path(__file__).resolve().parents[2] / "assets"
 LIVE_BASELINE_PATH = ASSETS_ROOT / "baselines" / "dual_ma_2024.live.json"

@@ -13,10 +13,10 @@ ARIA role 属性要求与语义图标.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class ToastLevel(str, Enum):
+class ToastLevel(StrEnum):
     """toast 级别."""
 
     SUCCESS = "success"

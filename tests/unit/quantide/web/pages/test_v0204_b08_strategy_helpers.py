@@ -23,6 +23,12 @@ from quantide.web.pages.strategy import (
 )
 
 
+@pytest.fixture(autouse=True)
+def private_edition_strategy_cases(monkeypatch):
+    monkeypatch.setattr(strategy_mod, "supports_live_trading", lambda: True)
+    if "acc_mod" in globals():
+        monkeypatch.setattr(acc_mod, "supports_live_trading", lambda: True)
+
 # ---------------------------------------------------------------------------
 # _parse_checkbox
 # ---------------------------------------------------------------------------

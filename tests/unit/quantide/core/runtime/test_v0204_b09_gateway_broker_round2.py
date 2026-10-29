@@ -53,7 +53,7 @@ def test_get_history_provider_get_bars_path_returns_history(monkeypatch):
     monkeypatch.setattr(wrapper, "_resolve_history_end_date", lambda end_dt: today)
     monkeypatch.setattr(wrapper, "_previous_trade_date", lambda d: today)
     monkeypatch.setattr(
-        "quantide.core.runtime.gateway_broker.live_quote.get_daily_bar", lambda asset: None
+        "quantide.core.runtime.gateway_broker.market_data_hub.get_daily_bar", lambda asset: None
     )
 
     # Provider exposes only get_bars (no get_history attr) -> exercises _provider_get_bars second branch.
@@ -92,7 +92,7 @@ def test_maybe_attach_forming_bar_returns_hist_when_bar_date_mismatch(monkeypatc
     # bar dt is yesterday, not today -> mismatch path.
     bar = {"dt": dt.datetime(2024, 6, 16, 10, 0), "close": 11.0}
     monkeypatch.setattr(
-        "quantide.core.runtime.gateway_broker.live_quote.get_daily_bar", lambda asset: bar
+        "quantide.core.runtime.gateway_broker.market_data_hub.get_daily_bar", lambda asset: bar
     )
     out = wrapper._maybe_attach_forming_bar(
         "000001.SZ", hist, today, dt.datetime(2024, 6, 17, 15, 0), 5
@@ -154,7 +154,7 @@ def test_resolve_price_returns_zero_on_live_quote_exception(monkeypatch):
         raise RuntimeError("quote err")
 
     monkeypatch.setattr(
-        "quantide.core.runtime.gateway_broker.live_quote.get_quote", _raise
+        "quantide.core.runtime.gateway_broker.market_data_hub.get_quote", _raise
     )
     assert adapter._resolve_price(req) == 0.0
 
@@ -170,7 +170,7 @@ def test_resolve_sizing_price_returns_execution_price_on_exception(monkeypatch):
         raise RuntimeError("limits err")
 
     monkeypatch.setattr(
-        "quantide.core.runtime.gateway_broker.live_quote.get_price_limits", _raise
+        "quantide.core.runtime.gateway_broker.market_data_hub.get_price_limits", _raise
     )
     assert adapter._resolve_sizing_price(req, 15.0) == 15.0
 

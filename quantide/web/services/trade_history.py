@@ -12,10 +12,10 @@ AC-FR0430-3: 仿真提供'补单'入口, 流程与实盘下单表单一致.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class HistoryRecordType(str, Enum):
+class HistoryRecordType(StrEnum):
     """记录类型."""
 
     ORDER = "order"

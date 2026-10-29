@@ -10,10 +10,10 @@ AC-5: IM / 邮件渠道需输入接收方.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class NotificationChannel(str, Enum):
+class NotificationChannel(StrEnum):
     """通知渠道."""
 
     WECHAT = "wechat"

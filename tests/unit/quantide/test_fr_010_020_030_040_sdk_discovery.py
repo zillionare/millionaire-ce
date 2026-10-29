@@ -138,21 +138,12 @@ def test_fr_015_security_list_sdk_is_st():
 
 
 def test_fr_020_discovery_returns_builtin_strategies():
-    """AC-FR-020: StrategyDiscovery 发现 quantide/strategies 内置策略 (FR-090/100/110)."""
+    """AC-FR-020: StrategyDiscovery 发现 CE 内置示例策略。"""
     from quantide.strategies.example import dual_ma
-    from quantide.strategies import pullback_sell, cost_stop_loss
 
     results_ma = StrategyDiscovery.discover(Path(dual_ma.__file__).parent)
-    results_pullback = StrategyDiscovery.discover(
-        Path(pullback_sell.__file__).parent
-    )
-    results_cost = StrategyDiscovery.discover(Path(cost_stop_loss.__file__).parent)
-
-    all_results = list(results_ma) + list(results_pullback) + list(results_cost)
-    ids = {r.strategy_id for r in all_results}
+    ids = {r.strategy_id for r in results_ma}
     assert any("DualMAStrategy" in sid for sid in ids)
-    assert any("PullbackSellStrategy" in sid for sid in ids)
-    assert any("CostStopLossStrategy" in sid for sid in ids)
 
 
 def test_fr_020_discovery_schema_fields():
@@ -229,15 +220,6 @@ def test_fr_040_base_strategy_strategy_type_independent():
 
     results = StrategyDiscovery.discover(Path(dual_ma.__file__).parent)
     assert all(r.strategy_type == "independent" for r in results.strategies)
-
-
-def test_fr_040_risk_strategy_strategy_type_risk():
-    """AC-FR-040: RiskStrategy 子类 strategy_type=risk."""
-    from quantide.strategies import pullback_sell, cost_stop_loss
-
-    results = list(StrategyDiscovery.discover(Path(pullback_sell.__file__).parent))
-    results += list(StrategyDiscovery.discover(Path(cost_stop_loss.__file__).parent))
-    assert all(r.strategy_type == "risk" for r in results)
 
 
 from pathlib import Path  # type: ignore[unresolved-import]  # noqa: E402

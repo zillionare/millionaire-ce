@@ -1,3 +1,8 @@
+"""Broker API routes."""
+
+# The application object must be created before these route dependencies load.
+# ruff: noqa: E402
+
 import datetime
 import json
 
@@ -9,7 +14,6 @@ from quantide.config.settings import get_settings
 from quantide.core.enums import FrameType
 from quantide.core.errors import TradeError, TradeErrors
 from quantide.data.models import Asset
-from quantide.data.sqlite import db
 from quantide.service.discovery import strategy_loader
 from quantide.service.param_optimizer import (
     OptimizationSpec,
@@ -291,7 +295,7 @@ async def metrics(request):
     """
     start = request.args.get("start")
     end = request.args.get("end")
-    baseline = request.args.get("baseline")
+    request.args.get("baseline")
 
     if start:
         start = arrow.get(start).date()
@@ -313,7 +317,6 @@ async def bills(request):
         - assets: 每日市值
 
     """
-    results = {}
 
 
 @rt("/accounts", methods=["DELETE"])

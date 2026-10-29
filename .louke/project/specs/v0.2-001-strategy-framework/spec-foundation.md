@@ -120,7 +120,7 @@
 
 ### 排除项（来自 story §12 限制声明）
 
-1. **Millionaire 仅支持日线行情存储和回测**；实盘中配合 qmt-gateway 获得当日实时行情（1m/30m/1d），但不存储
+1. **Millionaire 支持 1d/30m 历史行情存储和回测**；实盘中配合 qmt-gateway/MarketDataHub 获得当日实时行情（1m/30m/1d），其中 30m 历史来自 BaoStock，1m 仍为 live-only 且不落历史库
 2. **策略不能感知运行模式**（见 FR-040）
 3. **Stop 单作为风控策略实现**，不作为单独订单类型
 4. **Market-on-Close 暂不支持**

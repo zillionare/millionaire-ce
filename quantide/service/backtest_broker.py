@@ -30,7 +30,7 @@ from quantide.data.sqlite import db
 from quantide.service.abstract_broker import AbstractBroker
 from quantide.service.bar_views import HistBarView
 from quantide.service.datafeed import BarsFeedImpl
-from quantide.service.risk_overlay import TripleBarrierOverlay
+from quantide.service.risk_overlay import RiskOverlay
 
 
 class BacktestBroker(AbstractBroker):
@@ -49,8 +49,10 @@ class BacktestBroker(AbstractBroker):
         match_level: Literal["day", "minute"] = "day",
         desc: str = "",
         save_logs: bool = False,
-        risk_overlay: TripleBarrierOverlay | None = None,
+        risk_overlay: RiskOverlay | None = None,
         auction_epsilon: float = 0.001,
+        minute_bars: Any | None = None,
+        allow_same_bar_repurchase: bool = True,
     ):
         """回测 broker
 
@@ -76,7 +78,8 @@ class BacktestBroker(AbstractBroker):
         )
 
         self._data_feed: BarsFeedImpl = data_feed
-        self._bar_view = HistBarView(data_feed)
+        self._minute_bars = minute_bars
+        self._bar_view = HistBarView(data_feed, minute_bars=minute_bars)
         self._stamp_duty = max(0.0, float(stamp_duty))
         self._min_commission = max(0.0, float(min_commission))
         self._transfer_fee = max(0.0, float(transfer_fee))
@@ -88,6 +91,9 @@ class BacktestBroker(AbstractBroker):
         self._desc: str = desc
         self._save_backtest_logs = save_logs
         self._risk_overlay = risk_overlay
+        self.allow_same_bar_repurchase = bool(allow_same_bar_repurchase)
+        self._risk_overlay_in_progress = False
+        self._risk_overlay_sold_assets: set[str] = set()
         self._auction_epsilon = max(0.0, float(auction_epsilon))
 
         # 回测时钟，初始化为 bt_start 的前一个交易日 (Day 0)
@@ -96,8 +102,11 @@ class BacktestBroker(AbstractBroker):
             # 只有当日历确实包含 bt_start 之前的日期却算不出上一交易日时，
             # 才判定为日历损坏；最小测试日历（第一天没有更早日期）允许回退。
             frames = getattr(calendar, "day_frames", None)
+            first_frame = frames[0] if frames is not None and len(frames) else None
+            if hasattr(first_frame, "as_py"):
+                first_frame = first_frame.as_py()
             has_earlier = bool(
-                frames is not None and len(frames) and frames[0] < bt_start
+                first_frame is not None and first_frame < bt_start
             )
             if has_earlier:
                 raise ValueError(
@@ -470,17 +479,80 @@ class BacktestBroker(AbstractBroker):
             return None
         return df.row(0, named=True)
 
+    def get_bar_for_time(
+        self, asset: str, tm: datetime.datetime
+    ) -> dict[str, Any] | None:
+        """Return exactly the completed 30m bar at ``tm`` for risk overlays."""
+        if self._minute_bars is None:
+            return None
+        value = tm.replace(tzinfo=None) if tm.tzinfo is not None else tm
+        try:
+            frame = self._minute_bars.get_bars_in_range(
+                value, value, assets=[asset], adjust=None, eager_mode=True
+            )
+        except Exception:
+            return None
+        if frame is None or frame.is_empty():
+            return None
+        return frame.sort("date").row(0, named=True)
+
+    def _price_for_match(
+        self,
+        asset: str,
+        tm: datetime.datetime,
+        fill_timing: str = "",
+    ) -> pl.DataFrame | None:
+        """Read the matching bar without falling back from 30m to daily data."""
+        if self._match_level != "minute":
+            return self._data_feed.get_price_for_match(asset, tm)
+        if self._minute_bars is None:
+            # Preserve the original minute-feed contract for callers that
+            # provide minute data through the broker data feed.  The explicit
+            # ``minute_bars`` source is used by 30m runtimes, where silently
+            # falling back to daily data would be incorrect.
+            return self._data_feed.get_price_for_match(asset, tm)
+        value = tm.replace(tzinfo=None) if tm.tzinfo is not None else tm
+        try:
+            frame = self._minute_bars.get_bars_in_range(
+                value.date(), value.date(), assets=[asset], adjust=None, eager_mode=True
+            )
+        except Exception:
+            return None
+        if frame is None or frame.is_empty():
+            return None
+        frame = frame.filter(pl.col("date") <= value).sort("date")
+        if frame.is_empty():
+            return None
+        row = frame.tail(1)
+        fill_col = "open" if fill_timing == "next_open" else "close"
+        return row.with_columns(
+            pl.col(fill_col).alias("price"),
+            pl.col("date").alias("tm"),
+        )
+
     async def run_risk_overlay(self, tm: datetime.datetime) -> None:
         """Check open gaps/time exits before the host's ``on_bar``."""
         if self._risk_overlay is None:
             return
-        await self._risk_overlay.check_open(self, tm)
+        self._risk_overlay_in_progress = True
+        try:
+            await self._risk_overlay.check_open(self, tm)
+        finally:
+            self._risk_overlay_in_progress = False
 
     async def run_risk_overlay_intraday(self, tm: datetime.datetime) -> None:
         """Check same-day barrier touches after the host's ``on_bar``."""
         if self._risk_overlay is None:
             return
-        await self._risk_overlay.check_intraday(self, tm)
+        self._risk_overlay_in_progress = True
+        try:
+            await self._risk_overlay.check_intraday(self, tm)
+        finally:
+            self._risk_overlay_in_progress = False
+
+    def begin_risk_overlay_cycle(self) -> None:
+        """Start a bar-scoped same-bar repurchase decision window."""
+        self._risk_overlay_sold_assets.clear()
 
     def sync_risk_overlay(self, tm: datetime.datetime) -> None:
         """Register positions opened/changed by the host's ``on_bar``."""
@@ -586,6 +658,17 @@ class BacktestBroker(AbstractBroker):
         # 在回测中，timeout 参数无效，直接忽略
         _ = timeout
 
+        if (
+            not self.allow_same_bar_repurchase
+            and asset in self._risk_overlay_sold_assets
+        ):
+            self._log(
+                "INFO",
+                f"risk overlay blocked same-bar repurchase for {asset}",
+                dt=order_time,
+            )
+            return ExecutionResult.empty()
+
         assert order_time is not None, "order_time must be present in backtest mode"
         self.set_clock(order_time)
 
@@ -594,7 +677,9 @@ class BacktestBroker(AbstractBroker):
             raise NonMultipleOfLotSize(asset, shares)
 
         # 2. 获取撮合所需的行情数据
-        bars = self._data_feed.get_price_for_match(asset, order_time)
+        bars = self._price_for_match(
+            asset, order_time, str(kwargs.get("fill_timing", "")).lower()
+        )
         if bars is None or bars.is_empty():
             self._log(
                 "WARNING",
@@ -778,8 +863,8 @@ class BacktestBroker(AbstractBroker):
     ) -> ExecutionResult:
         """Execute a risk exit at an explicit simulated intraday price.
 
-        Used by the triple-barrier overlay for same-day stop/take-profit fills.
-        The fill is still constrained by A-share price limits and suspension.
+        Used by registered overlays for same-bar explicit-price exits. The fill
+        is still constrained by A-share price limits and suspension.
         """
         self.set_clock(order_time)
         pos = self._positions.get(asset)
@@ -787,7 +872,7 @@ class BacktestBroker(AbstractBroker):
             raise InsufficientPosition(asset, shares)
         self._validate_sell_shares(pos, shares)
 
-        bars = self._data_feed.get_price_for_match(asset, order_time)
+        bars = self._price_for_match(asset, order_time)
         if bars is None or bars.is_empty():
             raise NoDataForMatch(asset, order_time)
         row = bars.row(0, named=True)
@@ -827,6 +912,8 @@ class BacktestBroker(AbstractBroker):
                 tm=order_time,
                 shares=shares,
             )
+            if self._risk_overlay_in_progress:
+                self._risk_overlay_sold_assets.add(asset)
             return ExecutionResult(qt_oid=order.qtoid, trades=[trade])
         except TradeError as exc:
             order.status = OrderStatus.JUNK
@@ -900,7 +987,9 @@ class BacktestBroker(AbstractBroker):
             pos = self._positions.get(order.asset)
             if pos:
                 total_shares = pos.shares + shares
-                new_price = (pos.shares * pos.price + amount) / total_shares
+                # Position cost basis is the all-in acquisition cost, including
+                # the fee charged for this buy.
+                new_price = (pos.shares * pos.price + amount + fee) / total_shares
                 pos.shares = total_shares
                 pos.price = new_price
                 pos.profit = 0
@@ -912,7 +1001,7 @@ class BacktestBroker(AbstractBroker):
                     dt=self.as_date(tm),
                     asset=order.asset,
                     shares=shares,
-                    price=price,
+                    price=(amount + fee) / shares,
                     avail=0,  # T+1 规则：当日买入的持仓 avail 为 0
                     mv=shares * close,
                     profit=0,
@@ -996,7 +1085,7 @@ class BacktestBroker(AbstractBroker):
         if price > 0:
             est_price = price
         elif self.is_auction_time(order_time):
-            bars = self._data_feed.get_price_for_match(asset, order_time)
+            bars = self._price_for_match(asset, order_time)
             est_price = (
                 self._auction_bid_price(bars, OrderSide.BUY)
                 if bars is not None and not bars.is_empty()
@@ -1043,7 +1132,9 @@ class BacktestBroker(AbstractBroker):
         self.set_clock(order_time)
 
         # 1. 获取撮合所需的行情数据
-        bars = self._data_feed.get_price_for_match(asset, order_time)
+        bars = self._price_for_match(
+            asset, order_time, str(kwargs.get("fill_timing", "")).lower()
+        )
         if bars is None or bars.is_empty():
             self._log(
                 "WARNING",
@@ -1101,6 +1192,8 @@ class BacktestBroker(AbstractBroker):
             else:
                 trade = self._match_ask_day(order, bars)
 
+            if self._risk_overlay_in_progress:
+                self._risk_overlay_sold_assets.add(asset)
             return ExecutionResult(qt_oid=order.qtoid, trades=[trade])
         except TradeError as e:
             # 在废单的情况下，保留已插入的订单记录并更新状态。

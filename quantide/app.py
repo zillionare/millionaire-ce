@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,10 @@ def main() -> None:
     self-collision. Delegating app construction to the importable module path keeps
     the singleton check in the actual server process only.
     """
-    serve(appname=APP_IMPORT_PATH)
+    serve(
+        appname=APP_IMPORT_PATH,
+        host=os.getenv("QUANTIDE_HOST", "127.0.0.1"),
+    )
 
 
 if __name__ == "__main__":

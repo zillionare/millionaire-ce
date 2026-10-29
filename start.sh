@@ -61,8 +61,9 @@ fi
 exec > >(tee -a "$LOG_FILE")
 exec 2>&1
 
-# 启动应用（监听所有接口）
-UVICORN_ARGS=("quantide.app:app" "--host" "0.0.0.0" "--port" "8000")
+# 启动应用（默认仅监听本机；显式设置 QUANTIDE_HOST 可覆盖）
+HOST="${QUANTIDE_HOST:-127.0.0.1}"
+UVICORN_ARGS=("quantide.app:app" "--host" "$HOST" "--port" "8000")
 if [ -n "$RELOAD_MODE" ]; then
     UVICORN_ARGS+=("--reload")
 fi

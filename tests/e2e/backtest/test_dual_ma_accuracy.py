@@ -14,7 +14,6 @@ from quantide.service import runner as runner_module
 from quantide.service.runner import BacktestRunner
 from quantide.strategies.example.dual_ma import DualMAStrategy
 
-
 ASSETS_ROOT = Path(__file__).resolve().parents[2] / "assets"
 BASELINE_PATH = ASSETS_ROOT / "baselines" / "dual_ma_2024.backtest.json"
 
@@ -90,6 +89,13 @@ async def test_dual_ma_backtest_matches_accuracy_contract(calendar):
             "slow": 10,
             "invest": 100000,
             "universe": ["000001.SZ"],
+            # The checked-in accuracy fixture predates the FR-180 fee defaults
+            # and records a commission-only 0.05% fee model.  Keep that
+            # contract explicit rather than accidentally inheriting today's
+            # 0.01% commission + transfer-fee defaults.
+            "commission": 0.0005,
+            "stamp_duty": 0.0,
+            "transfer_fee": 0.0,
         },
         start_date=datetime.date(2024, 1, 2),
         end_date=datetime.date(2024, 5, 31),

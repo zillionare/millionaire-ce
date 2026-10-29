@@ -23,7 +23,7 @@ from quantide.data.models import Asset, Order, Position, Trade
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
 from quantide.service.abstract_broker import AbstractBroker
-from quantide.service.livequote import live_quote
+from quantide.service.market_data_hub import market_data_hub
 
 
 class GatewayTradeStateConsistencyError(RuntimeError):
@@ -146,7 +146,7 @@ class GatewayBrokerWrapper(AbstractBroker):
         """获取 live 策略所需的历史日线数据。
 
         Issue #20：默认 ``include_forming_bar=True``，当 ``end_dt`` 落在今日且
-        LiveQuote 已收到今日 tick 时，合并今日 forming bar 在末尾；close/high/low
+        MarketDataHub 已收到今日 tick 时，合并今日 forming bar 在末尾；close/high/low
         反映盘中最新状态。
         """
         if frame_type not in (FrameType.DAY, "1d", "day"):
@@ -201,16 +201,16 @@ class GatewayBrokerWrapper(AbstractBroker):
         end_dt: datetime.datetime | None,
         count: int,
     ) -> pl.DataFrame:
-        """end_date==今日且 end_dt.time()>9:30 时，合并 LiveQuote 的 forming bar.
+        """end_date==今日且 end_dt.time()>9:30 时，合并 MarketDataHub 的 forming bar.
 
-        若 LiveQuote 还没收到今日 tick（bar 为 None）— 今日的 close 还没固定，
+        若 MarketDataHub 还没收到今日 tick（bar 为 None）— 今日的 close 还没固定，
         退回只看昨日及更早。
         """
         if end_date != self._today():
             return hist
         if isinstance(end_dt, datetime.datetime) and end_dt.time() <= datetime.time(9, 30):
             return hist
-        bar = live_quote.get_daily_bar(asset)
+        bar = market_data_hub.get_daily_bar(asset)
         if bar is None:
             return self._provider_get_bars(
                 self._history_provider or daily_bars,
@@ -392,7 +392,7 @@ class GatewayBrokerWrapper(AbstractBroker):
         """Return the latest gateway quote price for live risk strategies."""
         result: dict[str, float] = {}
         for asset in assets:
-            quote = live_quote.get_quote(asset)
+            quote = market_data_hub.get_quote(asset)
             if not quote:
                 continue
             price = float(quote.get("lastPrice", 0) or 0)
@@ -697,7 +697,7 @@ class GatewayBrokerWrapper(AbstractBroker):
 
         TODO(#45 followup): post_auction 现在从 daily_bars 读"次日 open", 但 daily_bars
         在 9:30 盘中还没当日行 (历史数据收盘后入库). 等 zillionare/qmt-gateway#62
-        调查完 9:15~9:30 tick 推送行为后, 切到 live_quote.get_daily_bar(asset).open
+        调查完 9:15~9:30 tick 推送行为后, 切到 MarketDataHub 的 forming bar.open
         作为今开价. 在此之前, post_auction 路径会用昨日 close 撮合, 实际等于
         auction 模式, 偏差需通过 cheat_on_close_time 调晚 + slippage 放大缓解.
         """
@@ -1108,11 +1108,11 @@ class GatewayBrokerAdapter(BrokerPort):
         return result
 
     def _resolve_price(self, request: OrderRequest) -> float:
-        """解析正式下单价格，优先使用显式价格，其次回退到 live_quote 行情。"""
+        """解析正式下单价格，优先使用显式价格，其次回退到 MarketDataHub。"""
         if request.price > 0:
             return float(request.price)
         try:
-            quote = live_quote.get_quote(request.asset)
+            quote = market_data_hub.get_quote(request.asset)
         except Exception:
             return 0.0
         if not quote:
@@ -1126,13 +1126,18 @@ class GatewayBrokerAdapter(BrokerPort):
     def _resolve_sizing_price(self, request: OrderRequest, execution_price: float) -> float:
         """解析金额类下单的数量估算价格，优先使用涨跌停保护价。"""
         try:
-            down_limit, up_limit = live_quote.get_price_limits(request.asset)
+            down_limit, up_limit = market_data_hub.get_price_limits(request.asset)
         except Exception:
             return execution_price
-        if request.side == OrderSide.BUY and up_limit and up_limit > 0:
-            return float(up_limit)
-        if request.side == OrderSide.SELL and down_limit and down_limit > 0:
-            return float(down_limit)
+        try:
+            down_limit_value = float(down_limit or 0)
+            up_limit_value = float(up_limit or 0)
+        except (TypeError, ValueError):
+            return execution_price
+        if request.side == OrderSide.BUY and up_limit_value > 0:
+            return up_limit_value
+        if request.side == OrderSide.SELL and down_limit_value > 0:
+            return down_limit_value
         return execution_price
 
     def _resolve_shares(self, request: OrderRequest, price: float) -> int:

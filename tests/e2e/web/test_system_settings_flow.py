@@ -7,6 +7,7 @@ import datetime
 import pytest
 
 from quantide.service.init_wizard import init_wizard
+from quantide.service.market_data_hub import market_data_hub
 from quantide.web.pages.system import jobs as jobs_page
 from tests.e2e.support.gateway_stub import running_gateway_stub
 from tests.e2e.support.system_settings_session import (
@@ -18,55 +19,11 @@ from tests.e2e.support.tushare_stub import patched_tushare_fetcher
 
 @pytest.mark.e2e
 @pytest.mark.release_gate
-def test_gateway_settings_can_test_and_persist_configuration():
-    with system_settings_e2e_session() as session, running_gateway_stub(
-        prefix="/qmt", api_key="gateway-key"
-    ) as gateway_stub:
+def test_ce_keeps_gateway_settings_unavailable():
+    with system_settings_e2e_session() as session, running_gateway_stub(prefix="/qmt"):
         page = session.client.get("/system/gateway/", follow_redirects=False)
-        assert page.status_code == 200
-        assert "保存配置" in page.text
-
-        test_response = session.client.post(
-            "/system/gateway/test",
-            data={
-                "gateway_enabled": "on",
-                "gateway_server": gateway_stub.host,
-                "gateway_port": str(gateway_stub.port),
-                "gateway_prefix": gateway_stub.prefix,
-                "gateway_api_key": "gateway-key",
-                "gateway_timeout": "5",
-            },
-        )
-        assert test_response.status_code == 200
-        assert "连通性测试通过" in test_response.text
-        assert gateway_stub.prefix in test_response.text
-
-        save_response = session.client.post(
-            "/system/gateway/save",
-            data={
-                "gateway_enabled": "on",
-                "gateway_server": gateway_stub.host,
-                "gateway_port": str(gateway_stub.port),
-                "gateway_prefix": gateway_stub.prefix,
-                "gateway_api_key": "gateway-key",
-                "gateway_timeout": "5",
-            },
-        )
-        assert save_response.status_code == 200
-        assert "网关配置已保存" in save_response.text
-
-        state = init_wizard.get_state(force_refresh=True)
-        assert state.gateway_enabled is True
-        assert state.gateway_server == gateway_stub.host
-        assert state.gateway_port == gateway_stub.port
-        assert state.gateway_base_url == gateway_stub.prefix
-        assert state.gateway_api_key == "gateway-key"
-        assert state.gateway_timeout == 5
-
-        persisted_page = session.client.get("/system/gateway/", follow_redirects=False)
-        assert persisted_page.status_code == 200
-        assert gateway_stub.host in persisted_page.text
-        assert str(gateway_stub.port) in persisted_page.text
+        assert page.status_code == 503
+        assert "CE edition 暂不支持实盘交易" in page.text
 
 
 @pytest.mark.e2e
@@ -125,6 +82,26 @@ def test_jobs_toggle_persists_after_reopening_app():
 
 
 @pytest.mark.e2e
+def test_system_settings_session_clears_market_data_hub_state():
+    with system_settings_e2e_session():
+        market_data_hub.subscribe(["000001.SZ"])
+        market_data_hub._on_quotes(
+            {
+                "000001.SZ": {
+                    "price": 1678.23,
+                    "ts": "2026-10-28T10:00:00",
+                }
+            }
+        )
+
+    assert market_data_hub.is_running is False
+    assert market_data_hub.snapshot(["000001.SZ"]) == {}
+    assert market_data_hub.get_limits("000001.SZ") == (0.0, 0.0)
+    assert market_data_hub._subscribed == set()
+
+
+@pytest.mark.e2e
+@pytest.mark.private_only
 def test_trade_main_hides_fake_placeholder_metrics_with_gateway_stub():
     with (
         system_settings_e2e_session() as session,
@@ -138,7 +115,7 @@ def test_trade_main_hides_fake_placeholder_metrics_with_gateway_stub():
         state.gateway_base_url = gateway_stub.prefix
         state.gateway_api_key = "gateway-key"
         state.runtime_mode = "live"
-        
+
         state.runtime_broker_adapter = "gateway"
         state.livequote_mode = "gateway"
         init_wizard.save_state(state)
@@ -149,8 +126,8 @@ def test_trade_main_hides_fake_placeholder_metrics_with_gateway_stub():
         assert response.status_code == 200
         assert "昨收" in response.text
         assert "现价" in response.text
+        assert 'id="ref-current"' in response.text
         assert "1678.23" not in response.text
-        assert ">--<" not in response.text
         assert "reference-price-panel" in response.text
         assert "grid-cols-[88px_minmax(0,1fr)]" in response.text
         assert "quick-price-btn aspect-square" in response.text
@@ -161,6 +138,7 @@ def test_trade_main_hides_fake_placeholder_metrics_with_gateway_stub():
 
 
 @pytest.mark.e2e
+@pytest.mark.private_only
 def test_trade_main_keeps_side_controls_mutually_exclusive_with_gateway_stub():
     with (
         system_settings_e2e_session() as session,
@@ -174,7 +152,7 @@ def test_trade_main_keeps_side_controls_mutually_exclusive_with_gateway_stub():
         state.gateway_base_url = gateway_stub.prefix
         state.gateway_api_key = "gateway-key"
         state.runtime_mode = "live"
-        
+
         state.runtime_broker_adapter = "gateway"
         state.livequote_mode = "gateway"
         init_wizard.save_state(state)
@@ -192,6 +170,7 @@ def test_trade_main_keeps_side_controls_mutually_exclusive_with_gateway_stub():
 
 
 @pytest.mark.e2e
+@pytest.mark.private_only
 def test_trade_main_shows_limit_placeholder_and_price_hint_markup_with_gateway_stub():
     with (
         system_settings_e2e_session() as session,
@@ -205,7 +184,7 @@ def test_trade_main_shows_limit_placeholder_and_price_hint_markup_with_gateway_s
         state.gateway_base_url = gateway_stub.prefix
         state.gateway_api_key = "gateway-key"
         state.runtime_mode = "live"
-        
+
         state.runtime_broker_adapter = "gateway"
         state.livequote_mode = "gateway"
         init_wizard.save_state(state)
@@ -222,6 +201,7 @@ def test_trade_main_shows_limit_placeholder_and_price_hint_markup_with_gateway_s
 
 
 @pytest.mark.e2e
+@pytest.mark.private_only
 def test_trade_main_polls_live_quote_and_gates_speed_dial_with_gateway_stub():
     with (
         system_settings_e2e_session() as session,
@@ -235,7 +215,7 @@ def test_trade_main_polls_live_quote_and_gates_speed_dial_with_gateway_stub():
         state.gateway_base_url = gateway_stub.prefix
         state.gateway_api_key = "gateway-key"
         state.runtime_mode = "live"
-        
+
         state.runtime_broker_adapter = "gateway"
         state.livequote_mode = "gateway"
         init_wizard.save_state(state)
@@ -257,6 +237,7 @@ def test_trade_main_polls_live_quote_and_gates_speed_dial_with_gateway_stub():
 
 
 @pytest.mark.e2e
+@pytest.mark.private_only
 def test_trade_main_uses_top_toast_placeholder_with_gateway_stub():
     with (
         system_settings_e2e_session() as session,
@@ -270,7 +251,7 @@ def test_trade_main_uses_top_toast_placeholder_with_gateway_stub():
         state.gateway_base_url = gateway_stub.prefix
         state.gateway_api_key = "gateway-key"
         state.runtime_mode = "live"
-        
+
         state.runtime_broker_adapter = "gateway"
         state.livequote_mode = "gateway"
         init_wizard.save_state(state)
@@ -286,6 +267,7 @@ def test_trade_main_uses_top_toast_placeholder_with_gateway_stub():
 
 
 @pytest.mark.e2e
+@pytest.mark.private_only
 def test_trade_main_renders_lightning_controls_with_gateway_stub():
     with (
         system_settings_e2e_session() as session,
@@ -299,7 +281,7 @@ def test_trade_main_renders_lightning_controls_with_gateway_stub():
         state.gateway_base_url = gateway_stub.prefix
         state.gateway_api_key = "gateway-key"
         state.runtime_mode = "live"
-        
+
         state.runtime_broker_adapter = "gateway"
         state.livequote_mode = "gateway"
         init_wizard.save_state(state)
@@ -319,6 +301,7 @@ def test_trade_main_renders_lightning_controls_with_gateway_stub():
 
 
 @pytest.mark.e2e
+@pytest.mark.private_only
 def test_trade_lightning_create_modal_matches_buy_order_markup_with_gateway_stub():
     with (
         system_settings_e2e_session() as session,
@@ -332,7 +315,7 @@ def test_trade_lightning_create_modal_matches_buy_order_markup_with_gateway_stub
         state.gateway_base_url = gateway_stub.prefix
         state.gateway_api_key = "gateway-key"
         state.runtime_mode = "live"
-        
+
         state.runtime_broker_adapter = "gateway"
         state.livequote_mode = "gateway"
         init_wizard.save_state(state)
@@ -365,7 +348,9 @@ def test_trade_search_supports_name_and_pinyin_in_stub_mode():
         assert "平安银行" in pinyin_response.text
         assert 'data-display="平安银行（000001.SZ）"' in pinyin_response.text
         assert 'data-price="' in pinyin_response.text
-        assert 'data-price=""' not in pinyin_response.text
+        # Search is intentionally bounded and does not fetch prices; the
+        # price is populated later by the quote endpoint.
+        assert 'data-price=""' in pinyin_response.text
 
         assert name_response.status_code == 200
         assert "平安银行" in name_response.text

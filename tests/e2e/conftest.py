@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,12 +12,18 @@ import pytest
 from starlette.testclient import TestClient
 
 from quantide.app_factory import _attach_runtime_to_app_states, create_app
-from quantide.config.dev_stubs import DEV_STUBS_ENV_VAR, reset_dev_stub_runtime_for_tests
+from quantide.config.dev_stubs import (
+    DEV_STUBS_ENV_VAR,
+    reset_dev_stub_runtime_for_tests,
+)
 from quantide.config.paths import clear_app_config_dir_override
 from quantide.core.runtime.modes import RuntimeBootstrap
 from quantide.service.strategy_runtime import strategy_runtime_manager
+from tests.e2e.support.auth_fixture import ensure_test_admin
 from tests.e2e.support.system_settings_session import (
+    _reset_broker_registry,
     _reset_global_state,
+    _reset_market_data_hub,
     _seed_initialized_state,
     _seed_market_data,
     system_settings_e2e_session,
@@ -45,11 +52,24 @@ def _clear_runtime_manager() -> None:
 def clean_runtime_state() -> Iterator[None]:
     """Reset shared runtime state around each UI e2e test."""
     _clear_runtime_manager()
+    _reset_broker_registry()
+    _reset_market_data_hub()
     yield
     _clear_runtime_manager()
     _reset_global_state()
     clear_app_config_dir_override()
     reset_dev_stub_runtime_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def skip_private_only_contracts(request) -> None:
+    """Keep private-edition gateway UI contracts out of the CE E2E run."""
+    if request.node.get_closest_marker("private_only") is None:
+        return
+    enabled = str(os.getenv("QUANTIDE_ENABLE_EDITION_OVERRIDE", "")).lower()
+    edition = str(os.getenv("QUANTIDE_EDITION", "")).lower()
+    if enabled not in {"1", "true", "yes", "on"} or edition != "zillionaire":
+        pytest.skip("private-only contract; enable the zillionaire edition override")
 
 
 @contextmanager
@@ -68,6 +88,7 @@ def initialized_client() -> Iterator[TestClient]:
                 app_config_dir=app_config_dir,
                 enforce_single_instance=False,
             )
+            ensure_test_admin()
             _seed_initialized_state(market_home)
             runtime = RuntimeBootstrap().bootstrap()
             strategy_runtime_manager.bootstrap_from_runtime(runtime)

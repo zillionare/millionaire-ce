@@ -128,6 +128,6 @@ class IndexBarsStore(ParquetStorage):
         dates = df["date"].to_list()
         counts = df["n"].to_list()
         result: dict[datetime.date, int] = {}
-        for d, c in zip(dates, counts):
+        for d, c in zip(dates, counts, strict=False):
             result[d] = int(c)
         return result

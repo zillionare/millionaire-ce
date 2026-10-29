@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class NotificationEvent(str, Enum):
+class NotificationEvent(StrEnum):
     """通知事件定义 (FR-450).
 
     通知触发事件 (若用户已启用微信通知):

@@ -1,5 +1,8 @@
 """Application factory for Quantide."""
 
+# Import order is intentional: htmx is configured before page modules load.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import atexit
@@ -8,8 +11,8 @@ import os
 import sys
 from pathlib import Path
 
-from fasthtml.common import Mount, Route, fast_app
 from fasthtml import core as _fasthtml_core
+from fasthtml.common import Mount, Route, fast_app
 from loguru import logger
 
 # fasthtml 默认注入 htmx@2.0.7；AppTheme.headers() 又显式注入了 htmx@1.9.12。
@@ -57,8 +60,10 @@ from quantide.web.pages.history_trades import history_trades_list
 from quantide.web.pages.home import home_app
 from quantide.web.pages.init_wizard import init_wizard, init_wizard_app
 from quantide.web.pages.live import live_app
+from quantide.web.pages.optimize import (
+    optimize_page as _optimize_page,  # noqa: E402,F401
+)
 from quantide.web.pages.paper import paper_app
-from quantide.web.pages.optimize import optimize_page as _optimize_page  # noqa: E402,F401
 from quantide.web.pages.strategy import strategy_app
 from quantide.web.pages.system.alpha_ledger import system_alpha_ledger_app
 from quantide.web.pages.system.calendar import system_calendar_app
@@ -70,6 +75,7 @@ from quantide.web.pages.system.realtime import system_realtime_app
 from quantide.web.pages.system.risk_events import system_risk_events_app
 from quantide.web.pages.system.runtime_monitor import system_runtime_monitor_app
 from quantide.web.pages.system.stocks import system_stocks_app
+from quantide.web.pages.tracking import toggle_tracking, tracking_page
 from quantide.web.pages.trade_lightning import (
     trade_lightning_clear,
     trade_lightning_clear_modal,
@@ -90,8 +96,8 @@ from quantide.web.pages.trade_main import (
     trade_asset_stats,
     trade_live_quote,
     trade_main_page,
-    trade_positions_refresh,
     trade_orders_refresh,
+    trade_positions_refresh,
 )
 from quantide.web.theme import AppTheme
 
@@ -235,7 +241,19 @@ def create_app(
         enforce_single_instance: 是否执行单实例检查。
     """
     set_app_config_dir_override(app_config_dir)
+    # These singletons are imported before create_app() is called.  Rebind
+    # them after the per-test/per-instance config directory is selected so
+    # durable next-open intents and model artifacts use this app's database.
+    from quantide.service.model_store import model_store
+    from quantide.service.strategy_tracking import tracking_store
+
+    tracking_store.rebind(get_app_db_path())
+    model_store.rebind(get_app_config_dir() / "models")
     db_path = _initialize_app_database()
+    # InitWizardService is also a singleton and caches AppState.  A new app
+    # config directory must read its own state before the first worker-thread
+    # request, rather than inheriting the previous app's cached object.
+    init_wizard.reset_state_cache()
     ensure_dev_stubs_started()
 
     if enforce_single_instance:
@@ -266,6 +284,13 @@ def create_app(
             "public_paths": ["/init-wizard", r"/init-wizard/.*"],
         },
     )
+    # AuthManager is a process singleton, while the factory supports isolated
+    # app config directories (notably for tests and embedded app instances).
+    # Rebind before registering middleware/routes so a request handled by an
+    # ASGI worker cannot use the connection from an earlier app.
+    auth_db_path = Path(auth.auth_db.db_path).expanduser()
+    if auth_db_path != db_path.expanduser():
+        auth.rebind_database(str(db_path))
 
     app, rt = fast_app(
         hdrs=AppTheme.headers(),
@@ -368,6 +393,8 @@ def create_app(
             Route("/trade/asset-stats", trade_asset_stats, methods=["GET"]),
             Route("/trade/live-quote", trade_live_quote, methods=["GET"]),
             Route("/trade/order", place_order_trade, methods=["POST"]),
+            Route("/tracking/{portfolio_id}", tracking_page, methods=["GET"]),
+            Route("/tracking/{portfolio_id}/toggle", toggle_tracking, methods=["POST"]),
             Route("/trade/cancel/{qtoid}", cancel_order_trade, methods=["POST"]),
             Route(
                 "/trade/lightning/{portfolio_id:str}/create-modal",

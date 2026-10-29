@@ -8,11 +8,20 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import HTMLResponse, JSONResponse
 
 from quantide.config.branding import get_branding
+from quantide.config.features import (
+    live_trading_unavailable_message,
+    supports_live_trading,
+)
 from quantide.service.init_wizard import init_wizard
 
 FEATURE_ROUTE_PREFIXES = {
+    "/live": "live_trading",
     "/trade/simulation": "simulation",
     "/trade/live": "live_trading",
+    "/strategy/live": "live_trading",
+    "/system/gateway": "live_settings",
+    "/init-wizard/gateway-test": "live_settings",
+    "/system/accounts/live": "live_trading",
 }
 
 
@@ -20,6 +29,8 @@ def _match_feature_for_path(path: str) -> str | None:
     for prefix, feature in FEATURE_ROUTE_PREFIXES.items():
         if path == prefix or path.startswith(f"{prefix}/"):
             return feature
+    if "/deploy/live" in path:
+        return "live_trading"
     return None
 
 
@@ -28,6 +39,14 @@ def _is_htmx_request(headers) -> bool:
 
 
 def _disabled_fragment_html(feature_name: str) -> str:
+    if not supports_live_trading() and feature_name in {"实盘交易", "live_trading", "实盘设置"}:
+        return f"""
+        <div class="max-w-xl mx-auto mt-10 p-6 bg-white rounded-lg shadow border border-gray-200 text-center">
+            <h3 class="text-lg font-semibold text-gray-700 mb-3">🔒 实盘交易暂不可用</h3>
+            <p class="text-gray-700 mb-2">{live_trading_unavailable_message()}。</p>
+            <p class="text-gray-600">当前版本可继续使用回测、仿真账户和纸面运行。</p>
+        </div>
+        """
     return f"""
     <div class="max-w-xl mx-auto mt-10 p-6 bg-white rounded-lg shadow border border-gray-200 text-center">
         <h3 class="text-lg font-semibold text-red-700 mb-3">🔒 {feature_name}功能已禁用</h3>
@@ -78,8 +97,35 @@ class FeatureCheckMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         """处理请求"""
         feature_key = _match_feature_for_path(request.url.path)
+        if feature_key is None and request.url.path.startswith("/broker"):
+            requested_kind = str(request.query_params.get("kind", "")).lower()
+            active_kind = str(
+                (request.scope.get("session") or {}).get("active_account_kind", "")
+            ).lower()
+            if requested_kind in {"qmt", "live"} or active_kind in {"qmt", "live"}:
+                feature_key = "live_trading"
+        if feature_key is None and (
+            request.url.path == "/trade/set-active"
+            or request.url.path.startswith("/trade/cancel/")
+        ):
+            active_kind = str(
+                (request.scope.get("session") or {}).get("active_account_kind", "")
+            ).lower()
+            if active_kind in {"qmt", "live"}:
+                feature_key = "live_trading"
         if feature_key is not None:
-            feature = get_feature_status().get(feature_key, {})
+            if feature_key == "live_settings":
+                if not supports_live_trading():
+                    feature = {
+                        "name": "实盘设置",
+                        "available": False,
+                    }
+                else:
+                    # The settings page is how a private edition configures
+                    # the gateway, so it must remain reachable before setup.
+                    feature = {"name": "实盘设置", "available": True}
+            else:
+                feature = get_feature_status().get(feature_key, {})
             if not feature.get("available", False):
                 feature_name = str(feature.get("name") or feature_key)
                 if request.method == "GET":
@@ -88,7 +134,14 @@ class FeatureCheckMiddleware(BaseHTTPMiddleware):
                         htmx=_is_htmx_request(request.headers),
                     )
                 return JSONResponse(
-                    {"error": f"{feature_name}功能已禁用，请先在交易网关页面配置 gateway"},
+                    {
+                        "error": (
+                            live_trading_unavailable_message()
+                            if not supports_live_trading()
+                            and feature_key in {"live_trading", "live_settings"}
+                            else f"{feature_name}功能已禁用，请先在交易网关页面配置 gateway"
+                        )
+                    },
                     status_code=503,
                 )
         response = await call_next(request)
@@ -144,7 +197,7 @@ def get_feature_status() -> dict[str, dict]:
             },
             "live_trading": {
                 "name": "实盘交易",
-                "available": status["live_trading"],
+                "available": supports_live_trading() and status["live_trading"],
                 "icon": "💰",
                 "description": "使用 gateway 进行实盘交易",
                 "required": "完成初始化并启用 gateway",

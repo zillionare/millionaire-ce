@@ -40,12 +40,14 @@ class _DummyMarketData:
 @pytest.fixture
 def paper_broker() -> PaperBroker:
     db.init(":memory:")
-    return PaperBroker(
+    broker = PaperBroker(
         portfolio_id="paper-unit",
         principal=100000,
         market_data=_DummyMarketData(),
         market_value_update_interval=0.0,
     )
+    broker.set_clock(AC_TEST_DATE)
+    return broker
 
 
 def _publish_halted(broker, asset: str = AC_ASSET, price: float = 10.0):

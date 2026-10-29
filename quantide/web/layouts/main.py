@@ -5,6 +5,7 @@ from fasthtml.common import *
 from monsterui.all import *
 
 from quantide.config.branding import get_branding
+from quantide.config.features import supports_live_trading
 from quantide.core.enums import BrokerKind
 from quantide.service.init_wizard import init_wizard
 from quantide.service.registry import BrokerRegistry
@@ -159,7 +160,11 @@ def _build_paper_entry(req: object | None = None) -> dict[str, object]:
 
 
 def build_header_menu(trade_enabled: bool, req: object | None = None) -> list[dict[str, object]]:
-    menu: list[dict[str, object]] = copy.deepcopy(STATIC_HEADER_ITEMS)
+    menu: list[dict[str, object]] = [
+        copy.deepcopy(item)
+        for item in STATIC_HEADER_ITEMS
+        if supports_live_trading() or item.get("title") != "实盘"
+    ]
     menu.append(_build_paper_entry(req))
     if not trade_enabled:
         for item in menu:
@@ -170,6 +175,21 @@ def build_header_menu(trade_enabled: bool, req: object | None = None) -> list[di
 
 
 HEADER_MENU = STATIC_HEADER_ITEMS
+
+
+def _without_live_items(items: list[dict]) -> list[dict]:
+    """Remove private-edition live entries from a copied menu tree."""
+    if supports_live_trading():
+        return items
+    filtered: list[dict] = []
+    for item in items:
+        if item.get("title") in {"实盘", "实盘运行", "交易网关"}:
+            continue
+        children = item.get("children")
+        if children:
+            item["children"] = _without_live_items(children)
+        filtered.append(item)
+    return filtered
 
 
 def _menu_titles(menu_items: list[dict[str, object]]) -> set[str]:
@@ -197,7 +217,7 @@ class MainLayout(BaseLayout):
         self.header_accounts: list[dict] = []
         self.active_account: dict | None = None
         self.header_active = ""
-        self.header_menu = copy.deepcopy(HEADER_MENU)
+        self.header_menu = _without_live_items(copy.deepcopy(HEADER_MENU))
         self.sidebar_menu: list[dict] | None = None
         self._sidebar_active_url: str = "/"
 
@@ -244,7 +264,7 @@ class MainLayout(BaseLayout):
             menu_key = self._resolve_header_active() or "首页"
             menu_source = SIDEBAR_MENUS.get(menu_key, SIDEBAR_MENUS["首页"])
 
-        menu = copy.deepcopy(menu_source)
+        menu = _without_live_items(copy.deepcopy(menu_source))
         if self._sidebar_active_url and self._sidebar_active_url != "/":
             for item in menu:
                 item["active"] = item.get("url") == self._sidebar_active_url
@@ -258,7 +278,7 @@ class MainLayout(BaseLayout):
             status = init_wizard.get_feature_status()
         except Exception:
             return False
-        return bool(status.get("simulation") and status.get("live_trading"))
+        return bool(status.get("simulation"))
 
     def _build_alert_context(self) -> dict[str, object]:
         """构建 header 告警中心上下文。"""
@@ -291,7 +311,10 @@ class MainLayout(BaseLayout):
 
         reg = BrokerRegistry()
         default_account = reg.get_default()
-        for kind in [BrokerKind.QMT, BrokerKind.SIMULATION]:
+        kinds = [BrokerKind.SIMULATION]
+        if supports_live_trading():
+            kinds.insert(0, BrokerKind.QMT)
+        for kind in kinds:
             for info in reg.list_by_kind(kind):
                 account = {
                     "id": info.get("id"),

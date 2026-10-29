@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class RiskEventReason(str, Enum):
+class RiskEventReason(StrEnum):
     """风控触发原因."""
 
     STOP_LOSS = "stop_loss"

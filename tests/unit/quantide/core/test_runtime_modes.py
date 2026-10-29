@@ -79,13 +79,11 @@ def test_runtime_bootstrap_paper_uses_live_quote_market_data(monkeypatch):
 
     monkeypatch.setattr(runtime_modes, "get_settings", lambda: runtime_cfg)
     monkeypatch.setattr(runtime_modes.scheduler, "start", lambda: None)
-    monkeypatch.setattr(runtime_modes.live_quote, "start", lambda: None)
 
     runtime = runtime_modes.RuntimeBootstrap(mode="paper").bootstrap()
 
     assert runtime.mode == "paper"
-    from quantide.service.livequote import LiveQuote
-    assert isinstance(runtime.market_data, LiveQuote)
+    assert runtime.market_data is runtime_modes.market_data_hub
 
     handle = runtime.registry.get(BrokerKind.SIMULATION, "paper-account")
     assert handle is not None
@@ -169,12 +167,7 @@ def test_runtime_bootstrap_uses_hub_when_gateway_url_empty(monkeypatch):
         runtime_broker_adapter="",
         livequote_mode="none",
     )
-    started: list[bool] = []
     monkeypatch.setattr(runtime_modes, "get_settings", lambda: runtime_cfg)
     monkeypatch.setattr(runtime_modes.scheduler, "start", lambda: None)
-    monkeypatch.setattr(
-        runtime_modes.live_quote, "start", lambda: started.append(True)
-    )
     runtime = runtime_modes.RuntimeBootstrap(mode="paper").bootstrap()
-    assert started == []
     assert runtime.market_data is runtime_modes.market_data_hub

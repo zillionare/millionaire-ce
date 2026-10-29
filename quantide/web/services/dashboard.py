@@ -9,21 +9,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 _DASHBOARD_TASK_LIMIT = 10
 _ALERT_GROUP_LIMIT = 5
 
 
-class AlertCategory(str, Enum):
+class AlertCategory(StrEnum):
     """告警分类 (AC-FR0203-1)."""
 
     STRATEGY = "strategy"
     SYSTEM = "system"
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """任务状态 (AC-FR0202-1)."""
 
     SUCCESS = "success"

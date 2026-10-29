@@ -479,7 +479,7 @@ def _build_jobs_table(jobs_status: list[dict]) -> Table:
     """构建任务列表表格"""
     rows = []
     for job in jobs_status:
-        status_dot = _build_status_dot(job["enabled"])
+        _build_status_dot(job["enabled"])
         toggle_url = f"/system/jobs/toggle/{job['id']}"
         detail_url = f"/system/jobs/detail/{job['id']}"
 

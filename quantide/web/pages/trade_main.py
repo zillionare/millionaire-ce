@@ -24,6 +24,7 @@ from starlette.responses import (
     RedirectResponse,
 )
 
+from quantide.config.features import supports_live_trading
 from quantide.config.settings import get_settings
 from quantide.core.enums import BidType, BrokerKind, OrderSide, OrderStatus
 from quantide.core.runtime.gateway_broker import (
@@ -35,11 +36,14 @@ from quantide.data.models import Order, Position
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.stocks import stock_list
-from quantide.service.livequote import live_quote
+from quantide.service.market_data_hub import market_data_hub
 from quantide.service.registry import BrokerRegistry
 from quantide.web.components.asset_label import resolve_asset_name
 from quantide.web.layouts.main import MainLayout
-from quantide.web.pages.trade_lightning import TradeLightningSidebar
+from quantide.web.pages.trade_lightning import (
+    TradeLightningSidebar,
+    TradeReferencePanel,
+)
 
 
 def _get_registry(req) -> BrokerRegistry:
@@ -49,7 +53,10 @@ def _get_registry(req) -> BrokerRegistry:
 def _get_all_accounts(reg: BrokerRegistry) -> list[dict]:
     """获取所有账号列表"""
     accounts = []
-    for kind in [BrokerKind.QMT, BrokerKind.SIMULATION]:
+    kinds = [BrokerKind.SIMULATION]
+    if supports_live_trading():
+        kinds.insert(0, BrokerKind.QMT)
+    for kind in kinds:
         for info in reg.list_by_kind(kind):
             accounts.append({
                 "id": info.get("id"),
@@ -74,7 +81,10 @@ def _get_active_account(
     if query_params:
         query_account_id = query_params.get("account_id")
     if query_account_id and reg:
-        for candidate in (BrokerKind.QMT, BrokerKind.SIMULATION):
+        candidates = [BrokerKind.SIMULATION]
+        if supports_live_trading():
+            candidates.insert(0, BrokerKind.QMT)
+        for candidate in candidates:
             try:
                 candidate_broker = reg.get(candidate, query_account_id)
             except Exception:
@@ -87,8 +97,26 @@ def _get_active_account(
                 session["active_account_id"] = account_id
                 break
 
+    if (
+        str(kind_str or "").lower() in {"qmt", "live"}
+        and not supports_live_trading()
+    ):
+        kind_str = ""
+        account_id = ""
+        resolved_broker = None
+
     if not kind_str or not account_id:
         default = reg.get_default() if reg else None
+        if not isinstance(default, (tuple, list)) or len(default) != 2:
+            default = None
+        if (
+            default
+            and str(default[0]).lower() in {"qmt", "live"}
+            and not supports_live_trading()
+        ):
+            simulations = reg.list_by_kind(BrokerKind.SIMULATION) if reg else []
+            if simulations:
+                default = (BrokerKind.SIMULATION.value, simulations[0].get("id"))
         if not default:
             return None
         kind_str, account_id = default
@@ -223,7 +251,9 @@ def _build_asset_stats(asset: str) -> dict[str, str | bool]:
     current_price = _resolve_live_current_price(asset)
     payload["visible"] = True
     payload["close"] = _format_trade_metric(closes[-1])
-    payload["current"] = _format_trade_metric(current_price or closes[-1])
+    # A historical close is a reference metric, not a current quote.  Keep
+    # the current-price field empty until MarketDataHub has a real snapshot.
+    payload["current"] = _format_trade_metric(current_price) if current_price > 0 else ""
     for period in (5, 10, 20, 30, 60):
         if len(closes) >= period:
             payload[f"ma{period}"] = _format_trade_metric(sum(closes[-period:]) / period)
@@ -326,20 +356,6 @@ def _trade_result_has_order(result) -> bool:
     return len(trades) > 0
 
 
-def _maybe_start_live_quote() -> None:
-    """Start live quote streaming on demand when runtime settings allow it."""
-    settings = get_settings()
-    livequote_mode = str(getattr(settings, "livequote_mode", "") or "").strip().lower()
-    if not getattr(settings, "gateway_enabled", False) and livequote_mode == "none":
-        return
-    if live_quote.is_running:
-        return
-    try:
-        live_quote.start()
-    except Exception:
-        return
-
-
 def _resolve_live_current_price(asset: str) -> float:
     """Resolve the latest current price for the trade panel.
 
@@ -352,10 +368,18 @@ def _resolve_live_current_price(asset: str) -> float:
     if not asset:
         return 0.0
     _maybe_start_live_quote()
-    quote = live_quote.get_quote(asset)
+    try:
+        snapshot = market_data_hub.snapshot([asset]).get(asset)
+        if snapshot is not None:
+            price = float(getattr(snapshot, "price", 0) or 0)
+            if price > 0:
+                return price
+    except Exception:
+        pass
+    quote = market_data_hub.get_quote(asset)
     if not quote:
         return 0.0
-    for key in ("price", "lastPrice", "close"):
+    for key in ("price", "lastPrice"):
         try:
             value = float(quote.get(key) or 0)
         except Exception:
@@ -363,6 +387,12 @@ def _resolve_live_current_price(asset: str) -> float:
         if value > 0:
             return value
     return 0.0
+
+
+def _maybe_start_live_quote() -> None:
+    """Compatibility hook: start the sole MarketDataHub subscription."""
+    if not market_data_hub.is_running:
+        market_data_hub.start()
 
 
 def _build_live_quote_payload(asset: str) -> dict[str, str | bool]:
@@ -374,10 +404,10 @@ def _build_live_quote_payload(asset: str) -> dict[str, str | bool]:
     Returns:
         Quote payload for the trade page.
     """
-    current_price = _resolve_live_current_price(asset) or _resolve_trade_reference_close(asset)
+    current_price = _resolve_live_current_price(asset)
     return {
         "asset": asset,
-        "current": _format_trade_metric(current_price),
+        "current": _format_trade_metric(current_price) if current_price > 0 else "",
         "visible": current_price > 0,
     }
 
@@ -444,16 +474,30 @@ def _trade_toast(message: str, level: str = "error"):
     )
 
 
-def AssetInfoBar(total: float = 0, cash: float = 0, market_value: float = 0):
+def AssetInfoBar(
+    total: float = 0,
+    cash: float = 0,
+    market_value: float = 0,
+    principal: float = 0,
+):
     """资产信息条"""
     cash_ratio = (cash / total * 100) if total > 0 else 0
     position_ratio = (market_value / total * 100) if total > 0 else 0
+    pnl_pct = ((total - principal) / principal * 100) if principal > 0 else 0
 
     return Div(
         Div(
             Div(
                 Span("总资产", cls="text-gray-600 dark:text-gray-400 text-sm"),
                 Span(f"{total/10000:.2f}万", cls="font-bold text-gray-900 dark:text-white text-base ml-2"),
+                cls="flex items-center space-x-2",
+            ),
+            Div(
+                Span("盈亏比例", cls="text-gray-600 dark:text-gray-400 text-sm"),
+                Span(
+                    f"{pnl_pct:+.2f}%",
+                    cls="font-bold text-gray-900 dark:text-white text-base ml-2",
+                ),
                 cls="flex items-center space-x-2",
             ),
             Div(
@@ -730,26 +774,30 @@ def LightningTradePanel(
                     cls="flex shrink-0 items-stretch",
                 ),
                 # 右边：闪电单（实盘）/ 补单说明（仿真）
-                (
-                    TradeLightningSidebar(portfolio_id)
-                    if is_live
-                    else Div(
-                        Div(
-                            UkIcon("zap-off", size=18, cls="text-gray-400"),
-                            cls=(
-                                "flex h-8 w-8 items-center justify-center rounded-lg "
-                                "border border-gray-200 bg-gray-50"
+                Div(
+                    TradeReferencePanel(),
+                    (
+                        TradeLightningSidebar(portfolio_id)
+                        if is_live
+                        else Div(
+                            Div(
+                                UkIcon("zap-off", size=18, cls="text-gray-400"),
+                                cls=(
+                                    "flex h-8 w-8 items-center justify-center rounded-lg "
+                                    "border border-gray-200 bg-gray-50"
+                                ),
                             ),
-                        ),
-                        P(
-                            "闪电单仅用于实盘；仿真账户保留普通下单，用于补单与测试。",
-                            cls="mt-3 text-sm text-gray-500",
-                        ),
-                        cls=(
-                            "flex w-[260px] flex-col items-center justify-center "
-                            "rounded-lg border border-gray-100 bg-gray-50 p-4"
-                        ),
-                    )
+                            P(
+                                "闪电单仅用于实盘；仿真账户保留普通下单，用于补单与测试。",
+                                cls="mt-3 text-sm text-gray-500",
+                            ),
+                            cls=(
+                                "flex w-[260px] flex-col items-center justify-center "
+                                "rounded-lg border border-gray-100 bg-gray-50 p-4"
+                            ),
+                        )
+                    ),
+                    cls="flex-[0.95] space-y-0",
                 ),
                 cls="flex gap-3",
             ),
@@ -1179,7 +1227,7 @@ def LightningTradePanel(
                         const amountYuan = cash * fraction;
 
                         if (mode === 'AMOUNT') {
-                            valueInput.value = (amountYuan / 10000).toFixed(4).replace(/\.?0+$/, '');
+                            valueInput.value = (amountYuan / 10000).toFixed(4).replace(/\\.?0+$/, '');
                         } else {
                             const price = getEstimatePrice();
                             if (price <= 0) {
@@ -1931,7 +1979,7 @@ def trade_main_page(request):
     broker = reg.get(BrokerKind(kind), portfolio_id) if reg else None
 
     # 获取资产信息
-    total = cash = market_value = 0
+    total = cash = market_value = principal = 0
     positions: list[Position] = []
     orders: list[Order] = []
 
@@ -1944,11 +1992,13 @@ def trade_main_page(request):
                 total = broker.asset.total
                 cash = broker.asset.cash
                 market_value = broker.asset.market_value
+                principal = broker.asset.principal
             elif hasattr(broker, "total_assets"):
                 # SimulationBroker 等没有 asset 属性
                 total = broker.total_assets
                 cash = broker.cash if hasattr(broker, "cash") else 0
                 market_value = total - cash
+                principal = getattr(broker, "principal", 0)
         except Exception as e:
             logger.warning(f"获取资产信息失败: {e}")
 
@@ -1974,11 +2024,16 @@ def trade_main_page(request):
                     Span("★", cls="text-[#e41815] mr-1"),
                     Span(f"当前账号: {active_account['name']}", cls="font-medium"),
                     Span(f"({active_account['label']})", cls="ml-2 text-sm text-gray-500"),
+                    A(
+                        "对照 →",
+                        href=f"/tracking/{portfolio_id}",
+                        cls="ml-3 text-xs font-medium text-[#e41815] hover:text-[#c91412]",
+                    ),
                     cls="flex items-center mb-4 px-6",
                 ),
             ),
             # 资产信息条
-            AssetInfoBar(total, cash, market_value),
+            AssetInfoBar(total, cash, market_value, principal),
             # 闪电交易面板
             LightningTradePanel(
                 portfolio_id, kind, cash, total,
@@ -2008,8 +2063,21 @@ async def place_order_trade(req):
     reg = _get_registry(req)
     session = req.scope.get("session", {})
     broker = None
-    account_kind = str(form.get("account_kind") or session.get("active_account_kind") or "")
+    form_account_kind = str(form.get("account_kind") or "")
+    account_kind = form_account_kind or str(session.get("active_account_kind") or "")
     account_id = str(form.get("account_id") or session.get("active_account_id") or "")
+    if form_account_kind.lower() in {"qmt", "live"} and not supports_live_trading():
+        return JSONResponse(
+            {"error": "CE edition 暂不支持实盘交易"},
+            status_code=503,
+        )
+    if (
+        not form_account_kind
+        and account_kind.lower() in {"qmt", "live"}
+        and not supports_live_trading()
+    ):
+        account_kind = ""
+        account_id = ""
     requested_account = bool(account_kind and account_id)
     if reg and requested_account:
         try:
@@ -2018,14 +2086,29 @@ async def place_order_trade(req):
             broker = None
     if broker is None and reg and not requested_account:
         default = reg.get_default()
+        if not isinstance(default, (tuple, list)) or len(default) != 2:
+            default = None
         if default:
             default_kind, account_id = default
+            if (
+                str(default_kind).lower() in {"qmt", "live"}
+                and not supports_live_trading()
+            ):
+                simulations = reg.list_by_kind(BrokerKind.SIMULATION)
+                if simulations:
+                    default_kind = BrokerKind.SIMULATION.value
+                    account_id = simulations[0].get("id")
             account_kind = (
                 default_kind.value
                 if isinstance(default_kind, BrokerKind)
                 else str(default_kind)
             )
-            broker = reg.get(default[0], account_id)
+            if account_kind.lower() in {"qmt", "live"} and not supports_live_trading():
+                return JSONResponse(
+                    {"error": "CE edition 暂不支持实盘交易"},
+                    status_code=503,
+                )
+            broker = reg.get(default_kind, account_id)
 
     def _render_toast(message: str, level: str = "error"):
         return HTMLResponse(to_xml(_trade_toast(message, level)))
@@ -2044,13 +2127,16 @@ async def place_order_trade(req):
 
     price = 0.0
     if price_mode == "LIMIT":
-        if str(price_str).strip() == "":
+        price_text = str(price_str).strip()
+        if price_text == "":
             price = 0.0
         else:
             try:
                 price = float(price_str)
             except ValueError:
                 return _render_toast("价格格式错误")
+            if price <= 0:
+                return _render_toast("价格必须大于0")
         if price <= 0:
             price = _resolve_local_trade_close(asset)
         if price <= 0:
@@ -2115,6 +2201,11 @@ async def cancel_order_trade(req):
     session = req.scope.get("session", {})
     kind = session.get("active_account_kind")
     account_id = session.get("active_account_id")
+    if str(kind or "").lower() in {"qmt", "live"} and not supports_live_trading():
+        return JSONResponse(
+            {"error": "CE edition 暂不支持实盘交易"},
+            status_code=503,
+        )
     broker = None
     if reg and kind and account_id:
         try:
@@ -2233,6 +2324,11 @@ async def set_active_account(req, session: dict | None = None):
 
     if not kind or not account_id:
         return Div("参数错误", cls="text-red-500 p-4")
+    if str(kind).lower() in {"qmt", "live"} and not supports_live_trading():
+        return JSONResponse(
+            {"error": "CE edition 暂不支持实盘交易"},
+            status_code=503,
+        )
 
     session["active_account_kind"] = kind
     session["active_account_id"] = account_id
@@ -2253,12 +2349,22 @@ def _resolve_broker_for_refresh(req):
     session = req.scope.get("session", {}) or {}
     active_kind = session.get("active_account_kind")
     active_id = session.get("active_account_id")
+    if str(active_kind or "").lower() in {"qmt", "live"} and not supports_live_trading():
+        return None
     if active_kind and active_id:
         try:
             return reg.get(BrokerKind(active_kind), active_id)
         except Exception:
             return None
     default = reg.get_default()
+    if (
+        default
+        and str(default[0]).lower() in {"qmt", "live"}
+        and not supports_live_trading()
+    ):
+        simulations = reg.list_by_kind(BrokerKind.SIMULATION)
+        if simulations:
+            default = (BrokerKind.SIMULATION.value, simulations[0].get("id"))
     if default:
         try:
             return reg.get(default[0], default[1])

@@ -62,7 +62,8 @@ class _FakeMarketData:
         }
 
     def get_limits(self, asset):
-        return 12.0, 9.0
+        # LiveBarView._limits 契约: (down_limit, up_limit)
+        return 9.0, 12.0
 
 
 class _FakeAggregator:

@@ -87,6 +87,7 @@ class MessageHub:
     def subscribe(self, topic: str, callback: Callable) -> None:
         """
         订阅指定主题的消息
+
         Args:
             topic: 消息主题（字符串标识，如 "data_updated"）
             callback: 消息处理函数（参数为消息内容）
@@ -110,6 +111,7 @@ class MessageHub:
     def publish(self, topic: str, msg_content: Any) -> None:
         """
         异步发布消息
+
         Args:
             topic: 消息主题
             msg_content: 消息内容

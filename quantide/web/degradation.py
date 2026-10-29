@@ -9,11 +9,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 
-class DegradationClass(str, Enum):
+class DegradationClass(StrEnum):
     """降级类别.
 
     A: 永久降级 (无网关配置), 配置后立即解除.

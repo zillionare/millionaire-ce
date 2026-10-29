@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 from quantide.config.dev_stubs import dev_stubs_enabled, ensure_dev_stubs_started
+from quantide.config.features import supports_live_trading
 from quantide.config.paths import get_app_db_path, normalize_data_home
 from quantide.config.settings import (
     get_data_source,
@@ -83,7 +84,6 @@ class InitWizardService:
         state.gateway_username = settings.gateway_username
         state.gateway_password = settings.gateway_password
         state.gateway_timeout = int(settings.gateway_timeout)
-        state.livequote_mode = settings.livequote_mode
         state.runtime_mode = settings.runtime_mode
         state.runtime_broker_adapter = settings.runtime_broker_adapter
         state.gateway_api_key = settings.gateway_api_key
@@ -123,6 +123,10 @@ class InitWizardService:
         """确保数据库已初始化"""
         if not db._initialized:
             raise RuntimeError("数据库未初始化，请先调用 db.init()")
+
+    def reset_state_cache(self) -> None:
+        """Discard cached state after the app database is rebound."""
+        self._state = None
 
     def get_state(self, force_refresh: bool = False) -> AppState:
         """获取当前应用状态
@@ -196,16 +200,23 @@ class InitWizardService:
         backtest_available = state.is_fully_initialized and (
             dev_stubs_enabled() or bool(str(state.tushare_token or "").strip())
         )
-        live_trading_available = self._is_gateway_available(state)
+        gateway_available = self._is_gateway_available(state)
+        # Paper/simulation uses MarketDataHub and does not require a trading
+        # gateway.  Gateway availability is only a prerequisite for the
+        # private-edition live broker.
+        simulation_available = state.is_fully_initialized
+        live_trading_available = supports_live_trading() and gateway_available
 
         return {
             "backtest": backtest_available,
-            "simulation": live_trading_available,
+            "simulation": simulation_available,
             "live_trading": live_trading_available,
         }
 
     def _is_gateway_available(self, state: AppState) -> bool:
         """判断 gateway 是否处于可用状态。"""
+        if not supports_live_trading():
+            return False
         if dev_stubs_enabled() and state.is_fully_initialized:
             return ensure_dev_stubs_started() is not None
         if not state.can_use_live_trading():

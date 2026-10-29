@@ -21,8 +21,9 @@ import pytest
 from quantide.core.enums import OrderSide
 from quantide.core.errors import InsufficientCash
 from quantide.data.sqlite import db
+from quantide.service.backtest_broker import BacktestBroker
+from quantide.service.backtest_params import DEFAULT_FEE_PARAMS
 from quantide.service.sim_broker import PaperBroker
-
 
 AC_TEST_DATE = datetime.datetime(2024, 6, 3, 9, 30, 0)
 AC_ASSET = "000001.SZ"
@@ -31,7 +32,9 @@ AC_ASSET = "000001.SZ"
 @pytest.fixture
 def paper_broker() -> PaperBroker:
     db.init(":memory:")
-    return PaperBroker(portfolio_id="paper-unit", principal=100000)
+    broker = PaperBroker(portfolio_id="paper-unit", principal=100000)
+    broker.set_clock(AC_TEST_DATE)
+    return broker
 
 
 @pytest.mark.asyncio
@@ -92,8 +95,10 @@ async def test_fr_180_buy_with_exact_cash_allowed(paper_broker):
     """AC-FR-180: 买入资金刚好够 (含佣金) 允许下单."""
     price = 10.0
     shares = 100
-    commission_cost = price * shares * paper_broker._commission
-    paper_broker._cash = price * shares + commission_cost  # 刚够
+    from quantide.core.enums import OrderSide
+
+    fee = paper_broker._calculate_fee(price * shares, OrderSide.BUY)
+    paper_broker._cash = price * shares + fee  # 刚够（含最低佣金/过户费）
     paper_broker._market_data = None
     try:
         await paper_broker.buy(AC_ASSET, shares, price=price)
@@ -111,3 +116,16 @@ async def test_fr_180_stamp_tax_default(paper_broker):
 async def test_fr_180_commission_default(paper_broker):
     """AC-FR-180: 默认 commission = 1e-4 (A 股佣金 0.01%)."""
     assert paper_broker._commission == 1e-4
+
+
+def test_fr_180_backtest_current_defaults_match_configured_fee_model():
+    """Backtest defaults include transfer fee and use seller-only stamp duty."""
+    broker = BacktestBroker.__new__(BacktestBroker)
+    broker._commission = DEFAULT_FEE_PARAMS["commission"]
+    broker._stamp_duty = DEFAULT_FEE_PARAMS["stamp_duty"]
+    broker._transfer_fee = DEFAULT_FEE_PARAMS["transfer_fee"]
+    broker._min_commission = DEFAULT_FEE_PARAMS["min_commission"]
+
+    amount = 89965.0
+    assert broker._calc_fee(amount, OrderSide.BUY) == pytest.approx(9.89615)
+    assert broker._calc_fee(amount, OrderSide.SELL) == pytest.approx(54.87865)

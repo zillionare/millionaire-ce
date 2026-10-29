@@ -3,7 +3,6 @@
 import datetime
 
 import pandas as pd
-import pytest
 
 import quantide.service.param_optimizer as param_optimizer_module
 from quantide.data.models import BacktestLogEntry
@@ -11,7 +10,6 @@ from quantide.service.backtest_logs import _entry_to_row
 from quantide.service.metrics import _calculate_metrics
 from quantide.service.param_optimizer import OptimizationSpec, ParamOptimizer
 from quantide.service.trade_lightning import compute_cached_price
-from quantide.service.triple_barrier import BarrierHit, evaluate_day
 
 
 class _CompletedFuture:
@@ -141,11 +139,3 @@ def test_trade_lightning_current_and_unknown_references_need_no_market_call() ->
     """FR-0404 AC-5: current and unknown price references have deterministic empty cached prices."""
     assert compute_cached_price("000001.SZ", "current") == 0.0
     assert compute_cached_price("000001.SZ", "unknown") == 0.0
-
-
-def test_triple_barrier_equal_distance_prefers_conservative_down_barrier() -> None:
-    """FR-0404 AC-6: equal same-day barrier distances choose the documented conservative down result."""
-    evaluation = evaluate_day(10.6, 9.4, 10.0, 10.0, 10.0, 5.0, 5.0)
-
-    assert evaluation.barrier_hit is BarrierHit.DOWN
-    assert evaluation.excess_return == pytest.approx(0.05)

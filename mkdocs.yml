@@ -1,10 +1,17 @@
 site_name: Millionaire
-repo_url: https://github.com/zillionare/millionaire
-repo_name: millionaire
 
 nav:
-  - home: index.md
-  - init-wizard: init-wizard.md
+  - Home: index.md
+  - Installation: installation.md
+  - CE scope: scope.md
+  - Developer acceptance: developer-acceptance.md
+  - Design:
+      - Edition boundaries: design/edition_features.md
+      - Risk program boundary: design/risk_program_selection.md
+      - Data service: design/data_service.md
+      - UI: ui.md
+      - ML momentum reversal: design/ml_momentum_reversal.md
+      - 30-minute ML smoke: design/ml_30m_smoke.md
 
 theme:
   name: material

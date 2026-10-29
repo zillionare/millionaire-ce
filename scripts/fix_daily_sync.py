@@ -27,8 +27,8 @@ from loguru import logger
 
 def init_app_state(token: str, db_path: str | None = None) -> None:
     """Create app_state record with Tushare token."""
-    from quantide.data.sqlite import db
     from quantide.data.models.app_state import AppState
+    from quantide.data.sqlite import db
 
     if db_path:
         db.init(db_path)
@@ -41,7 +41,7 @@ def init_app_state(token: str, db_path: str | None = None) -> None:
         data_source="tushare",
         tushare_token=token,
         epoch=datetime.date(2005, 1, 1),
-        app_host="0.0.0.0",
+        app_host="127.0.0.1",
         app_port=8130,
         app_prefix="/quantide",
     )
@@ -82,8 +82,8 @@ def sync_calendar() -> int:
 
 def sync_daily_bars() -> dict:
     """Sync daily bars from last available date to present."""
-    from quantide.data.models.daily_bars import daily_bars
     from quantide.data.models.calendar import calendar as trade_calendar
+    from quantide.data.models.daily_bars import daily_bars
 
     logger.info("Syncing daily bars...")
 

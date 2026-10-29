@@ -23,6 +23,7 @@ from quantide.service.strategy_runtime import (
     StrategyRuntime,
     StrategyRuntimeManager,
 )
+from quantide.config.features import FeatureUnavailableError
 
 
 def _make_manager() -> StrategyRuntimeManager:
@@ -96,7 +97,7 @@ def test_start_from_spec_raises_when_registry_none():
     mgr = _make_manager()
     mgr._registry = None
     with pytest.raises(RuntimeError, match="registry 未初始化"):
-        mgr._start_from_spec({"mode": "live", "portfolio_id": "p1"})
+        mgr._start_from_spec({"mode": "paper", "portfolio_id": "p1"})
 
 
 def test_start_from_spec_raises_when_broker_missing():
@@ -135,7 +136,6 @@ def test_start_from_spec_uses_gateway_broker_for_gateway_kind():
     assert result == "started"
     call_kwargs = mock_start.call_args.kwargs
     assert call_kwargs["broker"] is gateway_broker
-    # registry.get should NOT have been called since gateway broker was set
     registry.get.assert_not_called()
 
 

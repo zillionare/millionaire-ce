@@ -221,9 +221,15 @@ class MinuteBarAggregator:
         self._last_completed[asset] = bar["date"]
 
     def _finalize_due(self, now: datetime.datetime) -> None:
-        """把已经收盘的桶落成完成 bar。"""
+        """把已经收盘的桶落成完成 bar。
+
+        A bar indexed by its close timestamp is complete at that timestamp.  The
+        inclusive comparison is important for a scheduler that wakes exactly at
+        10:00/10:30/etc.; using ``<`` would expose the previous forming bar to a
+        30m strategy for one extra polling interval.
+        """
         for asset, forming in list(self._forming.items()):
-            if forming["date"] < now:
+            if forming["date"] <= now:
                 self._complete(asset)
 
     # ------------------------------------------------------------------

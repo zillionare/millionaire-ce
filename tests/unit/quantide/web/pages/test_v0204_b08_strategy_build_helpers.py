@@ -14,6 +14,12 @@ from quantide.web.pages.strategy import (
 )
 
 
+@pytest.fixture(autouse=True)
+def private_edition_strategy_cases(monkeypatch, private_edition_feature_override):
+    """Exercise shared live-deployment helpers as private-edition cases."""
+    monkeypatch.setattr(strategy_mod, "supports_live_trading", lambda: True)
+
+
 def test_build_date_axis_with_portfolio():
     """[AC-NFR1101-01] When portfolio exists, returns list from calendar.get_frames."""
     fake_portfolio = MagicMock()
@@ -577,7 +583,7 @@ from quantide.web.pages.strategy import deploy_backtest_to_live
 
 
 @pytest.mark.asyncio
-async def test_deploy_to_live_no_registry():
+async def test_deploy_to_live_no_registry(private_edition_feature_override):
     """When no registry, returns modal with empty live_accounts."""
     with patch.object(strategy_mod_alias, "_get_registry") as mock_getreg, \
          patch.object(strategy_mod_alias, "_load_backtest_run_config") as mock_load, \
@@ -593,7 +599,7 @@ async def test_deploy_to_live_no_registry():
 
 
 @pytest.mark.asyncio
-async def test_deploy_to_live_no_live_accounts():
+async def test_deploy_to_live_no_live_accounts(private_edition_feature_override):
     """When no live accounts, returns modal with empty list."""
     with patch.object(strategy_mod_alias, "_get_registry") as mock_getreg, \
          patch.object(strategy_mod_alias, "_load_backtest_run_config") as mock_load, \
@@ -609,7 +615,7 @@ async def test_deploy_to_live_no_live_accounts():
 
 
 @pytest.mark.asyncio
-async def test_deploy_to_live_already_deployed():
+async def test_deploy_to_live_already_deployed(private_edition_feature_override):
     """When existing_runtime exists, returns error modal."""
     from quantide.web.pages.strategy import strategy_runtime_manager as srm
     fake_runtime = MagicMock()

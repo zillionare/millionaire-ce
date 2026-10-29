@@ -12,31 +12,24 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-from unittest.mock import AsyncMock, MagicMock
+import inspect
 
 import pytest
 
+from quantide.core.enums import OrderSide
 from quantide.core.message import msg_hub
 from quantide.core.notifications import NotificationEvent
-from quantide.core.risk_events import (
-    RISK_EXCESS_FINALIZED_TOPIC,
-    RISK_TRIGGERED_TOPIC,
-    BarrierHit,
-)
-from quantide.core.enums import OrderSide
+from quantide.core.risk_events import RISK_EXCESS_FINALIZED_TOPIC
 from quantide.data.models.calendar import calendar as calendar_model
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.sqlite import db
 from quantide.service.sim_broker import PaperBroker
-from quantide.strategies.cost_stop_loss import CostStopLossStrategy
-from quantide.strategies.pullback_sell import PullbackSellStrategy
-
 from tests.e2e.fixtures.minimal_assets import (
     ASSETS_ROOT_LOCAL,
     TEST_ASSET,
     TEST_DATE,
-    TEST_UP_LIMIT,
     TEST_DOWN_LIMIT,
+    TEST_UP_LIMIT,
 )
 
 
@@ -165,74 +158,6 @@ async def test_fr_200_slippage_sell_decreases_price(paper_broker):
     assert sell_result.trades[0].price == 9.99, f"expected 9.99, got {sell_result.trades[0].price}"
 
 
-# ===== FR-360 risk.triggered event e2e (via RiskStrategy) =====
-
-@pytest.mark.e2e
-@pytest.mark.e2e_paper
-async def test_fr_360_risk_triggered_event_on_cost_stop(paper_broker):
-    """AC-FR-360 + AC-FR-110: CostStopLossStrategy 触发时 emit risk.triggered event."""
-    captured: list[dict] = []
-    msg_hub.subscribe(RISK_TRIGGERED_TOPIC, lambda d: captured.append(d))
-
-    host_broker = PaperBroker(portfolio_id="host-cm-e2e", principal=100_000, market_data=None)
-    host_broker._clock = paper_broker._clock
-    host_broker._limits[TEST_ASSET] = {"up": TEST_UP_LIMIT, "down": TEST_DOWN_LIMIT}
-    host_broker.get_prices = MagicMock(return_value={TEST_ASSET: 9.4})
-    host_broker.sell = AsyncMock(return_value=type("R", (), {"trades": []})())
-
-    pos = MagicMock()
-    pos.price = 10.0
-    pos.avail = 100
-    pos.asset = TEST_ASSET
-    positions = {TEST_ASSET: pos}
-
-    strategy = CostStopLossStrategy(host_broker, {"k": -5.0})
-    await strategy.on_check(positions, paper_broker._clock)
-    _wait_dispatch()
-
-    assert len(captured) == 1
-    ev = captured[0]
-    assert ev["reason"] == "cost_stop"
-    assert ev["asset"] == TEST_ASSET
-    assert ev["activation_id"] == strategy.activation_id
-
-    msg_hub.unsubscribe(RISK_TRIGGERED_TOPIC, lambda d: captured.append(d))
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_paper
-async def test_fr_360_risk_triggered_event_on_pullback(paper_broker):
-    """AC-FR-360 + AC-FR-100: PullbackSellStrategy 触发时 emit risk.triggered event."""
-    captured: list[dict] = []
-    msg_hub.subscribe(RISK_TRIGGERED_TOPIC, lambda d: captured.append(d))
-
-    host_broker = PaperBroker(portfolio_id="host-pm-e2e", principal=100_000, market_data=None)
-    host_broker._clock = paper_broker._clock
-    host_broker._limits[TEST_ASSET] = {"up": TEST_UP_LIMIT, "down": TEST_DOWN_LIMIT}
-    host_broker.get_prices = MagicMock(return_value={TEST_ASSET: 10.0})
-    host_broker.sell = AsyncMock(return_value=type("R", (), {"trades": []})())
-
-    pos = MagicMock()
-    pos.avail = 100
-    pos.asset = TEST_ASSET
-    positions = {TEST_ASSET: pos}
-
-    strategy = PullbackSellStrategy(host_broker, {"m": 5.0, "k": 5.0})
-    strategy._open_prices[TEST_ASSET] = 10.0
-    strategy._monitoring.add(TEST_ASSET)
-    strategy._monitoring_started_at[TEST_ASSET] = paper_broker._clock
-    strategy._peak_prices[TEST_ASSET] = 11.5
-    await strategy.on_check(positions, paper_broker._clock)
-    _wait_dispatch()
-
-    assert len(captured) == 1
-    ev = captured[0]
-    assert ev["reason"] == "drawback"
-    assert ev["asset"] == TEST_ASSET
-
-    msg_hub.unsubscribe(RISK_TRIGGERED_TOPIC, lambda d: captured.append(d))
-
-
 # ===== FR-360 risk.excess_return.finalized event =====
 
 @pytest.mark.e2e
@@ -243,7 +168,7 @@ def test_fr_360_risk_excess_finalized_event_via_msg_hub():
     msg_hub.subscribe(RISK_EXCESS_FINALIZED_TOPIC, lambda d: captured.append(d))
 
     from quantide.core.risk_events import emit_risk_excess_finalized
-    eid = emit_risk_excess_finalized(
+    emit_risk_excess_finalized(
         activation_id="act-1", triggered_event_id="trig-1",
         excess_return=0.05, finalized_at=datetime.datetime.now(),
     )
@@ -263,7 +188,6 @@ def test_fr_360_risk_excess_finalized_event_via_msg_hub():
 def test_fr_115_base_strategy_in_paper_has_required_callbacks():
     """AC-FR-115: BaseStrategy 在 paper 模式下仍有 on_day_open / on_bar / on_day_close."""
     from quantide.core.strategy import BaseStrategy
-    import inspect
     for name in ("on_day_open", "on_bar", "on_day_close", "buy", "sell", "get_bars"):
         assert hasattr(BaseStrategy, name)
         assert inspect.iscoroutinefunction(getattr(BaseStrategy, name)) or name == "get_bars"

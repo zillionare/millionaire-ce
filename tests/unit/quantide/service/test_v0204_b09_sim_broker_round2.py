@@ -142,7 +142,7 @@ def test_extract_forming_bar_returns_none_when_bar_dt_does_not_match_end_date(mo
     broker = _make_broker()
     today = dt.date(2024, 6, 17)
     bar = {"dt": dt.datetime(2024, 6, 16, 10, 0), "close": 11.0}
-    monkeypatch.setattr(sb_mod.live_quote, "get_daily_bar", lambda asset: bar)
+    monkeypatch.setattr(sb_mod.market_data_hub, "get_daily_bar", lambda asset: bar)
     out = broker._extract_forming_bar("000001.SZ", today)
     assert out is None
 

@@ -8,14 +8,14 @@ requests to flow through to the actual page handlers.
 from __future__ import annotations
 
 import datetime
+from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def init_app_state_for_web_tests(monkeypatch):
-    """Force init_wizard.is_initialized() to return True so the middleware
-    passes requests through.
+    """Make web tests pass initialization middleware and seed app state.
 
     Also seeds the app_state DB row to fully-initialized to make the
     stub more realistic for any code that reads from db directly.
@@ -65,6 +65,18 @@ def init_app_state_for_web_tests(monkeypatch):
         monkeypatch.setattr(
             init_wizard_mod.init_wizard, "is_initialized", lambda: True
         )
+    except Exception:
+        pass
+
+    # Page tests use the repository's checked-in stock metadata.  Loading it
+    # here keeps the web singleton independent of whether an earlier test has
+    # initialized the application data home (and avoids a network fetch).
+    try:
+        from quantide.data.models.stocks import stock_list
+
+        stock_path = Path(__file__).resolve().parents[4] / "data" / "stock_list.parquet"
+        if stock_path.exists():
+            stock_list.load(stock_path)
     except Exception:
         pass
 

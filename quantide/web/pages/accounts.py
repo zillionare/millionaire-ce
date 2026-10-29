@@ -8,6 +8,7 @@ from loguru import logger
 from monsterui.all import *
 from starlette.responses import HTMLResponse, RedirectResponse
 
+from quantide.config.features import supports_live_trading
 from quantide.core.enums import BrokerKind
 from quantide.core.runtime.registration import register_port_backed_broker
 from quantide.data.sqlite import db
@@ -213,7 +214,7 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
             P("管理您的实盘账户和模拟交易账户", cls="text-sm text-gray-600 mt-1"),
             cls="mb-6",
         ),
-        # 实盘账户区域
+        # 实盘账户区域（仅私有版；CE 不展示任何实盘账户控件）
         Div(
             Div(
                 H2("实盘账户", cls="text-lg font-semibold text-gray-900"),
@@ -237,7 +238,7 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
                 cls="p-6",
             ),
             cls="bg-white rounded-lg shadow mb-6",
-        ),
+        ) if supports_live_trading() else None,
         # 模拟交易账户区域
         Div(
             Div(
@@ -300,8 +301,8 @@ def accounts_list(request):
     sim_accounts = []
 
     if reg:
-        # 实盘账户
-        for info in reg.list_by_kind(BrokerKind.QMT):
+        # 实盘账户（CE 不加载或渲染实盘账户）
+        for info in reg.list_by_kind(BrokerKind.QMT) if supports_live_trading() else []:
             account_id = info.get("id")
             if not account_id:
                 continue
@@ -355,7 +356,7 @@ def accounts_list(request):
         return AccountsPage(live_accounts, sim_accounts, active_kind, active_id, show_create_modal)
 
     layout.main_block = main_block
-    return HTMLResponse(to_xml(layout.render()))
+    return HTMLResponse(to_xml(layout.render(request)))
 
 
 @rt("/")
@@ -405,8 +406,8 @@ def _auto_select_latest_account(reg, session):
         session["active_account_id"] = latest["id"]
         return latest
 
-    # 没有模拟账户，尝试实盘账户
-    live_accounts = reg.list_by_kind(BrokerKind.QMT)
+    # 没有模拟账户，私有版才回退到实盘账户
+    live_accounts = reg.list_by_kind(BrokerKind.QMT) if supports_live_trading() else []
     if live_accounts:
         live = live_accounts[0]
         session["active_account_kind"] = BrokerKind.QMT.value

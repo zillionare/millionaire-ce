@@ -100,14 +100,14 @@ class AuthBeforeware:
         return skip
 
     def require_admin(self):
-        """Decorator for paths requiting admin role to access"""
+        """Decorate paths requiring the admin role."""
         return self.require_role("admin")
 
     import functools
     from typing import Any
 
     def require_role(self, *allowed_roles):
-        """Decorator to require a specific role"""
+        """Decorate paths requiring a specific role."""
 
         def decorator(func):
             @functools.wraps(func)  # ← Copy original function signature

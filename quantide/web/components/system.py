@@ -8,12 +8,10 @@ from __future__ import annotations
 from typing import Any
 
 from fasthtml.common import (
+    H1,
     A,
     Button,
     Div,
-    Form,
-    H1,
-    H2,
     Input,
     Label,
     P,

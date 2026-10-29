@@ -177,8 +177,9 @@ def test_resolve_broker_for_refresh_returns_none_when_registry_is_none():
         assert _resolve_broker_for_refresh(req) is None
 
 
-def test_resolve_broker_for_refresh_returns_broker_when_active_present():
+def test_resolve_broker_for_refresh_returns_broker_when_active_present(monkeypatch):
     """[AC-NFR1101-01] Session has active kind/id, broker resolved from registry."""
+    monkeypatch.setattr(tm, "supports_live_trading", lambda: True)
     req = _make_req(
         scope={
             "session": {
@@ -470,8 +471,9 @@ def test_today_orders_table_renders_empty_message_when_no_orders():
 
 
 @pytest.mark.asyncio
-async def test_place_order_trade_no_asset_returns_toast():
+async def test_place_order_trade_no_asset_returns_toast(monkeypatch):
     """[AC-NFR1101-01] Missing asset returns '请输入股票代码' toast."""
+    monkeypatch.setattr(tm, "supports_live_trading", lambda: True)
     fake_broker = MagicMock()
     reg = MagicMock()
     reg.get.return_value = fake_broker
@@ -491,8 +493,9 @@ async def test_place_order_trade_no_asset_returns_toast():
 
 
 @pytest.mark.asyncio
-async def test_place_order_trade_invalid_price_returns_toast():
+async def test_place_order_trade_invalid_price_returns_toast(monkeypatch):
     """[AC-NFR1101-01] Non-numeric price returns '价格格式错误' toast."""
+    monkeypatch.setattr(tm, "supports_live_trading", lambda: True)
     fake_broker = MagicMock()
     reg = MagicMock()
     reg.get.return_value = fake_broker
@@ -518,11 +521,14 @@ async def test_place_order_trade_invalid_price_returns_toast():
 
 
 @pytest.mark.asyncio
-async def test_place_order_trade_non_positive_price_returns_toast():
+async def test_place_order_trade_non_positive_price_returns_toast(monkeypatch):
     """[AC-NFR1101-01] Zero price in LIMIT mode returns '价格必须大于0' toast."""
+    monkeypatch.setattr(tm, "supports_live_trading", lambda: True)
     fake_broker = MagicMock()
     reg = MagicMock()
     reg.get.return_value = fake_broker
+    resolve_local_close = MagicMock(return_value=12.34)
+    monkeypatch.setattr(tm, "_resolve_local_trade_close", resolve_local_close)
     req = _make_req(
         scope={
             "session": {
@@ -541,12 +547,14 @@ async def test_place_order_trade_non_positive_price_returns_toast():
     )
     with patch.object(tm, "_get_registry", return_value=reg):
         resp = await place_order_trade(req)
+    resolve_local_close.assert_not_called()
     assert "价格必须大于0" in resp.body.decode()
 
 
 @pytest.mark.asyncio
-async def test_place_order_trade_invalid_value_returns_toast():
+async def test_place_order_trade_invalid_value_returns_toast(monkeypatch):
     """[AC-NFR1101-01] Non-numeric value returns '金额/数量格式错误' toast."""
+    monkeypatch.setattr(tm, "supports_live_trading", lambda: True)
     fake_broker = MagicMock()
     reg = MagicMock()
     reg.get.return_value = fake_broker
@@ -571,8 +579,9 @@ async def test_place_order_trade_invalid_value_returns_toast():
 
 
 @pytest.mark.asyncio
-async def test_place_order_trade_non_positive_value_returns_toast():
+async def test_place_order_trade_non_positive_value_returns_toast(monkeypatch):
     """[AC-NFR1101-01] Non-positive value returns '金额/数量必须大于0' toast."""
+    monkeypatch.setattr(tm, "supports_live_trading", lambda: True)
     fake_broker = MagicMock()
     reg = MagicMock()
     reg.get.return_value = fake_broker

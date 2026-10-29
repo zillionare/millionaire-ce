@@ -1,8 +1,9 @@
 import asyncio
 import datetime
 
+from quantide.service.simulation_broker import SimulationBroker
+
 from quantide.core.message import msg_hub
-from quantide.service.simulation_broker import QuoteEvent, SimulationBroker
 
 
 class Cfg:

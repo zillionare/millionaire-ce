@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class PushEventType(str, Enum):
+class PushEventType(StrEnum):
     """推送事件类型 (interfaces.md §4.5)."""
 
     ALERT = "alert"

@@ -27,6 +27,10 @@ from quantide.web.pages.trade_lightning import (
 )
 
 
+@pytest.fixture(autouse=True)
+def private_edition_lightning_cases(monkeypatch):
+    monkeypatch.setattr(tl_mod, "supports_live_trading", lambda: True)
+
 def _make_req(
     *,
     path_params: dict | None = None,

@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
+# Legacy calendar API documentation contains intentionally empty Returns sections.
+# ruff: noqa: D205,D414
+
 import datetime
-from zoneinfo import ZoneInfo
 import itertools
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import arrow
 import numpy as np
@@ -16,6 +19,9 @@ from loguru import logger
 from numpy import ndarray
 
 from quantide.config.settings import get_epoch, get_timezone
+from quantide.core.enums import FrameType
+from quantide.core.singleton import singleton
+from quantide.data.fetchers.registry import get_data_fetcher
 
 #: 日历至少从该日期开始拉取，保证 ``day_shift`` 在配置 epoch 附近可用。
 _CALENDAR_FETCH_START = datetime.date(2005, 1, 1)
@@ -23,9 +29,6 @@ _CALENDAR_FETCH_START = datetime.date(2005, 1, 1)
 
 def _calendar_fetch_start() -> datetime.date:
     return min(get_epoch(), _CALENDAR_FETCH_START)
-from quantide.core.enums import FrameType
-from quantide.core.singleton import singleton
-from quantide.data.fetchers.registry import get_data_fetcher
 
 Frame = datetime.datetime | datetime.date
 
@@ -742,7 +745,7 @@ class Calendar:
                 new_day.year, new_day.month, new_day.day, h, m, tzinfo=moment.tzinfo
             )
 
-        if type(moment) == datetime.date:
+        if type(moment) is datetime.date:
             if moment == datetime.date.today():
                 moment = datetime.datetime.now(tz=get_timezone())
             else:
@@ -1037,7 +1040,7 @@ class Calendar:
         Returns:
             [type]: [description]
         """
-        if frame_type in self.day_level_frames and type(moment) == datetime.datetime:
+        if frame_type in self.day_level_frames and type(moment) is datetime.datetime:
             moment = moment.date()
 
         floor = self.floor(moment, frame_type)

@@ -13,6 +13,7 @@ def test_module_entrypoint_defers_app_creation_until_server_import(monkeypatch):
     sentinel_app = object()
     original_app_module = sys.modules.pop("quantide.app", None)
     original_main_module = sys.modules.get("__main__")
+    monkeypatch.delenv("QUANTIDE_HOST", raising=False)
 
     def fake_create_app(*args, **kwargs):
         created.append({"args": args, "kwargs": kwargs})
@@ -20,7 +21,7 @@ def test_module_entrypoint_defers_app_creation_until_server_import(monkeypatch):
 
     def fake_serve(*, appname=None, **kwargs):
         assert appname == "quantide.app"
-        assert kwargs == {}
+        assert kwargs == {"host": "127.0.0.1"}
         assert created == []
 
         module = importlib.import_module(appname)

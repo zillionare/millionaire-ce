@@ -61,7 +61,7 @@ def test_get_settings_uses_defaults_when_db_is_unavailable(monkeypatch):
     assert settings.product_name == get_branding().product_name
     assert settings.release_package == get_branding().release_package
     assert settings.app_home == str(Path("~/.quantide").expanduser())
-    assert settings.app_host == "0.0.0.0"
+    assert settings.app_host == "127.0.0.1"
     assert settings.app_port == 8130
     assert settings.app_prefix == "/quantide"
     assert settings.gateway_enabled is False
@@ -71,6 +71,34 @@ def test_get_settings_uses_defaults_when_db_is_unavailable(monkeypatch):
     assert settings.data_source == "tushare"
     assert settings.epoch == datetime.date(2005, 1, 1)
     assert settings.timezone == DEFAULT_TIMEZONE
+
+
+def test_app_state_defaults_bind_localhost():
+    assert AppState().app_host == "127.0.0.1"
+
+
+def test_get_settings_honors_explicit_non_localhost_app_host(db):
+    db["app_state"].upsert(
+        AppState(app_host="0.0.0.0").to_dict(),
+        pk="id",
+    )
+
+    assert get_settings().app_host == "0.0.0.0"
+
+
+def test_start_script_binds_localhost_unless_explicitly_overridden():
+    project_root = Path(__file__).resolve().parents[4]
+    script = (project_root / "start.sh").read_text()
+
+    assert '"--host" "0.0.0.0"' not in script
+    assert "${QUANTIDE_HOST:-127.0.0.1}" in script
+
+
+def test_module_entrypoint_binds_localhost_unless_explicitly_overridden():
+    project_root = Path(__file__).resolve().parents[4]
+    source = (project_root / "quantide" / "app.py").read_text()
+
+    assert 'os.getenv("QUANTIDE_HOST", "127.0.0.1")' in source
 
 
 def test_get_settings_prefers_app_state(db, tmp_path: Path):
@@ -87,7 +115,7 @@ def test_get_settings_prefers_app_state(db, tmp_path: Path):
             gateway_password="db-secret",
             gateway_timeout=30,
             livequote_mode="gateway",
-            runtime_mode="live",
+                runtime_mode="live",
             data_source="tushare",
         ).to_dict(),
         pk="id",

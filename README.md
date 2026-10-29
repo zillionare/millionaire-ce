@@ -1,50 +1,58 @@
 # Millionaire
 
-Millionaire is Zillionare's flagship quantitative trading platform.
+Millionaire is a Community Edition quantitative trading platform released
+under the MIT License.
 
 The published package name is `millionaire`. The Python import namespace
 is `quantide` — this is an internal name, not a brand; if you fork and
 rename, you can rename the import namespace to match.
 
-This repository is in active architectural refactoring.
-
-The release-facing README is intentionally kept minimal until the codebase, runtime model, and deployment model are stable enough to publish without misleading users or automation.
+This repository is in active architectural refactoring. CE supports
+backtesting, paper trading, simulation, and generic risk-program extension
+points. Production/live trading and private risk-program implementations are
+not included in CE.
 
 Current status:
 
 - the project is not using FastAPI + Vue as its target stack
 - the application stack is being consolidated around FastHTML + MonsterUI
-- release documentation has not been finalized yet
+- live trading is intentionally hidden and unavailable in CE
 - development-stage notes are stored under `.dev/`
 
 Until the refactor settles, treat `.dev/` as draft engineering notes rather than release documentation.
 
-For local startup guidance and minimum developer-side acceptance, see `docs/developer-acceptance.md`.
+For local setup, optional dependencies, first-run browser opening, and
+service-manager hooks, see `docs/installation.md`. For minimum developer-side
+acceptance, see `docs/developer-acceptance.md`.
 
 ## Local Setup
 
 This project uses a standard Python virtual environment (not conda).
 
 ```bash
-# 1. Create the virtual environment (one-time)
-python3.13 -m venv .venv --prompt=millionaire-py3.13
+# Create .venv and install the current checkout
+python3 scripts/install.py
 
-# 2. Activate it
-source .venv/bin/activate
-
-# 3. Install dependencies (Poetry is configured as the build backend)
-pip install poetry
-poetry install
-
-# 4. Run the app
-uvicorn quantide.app:app --reload
+# Start paper/simulation mode and open the browser
+.venv/bin/python scripts/serve.py --open
 ```
 
-Or use the bundled helper script (creates the venv on first run if needed):
+On Windows, use `py -3.13 scripts\install.py` and
+`.venv\Scripts\python.exe scripts\serve.py --open`. The Unix helper is also
+available after setup:
 
 ```bash
 ./start.sh
 ```
+
+The optional ML extra is installed with `python3 scripts/install.py --ml30m`.
+See `docs/installation.md` for Poetry groups and service-manager hooks.
+
+The first launch is uninitialized and opens the init wizard. CE does not create
+an administrator account or a default password at startup; the wizard's
+administrator-password step creates the `admin` account. Until that step is
+completed, login is unavailable. Launch paths bind to `127.0.0.1` by default;
+set `QUANTIDE_HOST` (or `--host`) explicitly to expose another interface.
 
 ## Development Stub Mode
 
@@ -54,7 +62,7 @@ start Millionaire with the environment variable `QUANTIDE_ENABLE_DEV_STUBS=1`.
 Example:
 
 ```bash
-QUANTIDE_ENABLE_DEV_STUBS=1 uvicorn quantide.app:app --reload
+QUANTIDE_ENABLE_DEV_STUBS=1 .venv/bin/python scripts/serve.py --reload
 ```
 
 Or, with the helper script:
@@ -67,7 +75,7 @@ With this switch enabled, the process will automatically:
 
 - start a local `gateway` stub and route effective gateway settings to it
 - replace the default `tushare` fetcher with fixture-backed local data
-- expose simulation and live-trading feature gates as available after the app has already completed initialization once
+- expose the paper/simulation development path after the app has already completed initialization once
 
 Notes:
 
@@ -76,15 +84,3 @@ Notes:
 - The app still expects initialization to have been completed at least once, because `app_home`, auth, and other base runtime state still come from normal initialization.
 - The local gateway stub will be started on a random localhost port and logged at startup.
 - If an already-running dev server was started without the switch, its old logs are not evidence against stub mode; restart that process with the switch on the actual startup command.
-
-## Edition Override Mode
-
-Runtime edition identity is resolved from the installed release package, or from the local `pyproject.toml` when you are running from the source tree. A stray `QUANTIDE_EDITION` in your shell is ignored by default.
-
-For development-only branding checks, you can explicitly opt into an override for a single process:
-
-```bash
-QUANTIDE_ENABLE_EDITION_OVERRIDE=1 QUANTIDE_EDITION=zillionaire uvicorn quantide.app:app --reload
-```
-
-Use this only for local development. It deliberately overrides edition-specific branding and release-package diagnostics for that process.

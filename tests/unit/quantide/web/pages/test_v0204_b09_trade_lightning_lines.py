@@ -80,7 +80,7 @@ def test_resolve_lightning_price_current_premium_zero_current_returns_zero():
     non-positive value, the premium branch must short-circuit to 0.0 rather
     than multiply a non-positive base.
     """
-    with patch.object(tl_mod, "live_quote") as mock_lq, \
+    with patch.object(tl_mod, "market_data_hub") as mock_lq, \
          patch.object(tl_mod, "daily_bars") as mock_dbars:
         # live_quote returns a quote with price=0 -> current falls through to
         # close, and close's bars are empty -> current == 0 -> premium returns 0.
@@ -108,7 +108,7 @@ def test_resolve_lightning_price_current_quote_bad_float_falls_back():
         "date": [datetime.date(2024, 6, 1)],
         "close": [42.5],
     })
-    with patch.object(tl_mod, "live_quote") as mock_lq, \
+    with patch.object(tl_mod, "market_data_hub") as mock_lq, \
          patch.object(tl_mod, "daily_bars") as mock_dbars:
         mock_lq.is_running = True
         # Non-numeric values trigger the TypeError/ValueError branch.

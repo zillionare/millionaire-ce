@@ -1,5 +1,7 @@
 """Utility functions for FastHTML-Auth"""
 
+# ruff: noqa: D205
+
 import re
 import secrets
 import string
@@ -12,7 +14,7 @@ def generate_token(length: int = 32) -> str:
 
 
 def validate_email(email: str) -> bool:
-    """Basic email validation"""
+    """Validate an email address."""
     if not email or "@" not in email:
         return False
 

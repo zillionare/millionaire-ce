@@ -4,10 +4,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from quantide.core.enums import BrokerKind
 from quantide.service.registry import BrokerRegistry
+from quantide.web.layouts import main as layout_main
 from quantide.web.layouts.main import _build_paper_entry
 
+
+@pytest.fixture(autouse=True)
+def private_edition_navigation_cases(monkeypatch):
+    monkeypatch.setattr(layout_main, "supports_live_trading", lambda: True)
 
 def test_paper_entry_uses_singleton_when_request_missing():
     """页面 render() 不传 req 时，仍从单例注册表读取仿真账户。"""

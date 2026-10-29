@@ -301,7 +301,7 @@ async def index(req):
     )
 
     layout.main_block = page_content
-    return layout.render()
+    return layout.render(req)
 
 @rt("/do-verify", methods="post")
 async def do_verify(form: dict):

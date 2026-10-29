@@ -23,6 +23,7 @@ from quantide.data.models import Order, Position
 from quantide.data.sqlite import db as _db
 from quantide.service.registry import BrokerRegistry
 from quantide.service.sim_broker import SimulationBroker
+from tests.e2e.support.auth_fixture import ensure_test_admin
 from tests.e2e.support.system_settings_session import system_settings_e2e_session
 
 
@@ -38,6 +39,10 @@ def test_app():
         _db.init(test_db_path)
 
         reg = BrokerRegistry()
+        saved_brokers = dict(reg._brokers)
+        saved_default = reg._default
+        reg._brokers.clear()
+        reg._default = None
         # 实盘账户（闪电单仅实盘显示）；注册为默认账户
         try:
             from quantide.service.sim_broker import PaperBroker
@@ -169,6 +174,7 @@ def test_app():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
         auth.initialize(app, prefix="/auth")
+        ensure_test_admin(auth)
 
         yield app
     finally:
@@ -185,6 +191,9 @@ def test_app():
             os.unlink(test_db_path)
         except OSError:
             pass
+        reg._brokers.clear()
+        reg._brokers.update(saved_brokers)
+        reg._default = saved_default
 
 
 @pytest.fixture
@@ -1179,14 +1188,11 @@ class TestLoginRoutes:
         text = response.text
 
         assert response.status_code == 200
-        assert 'id="trade-lightning-panel"' in text
-        assert 'id="trade-lightning-modal-container"' in text
-        assert "/trade/lightning/" in text
-        assert "lightning-create-button" in text
-        assert "lightning-clear-button" in text
-        assert "/create-modal" in text
-        assert "/clear-modal" in text
-        assert "尚未添加闪电单股票" in text
+        assert 'id="trade-lightning-panel"' not in text
+        assert 'id="trade-lightning-modal-container"' not in text
+        assert "/trade/lightning/" not in text
+        assert "lightning-create-button" not in text
+        assert "lightning-clear-button" not in text
 
     def test_trade_lightning_create_update_delete_and_clear_flow(self, test_client, monkeypatch):
         """验证闪电买入单支持新建、编辑、删除和清空。"""
@@ -1665,6 +1671,17 @@ class TestLoginRoutes:
         assert "1678.23" not in text
         assert ">--<" not in text
 
+    def test_trade_panel_keeps_reference_prices_for_simulation_accounts(self, test_client):
+        """仿真账号也显示参考价格区，但不显示实盘闪电单控件。"""
+        response = test_client.get("/trade?account_id=sim_demo")
+        text = response.text
+
+        assert response.status_code == 200
+        assert 'id="reference-price-panel"' in text
+        assert "现价" in text
+        assert 'id="trade-lightning-panel"' not in text
+        assert "闪电单仅用于实盘；仿真账户保留普通下单，用于补单与测试。" in text
+
     def test_trade_panel_keeps_estimated_shares_width_aligned_with_value_input(self, test_client):
         """验证预估数量展示框与买入金额输入框使用同一宽度布局。"""
         response = test_client.get("/trade")
@@ -1758,13 +1775,30 @@ class TestLoginRoutes:
         assert "priceMode.value = 'LIMIT';" in text
         assert "priceInput.value = parsed.toFixed(2);" in text
 
+    def test_trade_live_current_price_prefers_market_data_hub(self, monkeypatch):
+        """交易页现价优先取 MarketDataHub，而不是只依赖 gateway live_quote。"""
+        from types import SimpleNamespace
+
+        from quantide.web.pages import trade_main as trade_page
+
+        monkeypatch.setattr(trade_page, "_maybe_start_live_quote", lambda: None)
+        monkeypatch.setattr(trade_page.market_data_hub, "get_quote", lambda asset: None)
+        monkeypatch.setattr(
+            trade_page.market_data_hub,
+            "snapshot",
+            lambda symbols: {
+                symbols[0]: SimpleNamespace(price=13.45),
+            },
+        )
+        assert trade_page._resolve_live_current_price("600519.SH") == pytest.approx(13.45)
+
     def test_trade_live_quote_returns_cached_live_price(self, test_client, monkeypatch):
         """验证 trade live quote 接口优先返回 live quote 当前价。"""
         from quantide.web.pages import trade_main as trade_page
 
         monkeypatch.setattr(trade_page, "_maybe_start_live_quote", lambda: None)
         monkeypatch.setattr(
-            trade_page.live_quote,
+            trade_page.market_data_hub,
             "get_quote",
             lambda asset: {"price": 12.41} if asset == "000001.SZ" else None,
         )
@@ -1777,20 +1811,22 @@ class TestLoginRoutes:
         assert payload["current"] == "12.41"
         assert payload["visible"] is True
 
-    def test_trade_live_quote_falls_back_to_reference_close(self, test_client, monkeypatch):
-        """验证 live quote 缺失时仍返回稳定的参考现价。"""
+    def test_trade_live_quote_stays_empty_without_market_data_hub_quote(
+        self, test_client, monkeypatch
+    ):
+        """MarketDataHub 无快照时不把昨收伪装成现价。"""
         from quantide.web.pages import trade_main as trade_page
 
         monkeypatch.setattr(trade_page, "_maybe_start_live_quote", lambda: None)
-        monkeypatch.setattr(trade_page.live_quote, "get_quote", lambda asset: None)
+        monkeypatch.setattr(trade_page.market_data_hub, "get_quote", lambda asset: None)
         monkeypatch.setattr(trade_page, "_resolve_trade_reference_close", lambda asset: 11.23)
 
         response = test_client.get("/trade/live-quote?asset=000001.SZ")
         payload = response.json()
 
         assert response.status_code == 200
-        assert payload["current"] == "11.23"
-        assert payload["visible"] is True
+        assert payload["current"] == ""
+        assert payload["visible"] is False
 
     def test_trade_panel_supports_enter_to_select_search_result(self, test_client):
         """验证股票搜索支持回车确认首个结果。"""
@@ -1863,6 +1899,7 @@ class TestLoginRoutes:
         )
 
         monkeypatch.setattr(trade_page.daily_bars, "get_bars", lambda *args, **kwargs: bars)
+        monkeypatch.setattr(trade_page, "_resolve_live_current_price", lambda asset: 0.0)
 
         response = test_client.get("/trade/asset-stats?asset=000001.SZ")
         payload = response.json()
@@ -1870,7 +1907,7 @@ class TestLoginRoutes:
         assert response.status_code == 200
         assert payload["visible"] is True
         assert payload["close"] == "14.00"
-        assert payload["current"] == "14.00"
+        assert payload["current"] == ""
         assert payload["ma5"] == "12.00"
         assert payload["ma10"] == ""
         assert payload["ma60"] == ""
@@ -1908,6 +1945,7 @@ class TestLoginRoutes:
                 return frame, []
 
         monkeypatch.setattr(trade_page, "get_data_fetcher", lambda: _Fetcher())
+        monkeypatch.setattr(trade_page, "_resolve_live_current_price", lambda asset: 0.0)
 
         response = test_client.get("/trade/asset-stats?asset=000001.SZ")
         payload = response.json()
@@ -1915,7 +1953,7 @@ class TestLoginRoutes:
         assert response.status_code == 200
         assert payload["visible"] is True
         assert payload["close"] == "11.00"
-        assert payload["current"] == "11.00"
+        assert payload["current"] == ""
         assert payload["ma5"] == ""
 
     def test_trade_search_is_bounded_and_does_not_fetch_prices(
@@ -2063,8 +2101,8 @@ class TestFeatureGate:
         response = test_client.get("/trade/live", follow_redirects=False)
 
         assert response.status_code == 503
-        assert "实盘交易功能已禁用" in response.text
-        assert "/system/gateway/" in response.text
+        assert "CE edition 暂不支持实盘交易" in response.text
+        assert "/system/gateway/" not in response.text
 
 
 class TestGatewayFirstNavigation:
@@ -2078,7 +2116,7 @@ class TestGatewayFirstNavigation:
             for item in menu
             if item.get("requires_gateway")
         }
-        assert gated_titles == {"实盘"}
+        assert gated_titles == set()
 
     def test_build_header_menu_keeps_trade_entries_open_when_gateway_ready(self):
         from quantide.web.layouts.main import build_header_menu
@@ -2093,7 +2131,7 @@ class TestGatewayFirstNavigation:
         menu = build_header_menu(True)
         urls = {item["title"]: item["url"] for item in menu}
 
-        assert urls["实盘"] == "/trade/live/"
+        assert "实盘" not in urls
 
     def test_home_defaults_to_live_nav_when_gateway_ready(self, monkeypatch):
         from quantide.web.layouts.main import MainLayout

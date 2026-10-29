@@ -37,6 +37,9 @@ def test_match_feature_for_path_prefix():
 
 def test_match_feature_for_path_live_trading():
     assert _match_feature_for_path("/trade/live") == "live_trading"
+    assert _match_feature_for_path("/live/") == "live_trading"
+    assert _match_feature_for_path("/system/gateway/") == "live_settings"
+    assert _match_feature_for_path("/strategy/backtest/bt-1/deploy/live") == "live_trading"
 
 
 def test_match_feature_for_path_no_match():
@@ -77,6 +80,12 @@ def test_is_htmx_request_missing():
 def test_disabled_fragment_html_contains_feature_name():
     html = _disabled_fragment_html("实盘交易")
     assert "实盘交易" in html
+
+
+def test_ce_live_fragment_explains_unavailability():
+    html = _disabled_fragment_html("实盘交易")
+    assert "CE edition 暂不支持实盘交易" in html
+    assert "交易网关" not in html
 
 
 def test_disabled_page_html_contains_product_and_feature():

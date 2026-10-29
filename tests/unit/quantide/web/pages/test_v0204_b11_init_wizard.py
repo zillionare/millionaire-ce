@@ -84,6 +84,7 @@ def _capture_progress_callback(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(iw, "stock_list", fake_stock_list)
 
     monkeypatch.setattr(iw, "daily_bars", MagicMock())
+    monkeypatch.setattr(iw.daily_basic, "update", MagicMock())
 
     asyncio.run(iw._run_data_sync(dt.date(2024, 1, 1)))
 

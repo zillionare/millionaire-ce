@@ -1,4 +1,5 @@
 import datetime
+
 from quantide.core.strategy import BaseStrategy
 
 
