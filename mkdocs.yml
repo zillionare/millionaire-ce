@@ -1,4 +1,7 @@
-site_name: Millionaire
+site_name: Millionaire CE
+site_url: https://zillionare.github.io/millionaire-ce/
+repo_url: https://github.com/zillionare/millionaire-ce
+repo_name: zillionare/millionaire-ce
 
 nav:
   - Home: index.md

@@ -3,6 +3,7 @@
 [tool.poetry]
 name = "millionaire-ce"
 version = "0.3.0"
+homepage = "https://github.com/zillionare/millionaire-ce"
 description = "Millionaire Community Edition quantitative trading platform."
 authors = ["Aaron Yang <aaron_yang@jieyu.ai>"]
 readme = "README.md"
