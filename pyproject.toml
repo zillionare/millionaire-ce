@@ -2,7 +2,7 @@
 
 [tool.poetry]
 name = "millionaire"
-version = "0.1.0"
+version = "0.3.0"
 description = "Millionaire — Zillionare's flagship quantitative trading platform."
 authors = ["Aaron Yang <aaron_yang@jieyu.ai>"]
 readme = "README.md"
