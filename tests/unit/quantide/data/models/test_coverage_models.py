@@ -24,8 +24,11 @@ def test_calendar_integer_date_and_time_round_trip():
     assert calendar.int2time(202401020931).replace(tzinfo=None) == moment.replace(tzinfo=None)
 
 
-def test_app_state_round_trip_and_readiness_are_derived_from_steps():
+def test_app_state_round_trip_and_readiness_are_derived_from_steps(monkeypatch):
     """FR-0302 AC-4: state serialization preserves readiness and live/backtest gates."""
+    monkeypatch.setattr(
+        "quantide.data.models.app_state.supports_live_trading", lambda: True
+    )
     state = AppState(
         init_completed=True,
         init_step=WIZARD_FINAL_STEP,

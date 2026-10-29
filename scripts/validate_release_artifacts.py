@@ -76,14 +76,6 @@ def _validate_artifact(path: Path) -> list[str]:
 
 def main() -> int:
     """Validate all wheel and source archives in a distribution directory."""
-    from quantide.config.branding import get_runtime_edition
-
-    if get_runtime_edition() != "millionaire-ce":
-        # The full edition intentionally ships its built-in risk programs.
-        # This private-artifact guard applies only to the Community Edition.
-        print("Full edition: CE private-artifact check skipped")
-        return 0
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dist_dir", type=Path, nargs="?", default=Path("dist"))
     args = parser.parse_args()

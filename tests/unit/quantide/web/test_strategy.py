@@ -25,12 +25,12 @@ class FakePageRequest:
         self.query_params = query_params or {}
 
 
-def test_strategy_live_redirects_to_trade_live_with_create_app_client():
+def test_strategy_live_is_unavailable_in_ce():
     with system_settings_e2e_session() as session:
         response = session.client.get("/strategy/live", follow_redirects=False)
 
-    assert response.status_code == 303
-    assert response.headers["location"] == "/trade/live/"
+    assert response.status_code == 503
+    assert "CE edition 暂不支持实盘交易" in response.text
 
 
 def test_papertrade_redirects_to_trade_paper_with_create_app_client():
@@ -344,7 +344,9 @@ def test_resolve_backtest_status_prefers_runtime_failure(monkeypatch):
     assert error == "boom"
 
 
-def test_build_backtest_rows_keeps_missing_metrics_blank(monkeypatch):
+def test_build_backtest_rows_keeps_missing_metrics_blank(
+    monkeypatch, private_edition_feature_override
+):
     portfolios = pd.DataFrame(
         [
             {
@@ -378,7 +380,9 @@ def test_build_backtest_rows_keeps_missing_metrics_blank(monkeypatch):
     assert 'btn btn-primary btn-sm' not in html
 
 
-def test_build_backtest_rows_keeps_paper_deploy_available_when_gateway_missing(monkeypatch):
+def test_build_backtest_rows_keeps_paper_deploy_available_when_gateway_missing(
+    monkeypatch, private_edition_feature_override
+):
     portfolios = pd.DataFrame(
         [
             {
@@ -414,7 +418,9 @@ def test_build_backtest_rows_keeps_paper_deploy_available_when_gateway_missing(m
     assert html.count("pointer-events-none") == 1
 
 
-def test_build_backtest_rows_disables_only_paper_deploy_when_runtime_missing(monkeypatch):
+def test_build_backtest_rows_disables_only_paper_deploy_when_runtime_missing(
+    monkeypatch, private_edition_feature_override
+):
     portfolios = pd.DataFrame(
         [
             {
@@ -451,7 +457,9 @@ def test_build_backtest_rows_disables_only_paper_deploy_when_runtime_missing(mon
     assert "disabled" in html
 
 
-def test_build_backtest_rows_renders_active_deployment_statuses(monkeypatch):
+def test_build_backtest_rows_renders_active_deployment_statuses(
+    monkeypatch, private_edition_feature_override
+):
     portfolios = pd.DataFrame(
         [
             {

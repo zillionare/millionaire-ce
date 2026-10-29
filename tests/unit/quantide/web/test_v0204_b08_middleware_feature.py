@@ -82,10 +82,7 @@ def test_disabled_fragment_html_contains_feature_name():
     assert "实盘交易" in html
 
 
-def test_ce_live_fragment_explains_unavailability(monkeypatch):
-    monkeypatch.setattr(
-        "quantide.web.middleware_feature.supports_live_trading", lambda: False
-    )
+def test_ce_live_fragment_explains_unavailability():
     html = _disabled_fragment_html("实盘交易")
     assert "CE edition 暂不支持实盘交易" in html
     assert "交易网关" not in html

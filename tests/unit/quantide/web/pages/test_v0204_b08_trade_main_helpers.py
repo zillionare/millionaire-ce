@@ -59,7 +59,8 @@ def test_get_all_accounts_returns_list():
     ]
     out = _get_all_accounts(reg)
     assert isinstance(out, list)
-    assert len(out) == 2  # one QMT, one SIMULATION
+    assert len(out) == 1  # CE exposes only the simulation account
+    assert out[0]["kind"] == BrokerKind.SIMULATION.value
 
 
 def test_get_all_accounts_uses_fallback_name_when_missing():
@@ -70,7 +71,7 @@ def test_get_all_accounts_uses_fallback_name_when_missing():
     assert all(item["name"] == item["id"] for item in out)
 
 
-def test_get_all_accounts_marks_live_for_qmt():
+def test_get_all_accounts_marks_live_for_qmt(private_edition_feature_override):
     reg = MagicMock()
     reg.list_by_kind.side_effect = lambda kind: [
         {"id": f"x-{kind.value}", "name": "n", "status": False}

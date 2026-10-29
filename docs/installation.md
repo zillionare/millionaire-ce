@@ -10,10 +10,8 @@ macOS, and Linux installers are not part of this release groundwork.
 - A local Python virtual environment
 - Network access to install the Python dependencies
 
-The current distribution name in `pyproject.toml` is `millionaire`. The
-repository owner may choose a different repository or distribution name later;
-the commands below intentionally use the current tree and do not predict that
-rename.
+The distribution name in `pyproject.toml` is `millionaire-ce`, and the
+runtime edition defaults to `millionaire-ce`.
 
 ## Cross-platform local setup
 
@@ -122,6 +120,9 @@ poetry build
 python3 scripts/validate_release_artifacts.py dist
 ```
 
-The validation rejects the private risk source names and known private risk
-IDs. Repository-only tests and notes are intentionally excluded from the CE
-sdist; they remain available in the checkout for development.
+The validation rejects the private risk source names (including the
+triple-barrier, pullback-sell, and cost-stop modules) and known private risk ID
+markers in both the wheel and the sdist. Repository-only tests and notes are
+intentionally excluded from the CE sdist; they remain available in the checkout
+for development. The CE wheel/sdist contain the generic risk-program framework
+only, and CE live trading stays hidden and unavailable.

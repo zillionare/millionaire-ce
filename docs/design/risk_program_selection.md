@@ -1,7 +1,8 @@
 # Risk program selection boundary
 
 CE retains the generic `RiskStrategy` contract and the broker-level
-backtest-risk-overlay lifecycle. It ships no risk-program implementation.
+backtest-risk-overlay lifecycle. It ships no built-in triple-barrier,
+pullback-sell, or cost-stop program, and the default registry is empty.
 Host-owned learner programs are maintained outside the CE source tree and are
 excluded from CE discovery, runner fallbacks, and selection UI.
 

@@ -48,7 +48,7 @@ def test_ensure_db_raises_when_db_not_initialized(monkeypatch):
 # --- _is_gateway_available --------------------------------------------------
 
 
-def test_is_gateway_available_dev_stubs_returns_stub_status(db, monkeypatch):
+def test_is_gateway_available_dev_stubs_returns_stub_status(db, monkeypatch, private_edition_feature_override):
     """Line 210: dev_stubs enabled + fully initialized -> ensure_dev_stubs_started()."""
     monkeypatch.setattr(init_wizard_module, "dev_stubs_enabled", lambda: True)
     monkeypatch.setattr(
@@ -80,7 +80,7 @@ def test_is_gateway_available_false_when_cannot_use_live_trading(db, monkeypatch
     assert service._is_gateway_available(state) is False
 
 
-def test_is_gateway_available_false_when_no_server(db, monkeypatch):
+def test_is_gateway_available_false_when_no_server(db, monkeypatch, private_edition_feature_override):
     """Line 216: gateway_server empty -> return False."""
     monkeypatch.setattr(init_wizard_module, "dev_stubs_enabled", lambda: False)
     service = InitWizardService()

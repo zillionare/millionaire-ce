@@ -1188,14 +1188,11 @@ class TestLoginRoutes:
         text = response.text
 
         assert response.status_code == 200
-        assert 'id="trade-lightning-panel"' in text
-        assert 'id="trade-lightning-modal-container"' in text
-        assert "/trade/lightning/" in text
-        assert "lightning-create-button" in text
-        assert "lightning-clear-button" in text
-        assert "/create-modal" in text
-        assert "/clear-modal" in text
-        assert "尚未添加闪电单股票" in text
+        assert 'id="trade-lightning-panel"' not in text
+        assert 'id="trade-lightning-modal-container"' not in text
+        assert "/trade/lightning/" not in text
+        assert "lightning-create-button" not in text
+        assert "lightning-clear-button" not in text
 
     def test_trade_lightning_create_update_delete_and_clear_flow(self, test_client, monkeypatch):
         """验证闪电买入单支持新建、编辑、删除和清空。"""
@@ -2104,8 +2101,8 @@ class TestFeatureGate:
         response = test_client.get("/trade/live", follow_redirects=False)
 
         assert response.status_code == 503
-        assert "实盘交易功能已禁用" in response.text
-        assert "/system/gateway/" in response.text
+        assert "CE edition 暂不支持实盘交易" in response.text
+        assert "/system/gateway/" not in response.text
 
 
 class TestGatewayFirstNavigation:
@@ -2119,7 +2116,7 @@ class TestGatewayFirstNavigation:
             for item in menu
             if item.get("requires_gateway")
         }
-        assert gated_titles == {"实盘"}
+        assert gated_titles == set()
 
     def test_build_header_menu_keeps_trade_entries_open_when_gateway_ready(self):
         from quantide.web.layouts.main import build_header_menu
@@ -2134,7 +2131,7 @@ class TestGatewayFirstNavigation:
         menu = build_header_menu(True)
         urls = {item["title"]: item["url"] for item in menu}
 
-        assert urls["实盘"] == "/trade/live/"
+        assert "实盘" not in urls
 
     def test_home_defaults_to_live_nav_when_gateway_ready(self, monkeypatch):
         from quantide.web.layouts.main import MainLayout

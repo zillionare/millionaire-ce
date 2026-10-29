@@ -1,8 +1,8 @@
 """Generic risk-program extension and adapter boundary.
 
-Risk programs are registered explicitly through adapters.  The full Millionaire
-release registers its built-in programs here; the Community Edition removes
-those registrations and ships only the generic extension mechanism.
+Risk programs are registered explicitly through host-supplied adapters.  The
+Community Edition ships only this generic extension mechanism; its default
+registry is empty and it contains no built-in program implementations.
 """
 
 from __future__ import annotations
@@ -261,25 +261,45 @@ def build_backtest_risk_overlay(
     )
 
 
+def _declared_live_adapter(
+    strategy_cls: type[BaseStrategy],
+    frame_type: FrameType | str,
+) -> RiskProgramAdapter | None:
+    """Resolve a host's ``RISK_OVERLAY`` declaration through the registry."""
+    declaration = getattr(strategy_cls, "RISK_OVERLAY", None)
+    if not declaration or isinstance(declaration, bool):
+        return None
+    adapter = risk_program_registry.get(str(declaration).strip())
+    if adapter is None or adapter.live_strategy_factory is None:
+        return None
+    if not adapter.supports(strategy_cls, frame_type):
+        return None
+    return adapter
+
+
+def _legacy_live_enabled(
+    strategy_cls: type[BaseStrategy],
+    config: dict[str, Any],
+) -> bool:
+    """Honor the legacy explicit opt-out for host-declared live risk."""
+    if "use_broker_barriers" in config:
+        return bool(config["use_broker_barriers"])
+    defaults = getattr(strategy_cls, "default_config", None)
+    if callable(defaults):
+        return bool(defaults().get("use_broker_barriers", True))
+    return True
+
+
 def build_live_risk_strategies(
     strategy_cls: type[BaseStrategy],
     broker: Any,
     config: dict[str, Any],
     frame_type: FrameType | str = FrameType.DAY,
 ) -> list[Any]:
-    """Instantiate explicitly selected live adapters or legacy declarations."""
+    """Instantiate explicitly selected live adapters or declared host overlays."""
     if RISK_PROGRAMS_KEY not in config:
-        if getattr(strategy_cls, "RISK_OVERLAY", None) != "triple_barrier":
-            return []
-        if "use_broker_barriers" in config:
-            enabled = bool(config["use_broker_barriers"])
-        else:
-            defaults = getattr(strategy_cls, "default_config", None)
-            enabled = bool(defaults().get("use_broker_barriers", False)) if callable(defaults) else False
-        if not enabled:
-            return []
-        adapter = risk_program_registry.get(TRIPLE_BARRIER_ID)
-        if adapter is None or adapter.live_strategy_factory is None:
+        adapter = _declared_live_adapter(strategy_cls, frame_type)
+        if adapter is None or not _legacy_live_enabled(strategy_cls, config):
             return []
         return [adapter.live_strategy_factory(broker, dict(config))]
     selected = normalize_risk_programs(
@@ -296,56 +316,3 @@ def build_live_risk_strategies(
             adapter.live_strategy_factory(broker, dict(item["params"]))
         )
     return strategies
-
-
-TRIPLE_BARRIER_ID = "quantide.strategies.triple_barrier_risk.TripleBarrierRiskStrategy"
-
-
-def _triple_barrier_overlay(params: dict[str, Any]) -> Any:
-    from quantide.service.risk_overlay import TripleBarrierOverlay
-    from quantide.service.triple_barrier import TripleBarrierConfig
-
-    values = {**params}
-    return TripleBarrierOverlay(
-        TripleBarrierConfig(
-            up_pct=float(values.get("take_profit_pct", values.get("up_pct", 0.15))),
-            down_pct=float(values.get("stop_loss_pct", values.get("down_pct", 0.06))),
-            horizon=int(values.get("horizon", 3)),
-            sell_fraction=float(values.get("sell_fraction", 1.0)),
-            slippage=float(values.get("slippage_pct", values.get("slippage", 0.001))),
-        )
-    )
-
-
-def _triple_barrier_live(broker: Any, params: dict[str, Any]) -> Any:
-    from quantide.strategies.triple_barrier_risk import TripleBarrierRiskStrategy
-
-    return TripleBarrierRiskStrategy(broker, dict(params))
-
-
-def _supports_daily_or_30m(
-    host_strategy_cls: type[BaseStrategy] | None,
-    frame_type: FrameType | str,
-) -> bool:
-    del host_strategy_cls
-    interval = frame_type.value if isinstance(frame_type, FrameType) else str(frame_type)
-    return interval in {FrameType.DAY.value, "1d", FrameType.MIN30.value}
-
-
-register_risk_program(
-    RiskProgramAdapter(
-        id=TRIPLE_BARRIER_ID,
-        name="三重障碍",
-        description="按成本设置止盈、止损和持有期限，遵守 A 股 T+1。",
-        default_params={
-            "take_profit_pct": 0.15,
-            "stop_loss_pct": 0.06,
-            "horizon": 3,
-            "sell_fraction": 1.0,
-            "slippage_pct": 0.001,
-        },
-        compatible=_supports_daily_or_30m,
-        overlay_factory=_triple_barrier_overlay,
-        live_strategy_factory=_triple_barrier_live,
-    )
-)

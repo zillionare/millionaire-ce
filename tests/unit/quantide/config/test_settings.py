@@ -67,7 +67,7 @@ def test_get_settings_uses_defaults_when_db_is_unavailable(monkeypatch):
     assert settings.gateway_enabled is False
     assert settings.gateway_base_url == ""
     assert settings.livequote_mode == "gateway"
-    assert settings.runtime_mode == "live"
+    assert settings.runtime_mode == "paper"
     assert settings.data_source == "tushare"
     assert settings.epoch == datetime.date(2005, 1, 1)
     assert settings.timezone == DEFAULT_TIMEZONE
@@ -130,7 +130,7 @@ def test_get_settings_prefers_app_state(db, tmp_path: Path):
     assert settings.gateway_password == "db-secret"
     assert settings.gateway_timeout == 30
     assert settings.livequote_mode == "gateway"
-    assert settings.runtime_mode == "live"
+    assert settings.runtime_mode == "paper"
     assert settings.data_source == "tushare"
 
 
@@ -278,7 +278,7 @@ def test_get_settings_applies_dev_stub_overrides(monkeypatch, tmp_path: Path):
     assert settings.gateway_username == "stub-user"
     assert settings.gateway_password == "stub-password"
     assert settings.livequote_mode == "gateway"
-    assert settings.runtime_mode == "live"
+    assert settings.runtime_mode == "paper"
     assert settings.runtime_broker_adapter == "gateway"
     assert settings.data_source == "tushare"
 

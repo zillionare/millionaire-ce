@@ -522,7 +522,7 @@ def test_deploy_to_paper_returns_existing_when_active():
     assert returned is rt
 
 
-def test_deploy_to_live_returns_existing_when_active():
+def test_deploy_to_live_returns_existing_when_active(private_edition_feature_override):
     rt = _make_runtime("running")
     rt.runtime_id = "live:existing-live"
     rt.mode = "live"
@@ -542,7 +542,9 @@ def test_deploy_to_live_returns_existing_when_active():
     assert returned is rt
 
 
-def test_deploy_to_live_raises_when_no_gateway_broker():
+def test_deploy_to_live_raises_when_no_gateway_broker(
+    private_edition_feature_override,
+):
     """When _gateway_broker is None, deploy_to_live raises. Covers L334-L335."""
     strategy_runtime_manager._backtest_history["bt-no-gw"] = _make_backtest("bt-no-gw")
     strategy_runtime_manager._gateway_broker = None

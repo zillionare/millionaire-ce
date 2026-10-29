@@ -7,9 +7,10 @@ decision date its target portfolio is exactly the current `top_k` selection:
 2. an available holding absent from `top_k` is fully sold and realized; and
 3. every selected asset that is not held is bought.
 
-The strategy does not use fixed holding days, price barriers, or a
-triple-barrier exit.  Generic `RiskStrategy` and the backtest risk-overlay
-framework remain available for strategies that explicitly opt into them.
+The strategy does not use fixed holding days, price barriers, or any
+built-in risk program. Generic `RiskStrategy` and the backtest risk-overlay
+framework remain available for strategies that explicitly opt into a
+host-registered adapter.
 
 ## Training target
 

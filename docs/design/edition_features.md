@@ -1,8 +1,10 @@
 # Edition feature boundaries
 
-The source-tree package is the Community Edition (CE), identified at runtime
-as the `millionaire` edition. Shared adapter boundaries may also be used by a
-separately maintained private edition; that edition is outside this package.
+The source-tree package is the Community Edition (CE), distributed as
+`millionaire-ce` and identified at runtime as the `millionaire-ce` edition.
+Shared adapter boundaries may also be used by a separately maintained private
+edition; that edition is outside this package and can still enable live
+trading through the edition gate.
 
 ## CE behavior
 
@@ -24,6 +26,10 @@ separately maintained private edition; that edition is outside this package.
   gateway broker is never started. Generic gateway and live adapter modules
   remain in the tree as an adapter boundary; CE does not expose or register
   them.
+- The risk-program registry starts empty. CE ships no built-in triple-barrier,
+  pullback-sell, or cost-stop program; hosts must register a custom
+  `RiskProgramAdapter` explicitly. Generic `RISK_OVERLAY` host declarations
+  resolve only through that registry.
 - A direct `deploy_to_live` call fails with
   `FeatureUnavailableError("CE edition 暂不支持实盘交易")` before resolving a
   backtest or touching a gateway broker.

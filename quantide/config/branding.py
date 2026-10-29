@@ -15,7 +15,7 @@ from importlib.metadata import PackageNotFoundError, packages_distributions, ver
 from pathlib import Path
 
 RUNTIME_NAME = "quantide"
-DEFAULT_EDITION = "millionaire"
+DEFAULT_EDITION = "millionaire-ce"
 EDITION_ENV_VAR = "QUANTIDE_EDITION"
 EDITION_OVERRIDE_ENV_VAR = "QUANTIDE_ENABLE_EDITION_OVERRIDE"
 SUPPORTED_EDITIONS = {"millionaire", "millionaire-ce", "zillionaire"}
@@ -58,6 +58,8 @@ def _is_truthy(value: str | None) -> bool:
 def _get_release_package_edition(package_name: str | None) -> str | None:
     """Extract a supported edition from a release package name."""
     text = str(package_name or "").strip().lower()
+    if text in SUPPORTED_EDITIONS:
+        return text
     prefix = f"{RUNTIME_NAME}-"
     if not text.startswith(prefix):
         return None

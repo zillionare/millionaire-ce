@@ -112,7 +112,9 @@ def test_start_from_spec_raises_when_broker_missing():
         mgr._start_from_spec(spec)
 
 
-def test_start_from_spec_uses_gateway_broker_for_gateway_kind():
+def test_start_from_spec_uses_gateway_broker_for_gateway_kind(
+    private_edition_feature_override,
+):
     """[AC-NFR1101-01] When account_kind=="gateway", uses _gateway_broker (line 1060)."""
     mgr = _make_manager()
     gateway_broker = MagicMock()

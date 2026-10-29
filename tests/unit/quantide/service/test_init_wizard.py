@@ -89,6 +89,7 @@ def test_get_state_defaults_to_localhost_bind(db):
 
 
 def test_feature_status_and_redirect_follow_gateway_state(db, monkeypatch):
+    monkeypatch.setattr(init_wizard_module, "supports_live_trading", lambda: True)
     service = InitWizardService()
 
     state = AppState(
@@ -120,7 +121,7 @@ def test_feature_status_and_redirect_follow_gateway_state(db, monkeypatch):
 
     status = service.get_feature_status()
     assert status["simulation"] is True
-    assert status["live_trading"] is True
+    assert status["live_trading"] is False
     assert service.get_completion_redirect() == "/"
 
 
@@ -418,11 +419,15 @@ class TestFeatureStatusWithRealReachableGateway:
     ``get_feature_status()`` 不再因 404 误判为「网关不可用」。
     """
 
-    def test_live_trading_flips_true_when_gateway_reachable(self) -> None:
+    def test_live_trading_flips_true_when_gateway_reachable(self, monkeypatch) -> None:
         from urllib.parse import urlparse
 
         from tests.e2e.support.gateway_stub import running_gateway_stub
 
+        monkeypatch.setattr(init_wizard_module, "supports_live_trading", lambda: True)
+        monkeypatch.setattr(
+            "quantide.data.models.app_state.supports_live_trading", lambda: True
+        )
         service = InitWizardService()
         service.save_state(
             AppState(

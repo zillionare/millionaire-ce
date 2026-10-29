@@ -8,6 +8,12 @@ from tests.e2e.support.gateway_stub import running_gateway_stub
 from tests.e2e.support.system_settings_session import system_settings_e2e_session
 
 
+@pytest.fixture(autouse=True)
+def _gateway_page_requires_private_edition(private_edition_feature_override):
+    """Gateway settings UI is a private-edition contract; CE returns 503."""
+    yield
+
+
 @pytest.fixture(scope="module")
 def client():
     """创建已初始化且已登录的测试客户端。"""

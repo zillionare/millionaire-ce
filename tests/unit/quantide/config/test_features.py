@@ -22,3 +22,9 @@ def test_private_edition_supports_live_trading(monkeypatch):
 
     assert supports_live_trading() is True
     require_live_trading()
+
+def test_full_edition_supports_live_trading(monkeypatch):
+    monkeypatch.setattr("quantide.config.features.get_runtime_edition", lambda: "millionaire")
+
+    assert supports_live_trading() is True
+    require_live_trading()

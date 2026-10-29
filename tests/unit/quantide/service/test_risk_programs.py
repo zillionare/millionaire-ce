@@ -129,3 +129,39 @@ def test_host_without_risk_overlay_declaration_can_use_empty_selection(clean_reg
     assert normalize_risk_programs(
         [], host_strategy_cls=HostWithoutPrivateDeclaration, frame_type="1d"
     ) == []
+
+
+def test_host_risk_overlay_declaration_resolves_registered_adapter(clean_registry):
+    adapter = _adapter("host.declared.Risk")
+    register_risk_program(adapter)
+
+    class DeclaringHost:
+        BAR_INTERVAL = "1d"
+        RISK_OVERLAY = adapter.id
+
+    live = build_live_risk_strategies(DeclaringHost, object(), {}, frame_type="1d")
+    assert len(live) == 1
+    assert isinstance(live[0], _LiveRisk)
+    assert live[0].params == {}
+
+    assert (
+        build_live_risk_strategies(
+            DeclaringHost,
+            object(),
+            {"use_broker_barriers": False},
+            frame_type="1d",
+        )
+        == []
+    )
+
+
+def test_undeclared_or_unregistered_overlay_does_not_invent_a_program(clean_registry):
+    class UndeclaredHost:
+        BAR_INTERVAL = "1d"
+
+    class UnregisteredHost:
+        BAR_INTERVAL = "1d"
+        RISK_OVERLAY = "host.missing.Risk"
+
+    assert build_live_risk_strategies(UndeclaredHost, object(), {}) == []
+    assert build_live_risk_strategies(UnregisteredHost, object(), {}) == []

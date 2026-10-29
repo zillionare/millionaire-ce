@@ -18,8 +18,10 @@ FEATURE_ROUTE_PREFIXES = {
     "/live": "live_trading",
     "/trade/simulation": "simulation",
     "/trade/live": "live_trading",
+    "/strategy/live": "live_trading",
     "/system/gateway": "live_settings",
     "/init-wizard/gateway-test": "live_settings",
+    "/system/accounts/live": "live_trading",
 }
 
 

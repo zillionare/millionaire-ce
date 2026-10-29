@@ -14,7 +14,7 @@ def test_paper_journey_covers_accounts_trade_history_and_data_pages(paper_sessio
     """AC-FR0390-01 AC-FR0400-01 AC-FR0310-01 AC-FR0320-01 AC-FR0330-01: paper 主路径可打开账户、委托成交与系统数据页."""
     trade_page = TradePage(paper_session.client).open_main()
     assert trade_page.status_code == 200
-    trade_page.require("当前账号", "委托", "持仓")
+    trade_page.require("暂无交易账号", "创建仿真账号")
 
     accounts_page = SystemPage(paper_session.client).open_accounts()
     assert accounts_page.status_code == 200
@@ -43,8 +43,8 @@ def test_paper_journey_covers_accounts_trade_history_and_data_pages(paper_sessio
 
 @pytest.mark.e2e
 @pytest.mark.e2e_paper
-def test_paper_journey_promotes_backtest_into_paper_and_live_modes(paper_session):
-    """AC-FR0040-01 AC-FR0420-01 AC-FR0430-01: 回测报告可转入仿真和实盘, 入口页保持可访问."""
+def test_paper_journey_promotes_backtest_and_blocks_live_mode_in_ce(paper_session):
+    """回测报告可转入仿真；CE 仍阻止实盘部署和实盘页面。"""
     portfolio_id = "shield-paper-promote"
     strategy_runtime_manager.create_backtest_runtime(
         portfolio_id=portfolio_id,
@@ -78,15 +78,15 @@ def test_paper_journey_promotes_backtest_into_paper_and_live_modes(paper_session
         f"/strategy/backtest/{portfolio_id}/deploy/live/modal",
         follow_redirects=True,
     )
-    assert live_modal.status_code == 200
-    assert "确认转入实盘" in live_modal.text
+    assert live_modal.status_code == 503
+    assert "CE edition 暂不支持实盘交易" in live_modal.text
 
     live_response = paper_session.client.post(
         f"/strategy/backtest/{portfolio_id}/deploy/live",
         data={"live_account_id": "gateway:default"},
         follow_redirects=True,
     )
-    assert live_response.status_code == 200
-    assert "已转入实盘" in live_response.text
+    assert live_response.status_code == 503
+    assert "CE edition 暂不支持实盘交易" in live_response.text
 
-    assert TradePage(paper_session.client).open_live().status_code == 200
+    assert TradePage(paper_session.client).open_live().status_code == 503

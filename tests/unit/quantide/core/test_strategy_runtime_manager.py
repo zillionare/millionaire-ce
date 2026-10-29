@@ -123,7 +123,12 @@ def test_strategy_runtime_manager_persists_block_state_and_risk_events(tmp_path:
     assert any(event["title"] == "策略已封锁" for event in manager2.list_risk_events())
 
 
-def test_strategy_runtime_manager_restart_recovery_skips_blocked_specs(tmp_path: Path):
+def test_strategy_runtime_manager_restart_recovery_skips_blocked_specs(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        "quantide.service.strategy_runtime.supports_live_trading", lambda: True
+    )
     manager = StrategyRuntimeManager()
     manager._state_file = lambda: tmp_path / "strategy_runtimes.json"
     manager._runtime_specs = {

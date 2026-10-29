@@ -53,7 +53,9 @@ def _make_manager() -> StrategyRuntimeManager:
 # ---------------------------------------------------------------------------
 
 
-def test_deploy_to_live_calls_start_strategy_runtime_when_gateway_broker_present():
+def test_deploy_to_live_calls_start_strategy_runtime_when_gateway_broker_present(
+    private_edition_feature_override,
+):
     """[AC-NFR1101-01] deploy_to_live reaches _start_strategy_runtime (line 336)."""
     mgr = _make_manager()
     mgr._gateway_broker = MagicMock(name="gateway_broker")
@@ -235,7 +237,7 @@ def test_load_specs_resets_to_empty_on_exception():
 # ---------------------------------------------------------------------------
 
 
-def test_restore_persisted_runtimes_records_account_block_reason():
+def test_restore_persisted_runtimes_records_account_block_reason(private_edition_feature_override):
     """[AC-NFR1101-01] _restore_persisted_runtimes reads account_block reason (line 974)."""
     mgr = _make_manager()
     runtime_id = "live:p1:s1"
@@ -263,7 +265,7 @@ def test_restore_persisted_runtimes_records_account_block_reason():
     assert len(account_events) >= 1
 
 
-def test_restore_persisted_runtimes_starts_unblocked_spec():
+def test_restore_persisted_runtimes_starts_unblocked_spec(private_edition_feature_override):
     """[AC-NFR1101-01] _restore_persisted_runtimes starts an unblocked spec (993-995)."""
     mgr = _make_manager()
     runtime_id = "live:p1:s1"

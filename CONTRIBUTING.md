@@ -11,7 +11,7 @@ and does not grant you.
 
 ## Your Contribution
 
-This project is released under the [Millionaire Source-Available License v2.0](LICENSE).
+This project is released under the [MIT License](LICENSE).
 
 - By submitting a contribution (whether as a pull request, patch, file,
   or any other form), you confirm that the project may use, modify, and
