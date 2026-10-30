@@ -12,11 +12,11 @@ from quantide.service.bar_views import HistBarView, LiveBarView
 
 
 @pytest.fixture(autouse=True)
-def _global_calendar(calendar):
+def _global_calendar(asset_dir):
     """测试内加载全局日历（视图/合成器默认使用单例）。"""
     from quantide.data.models.calendar import calendar as global_calendar
 
-    global_calendar.load(calendar._path)
+    global_calendar.load(asset_dir / "baseline_calendar.parquet")
     return global_calendar
 
 
