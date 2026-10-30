@@ -64,10 +64,7 @@ def asset_dir():
             shutil.copy2(stock_list_src, dst / "stock_list.parquet")
 
         yield dst
-        try:
-            dst.unlink()
-        except PermissionError:
-            pass
+        shutil.rmtree(dst, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
