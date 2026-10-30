@@ -54,17 +54,26 @@ poetry install --with doc,test,dev
 After installation:
 
 ```bash
+.venv/bin/millionaire-ce --open
+```
+
+The console command accepts `--host`, `--port`, `--reload`, `--stub`,
+`--open`, and `--no-browser`. The source-tree form remains available:
+
+```bash
 .venv/bin/python scripts/serve.py --open
 ```
 
-On Windows, use `.venv\Scripts\python.exe scripts\serve.py --open`.
+On Windows, use `.venv\Scripts\millionaire-ce.exe --open` or
+`.venv\Scripts\python.exe scripts\serve.py --open`.
 The `--open` hook opens the local URL in the default browser after Uvicorn
 starts. It is opt-in; the equivalent environment hook is
 `QUANTIDE_OPEN_BROWSER=1`. Use `--no-browser` to override that environment
 setting.
 
-Development stub mode is available for a local run without a real gateway or
-live data provider:
+Development stub mode is available for a source checkout without a real
+gateway or live data provider. It depends on repository test fixtures and is
+not included in the installed wheel:
 
 ```bash
 .venv/bin/python scripts/serve.py --stub --open

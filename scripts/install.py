@@ -65,7 +65,8 @@ def main() -> int:
     _run([str(python), "-m", "pip", "install", "-e", requirement])
 
     print(f"Installed CE into {venv_path}")
-    print(f"Run: {python} scripts/serve.py --open")
+    launcher = python.parent / ("millionaire-ce.exe" if os.name == "nt" else "millionaire-ce")
+    print(f"Run: {launcher} --open")
     return 0
 
 

@@ -36,8 +36,12 @@ This project uses a standard Python virtual environment (not conda).
 python3 scripts/install.py
 
 # Start paper/simulation mode and open the browser
-.venv/bin/python scripts/serve.py --open
+.venv/bin/millionaire-ce --open
 ```
+
+The installed console command is equivalent to
+`.venv/bin/python scripts/serve.py --open`; the source script remains
+available for compatibility.
 
 On Windows, use `py -3.13 scripts\install.py` and
 `.venv\Scripts\python.exe scripts\serve.py --open`. The Unix helper is also
