@@ -19,9 +19,8 @@ Current status:
 - the project is not using FastAPI + Vue as its target stack
 - the application stack is being consolidated around FastHTML + MonsterUI
 - live trading is intentionally hidden and unavailable in CE
-- development-stage notes are stored under `.dev/`
 
-Until the refactor settles, treat `.dev/` as draft engineering notes rather than release documentation.
+Release documentation lives under `docs/`.
 
 For local setup, optional dependencies, first-run browser opening, and
 service-manager hooks, see `docs/installation.md`. For minimum developer-side

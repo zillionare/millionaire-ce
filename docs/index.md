@@ -13,6 +13,3 @@ Start with:
 - [CE scope](scope.md) for the paper-only boundary and generic risk extension
   point.
 - [Developer acceptance](developer-acceptance.md) for repository-level checks.
-
-Development notes remain under `.dev/` and are not part of the published CE
-documentation navigation.

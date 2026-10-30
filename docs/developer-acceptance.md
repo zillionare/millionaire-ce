@@ -15,7 +15,7 @@
 2. 需要在不连接真实 Tushare、真实 qmt-gateway/QMT 的情况下，使用 stub 走通
    开发态纸面/仿真验证。
 
-本文档不替代 `.dev/specs/00-architecture.md`、`.dev/specs/01-e2e-accuracy-contract.md` 和 `.dev/specs/three_mode_acceptance_checklist.md`；后者仍然是工程约束和发布态验收基线。
+本文档不替代仓库中的测试用例和 CI 发布门禁；后者仍然是工程约束和发布态验收基线。
 
 ## 2. 环境准备
 
@@ -166,7 +166,7 @@ CE 验收证据。需要验证这些共享内部实现时，必须显式启用
 1. 自动化结果首先看终端里的 pytest 输出。
 2. 三模式 parity 的共享 baseline 在 `tests/assets/baselines/dual_ma_2024.backtest.json`。
 3. 三模式 parity 的测试入口在 `tests/e2e/three_mode/test_dual_ma_parity.py`。
-4. 发布态验收缺口与放行判断看 `.dev/specs/three_mode_acceptance_checklist.md`。
+4. 发布态验收缺口与放行判断以 release gate 和 CI 结果为准。
 
 如果你只想回答一个最小问题："我这次改动有没有把三模式主链路弄坏？"
 
