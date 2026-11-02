@@ -103,9 +103,7 @@ class InitWizardService:
         )
         return state
 
-    def _compute_history_start_date(
-        self, epoch: datetime.date, years: int
-    ) -> datetime.date:
+    def _compute_history_start_date(self, epoch: datetime.date, years: int) -> datetime.date:
         """计算历史下载起始日期.
 
         Args:
@@ -388,8 +386,7 @@ class InitWizardService:
         """
         years = max(1, int(history_years))
         normalized_source = (
-            str(data_source or get_data_source() or "tushare").strip().lower()
-            or "tushare"
+            str(data_source or get_data_source() or "tushare").strip().lower() or "tushare"
         )
         normalized_token = str(tushare_token or "").strip()
         registry = register_builtin_fetchers()

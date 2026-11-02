@@ -12,7 +12,6 @@ from fasthtml.common import (
     Div,
     Form,
     Input,
-    Nav,
     P,
     Span,
     Table,
@@ -21,12 +20,13 @@ from fasthtml.common import (
     Th,
     Thead,
     Tr,
-    fast_app,
 )
 
 from quantide.data.models.calendar import calendar
 from quantide.data.models.stocks import stock_list
 from quantide.service.quote_monitor import quote_monitor
+from quantide.web.application import fast_app
+from quantide.web.components.navigation import SystemBreadcrumb
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import AppTheme
 
@@ -36,17 +36,7 @@ _POLL = "every 3s [document.visibilityState === 'visible']"
 
 
 def _breadcrumb() -> Div:
-    return Div(
-        Nav(
-            A("首页", href="/", cls="hover:text-[#e41815]"),
-            Span(">", cls="text-gray-400"),
-            A("系统维护", href="/system/", cls="hover:text-[#e41815]"),
-            Span(">", cls="text-gray-400"),
-            Span("实时行情", cls="text-gray-900 font-medium"),
-            cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",
-        ),
-        cls="mb-4",
-    )
+    return SystemBreadcrumb("实时行情")
 
 
 def _is_session(now: datetime.datetime) -> bool:
@@ -94,6 +84,51 @@ def _change_cls(change_pct: float | None) -> str:
     return "text-red-500" if change_pct > 0 else "text-green-600"
 
 
+def _quote_row(row, now):
+    """Render one row with its display values and available actions."""
+    prev_close = row.get("prev_close")
+    change_pct = None
+    if prev_close and prev_close > 0:
+        change_pct = (row["price"] - prev_close) / prev_close * 100
+    received_at = row.get("received_at")
+    delay = (
+        max(0.0, (now - received_at).total_seconds())
+        if isinstance(received_at, datetime.datetime)
+        else None
+    )
+    quote_ts = row.get("quote_ts")
+    return Tr(
+        Td(row["symbol"], cls="px-3 py-2 font-mono text-xs text-gray-700"),
+        Td(row.get("name") or "-", cls="px-3 py-2 text-gray-700"),
+        Td(f"{row['price']:,.2f}", cls="px-3 py-2 text-right tabular-nums"),
+        Td(
+            f"{change_pct:+.2f}%" if change_pct is not None else "-",
+            cls=f"px-3 py-2 text-right tabular-nums {_change_cls(change_pct)}",
+        ),
+        Td(
+            f"{prev_close:,.2f}" if prev_close else "-",
+            cls="px-3 py-2 text-right tabular-nums text-gray-500",
+        ),
+        Td(
+            f"{row.get('volume'):,.0f}" if row.get("volume") is not None else "-",
+            cls="px-3 py-2 text-right tabular-nums text-gray-600",
+        ),
+        Td(
+            f"{row.get('amount'):,.0f}" if row.get("amount") is not None else "-",
+            cls="px-3 py-2 text-right tabular-nums text-gray-600",
+        ),
+        Td(
+            quote_ts.strftime("%H:%M:%S") if isinstance(quote_ts, datetime.datetime) else "-",
+            cls="px-3 py-2 text-right tabular-nums text-gray-500",
+        ),
+        Td(
+            f"{delay:.1f}s" if delay is not None else "-",
+            cls="px-3 py-2 text-right tabular-nums text-gray-500",
+        ),
+        cls="border-b border-gray-50 last:border-0",
+    )
+
+
 def _render_rows(now: datetime.datetime, query: str) -> list[Any]:
     rows = quote_monitor.snapshot(query=query, limit=50)
     if not rows:
@@ -103,7 +138,10 @@ def _render_rows(now: datetime.datetime, query: str) -> list[Any]:
                     Div(
                         P("尚未收到行情", cls="text-sm font-medium text-gray-500"),
                         P(
-                            "请确认 QUANTIDE_QUOTE_PUBLISHER=tencent 已启用，或自定义发布者已连接。",
+                            (
+                                "请确认 QUANTIDE_QUOTE_PUBLISHER=tencent "
+                                "已启用，或自定义发布者已连接。"
+                            ),
                             cls="mt-1 text-xs text-gray-400",
                         ),
                         cls="py-12 text-center",
@@ -113,52 +151,7 @@ def _render_rows(now: datetime.datetime, query: str) -> list[Any]:
             )
         ]
     rendered: list[Any] = []
-    for row in rows:
-        prev_close = row.get("prev_close")
-        change_pct = None
-        if prev_close and prev_close > 0:
-            change_pct = (row["price"] - prev_close) / prev_close * 100
-        received_at = row.get("received_at")
-        delay = (
-            max(0.0, (now - received_at).total_seconds())
-            if isinstance(received_at, datetime.datetime)
-            else None
-        )
-        quote_ts = row.get("quote_ts")
-        rendered.append(
-            Tr(
-                Td(row["symbol"], cls="px-3 py-2 font-mono text-xs text-gray-700"),
-                Td(row.get("name") or "-", cls="px-3 py-2 text-gray-700"),
-                Td(f"{row['price']:,.2f}", cls="px-3 py-2 text-right tabular-nums"),
-                Td(
-                    f"{change_pct:+.2f}%" if change_pct is not None else "-",
-                    cls=f"px-3 py-2 text-right tabular-nums {_change_cls(change_pct)}",
-                ),
-                Td(
-                    f"{prev_close:,.2f}" if prev_close else "-",
-                    cls="px-3 py-2 text-right tabular-nums text-gray-500",
-                ),
-                Td(
-                    f"{row.get('volume'):,.0f}" if row.get("volume") is not None else "-",
-                    cls="px-3 py-2 text-right tabular-nums text-gray-600",
-                ),
-                Td(
-                    f"{row.get('amount'):,.0f}" if row.get("amount") is not None else "-",
-                    cls="px-3 py-2 text-right tabular-nums text-gray-600",
-                ),
-                Td(
-                    quote_ts.strftime("%H:%M:%S")
-                    if isinstance(quote_ts, datetime.datetime)
-                    else "-",
-                    cls="px-3 py-2 text-right tabular-nums text-gray-500",
-                ),
-                Td(
-                    f"{delay:.1f}s" if delay is not None else "-",
-                    cls="px-3 py-2 text-right tabular-nums text-gray-500",
-                ),
-                cls="border-b border-gray-50 last:border-0",
-            )
-        )
+    rendered.extend(_quote_row(row, now) for row in rows)
     return rendered
 
 
@@ -184,7 +177,9 @@ def _data_health(now: datetime.datetime) -> list[Any]:
             )
         )
     except Exception:
-        items.append(Span("涨跌停价未获取", cls="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500"))
+        items.append(
+            Span("涨跌停价未获取", cls="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500")
+        )
     items.append(
         A(
             "查看风险事件 →",
@@ -200,9 +195,7 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
     last_received = status.get("last_received_at")
     freshness, tone, hint = _freshness(now, last_received)
     last_text = (
-        last_received.strftime("%H:%M:%S")
-        if isinstance(last_received, datetime.datetime)
-        else "—"
+        last_received.strftime("%H:%M:%S") if isinstance(last_received, datetime.datetime) else "—"
     )
     last_batch = (
         status["last_batch_at"].strftime("%H:%M:%S")
@@ -223,10 +216,20 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
             _status_card("行情状态", freshness, hint, tone),
             _status_card("最后更新", last_text, "行情总线最近一次推送"),
             _status_card("覆盖标的", f"{status['symbols']:,}", "当前缓存的最新快照数"),
-            _status_card("累计推送", f"{status['messages']:,}", f"最新批次 {status['last_batch_size']:,} 只"),
+            _status_card(
+                "累计推送", f"{status['messages']:,}", f"最新批次 {status['last_batch_size']:,} 只"
+            ),
             _status_card("最新批次", last_batch, "接收时间"),
-            _status_card("行情源", "运行中" if status["started"] else "未启动", "监视器订阅状态", "green" if status["started"] else "red"),
-            cls="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-gray-100 bg-gray-100 md:grid-cols-3 xl:grid-cols-6",
+            _status_card(
+                "行情源",
+                "运行中" if status["started"] else "未启动",
+                "监视器订阅状态",
+                "green" if status["started"] else "red",
+            ),
+            cls=(
+                "mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border "
+                "border-gray-100 bg-gray-100 md:grid-cols-3 xl:grid-cols-6"
+            ),
         ),
         Div(
             Form(
@@ -247,9 +250,10 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
                     type="submit",
                     style="height:2rem;min-height:2rem;width:64px;flex:none;box-sizing:border-box;",
                     cls=(
-                        "inline-flex h-8 w-16 flex-none items-center justify-center whitespace-nowrap "
-                        "rounded-lg border border-gray-200 bg-white px-0 text-sm font-medium "
-                        "text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
+                        "inline-flex h-8 w-16 flex-none items-center justify-center "
+                        "whitespace-nowrap rounded-lg border border-gray-200 "
+                        "bg-white px-0 text-sm font-medium text-gray-600 transition "
+                        "hover:bg-gray-50 hover:text-gray-900"
                     ),
                 ),
                 hx_get="/system/realtime/panel",
@@ -268,13 +272,33 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
                         Tr(
                             Th("代码", cls="px-3 py-2 text-left text-xs font-medium text-gray-500"),
                             Th("名称", cls="px-3 py-2 text-left text-xs font-medium text-gray-500"),
-                            Th("最新价", cls="px-3 py-2 text-right text-xs font-medium text-gray-500"),
-                            Th("涨跌幅", cls="px-3 py-2 text-right text-xs font-medium text-gray-500"),
-                            Th("昨收", cls="px-3 py-2 text-right text-xs font-medium text-gray-500"),
-                            Th("成交量(手)", cls="px-3 py-2 text-right text-xs font-medium text-gray-500"),
-                            Th("成交额(千元)", cls="px-3 py-2 text-right text-xs font-medium text-gray-500"),
-                            Th("行情时间", cls="px-3 py-2 text-right text-xs font-medium text-gray-500"),
-                            Th("接收延迟", cls="px-3 py-2 text-right text-xs font-medium text-gray-500"),
+                            Th(
+                                "最新价",
+                                cls="px-3 py-2 text-right text-xs font-medium text-gray-500",
+                            ),
+                            Th(
+                                "涨跌幅",
+                                cls="px-3 py-2 text-right text-xs font-medium text-gray-500",
+                            ),
+                            Th(
+                                "昨收", cls="px-3 py-2 text-right text-xs font-medium text-gray-500"
+                            ),
+                            Th(
+                                "成交量(手)",
+                                cls="px-3 py-2 text-right text-xs font-medium text-gray-500",
+                            ),
+                            Th(
+                                "成交额(千元)",
+                                cls="px-3 py-2 text-right text-xs font-medium text-gray-500",
+                            ),
+                            Th(
+                                "行情时间",
+                                cls="px-3 py-2 text-right text-xs font-medium text-gray-500",
+                            ),
+                            Th(
+                                "接收延迟",
+                                cls="px-3 py-2 text-right text-xs font-medium text-gray-500",
+                            ),
                             cls="border-b border-gray-100",
                         )
                     ),

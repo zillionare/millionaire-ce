@@ -27,23 +27,39 @@ class SchedulerManager:
         return self._scheduler
 
     def start(self):
-        if self._scheduler and not self._is_running:
-            self._scheduler.start()
+        if not self._is_running:
+            self.scheduler.start()
             self._is_running = True
             logger.info("Scheduler started")
 
-    def stop(self):
+    def pause(self):
+        """Prevent new scheduled work before shutdown signals existing workers."""
         if self._scheduler and self._is_running:
-            self._scheduler.shutdown()
+            self._scheduler.pause()
+
+    def stop(self, wait=False):
+        if self._scheduler and self._is_running:
+            self._scheduler.shutdown(wait=wait)
             self._is_running = False
+            self._scheduler = None
             logger.info("Scheduler stopped")
 
-    def add_job(self, func, trigger=None, args=None, kwargs=None, id=None, name=None, **trigger_args):
+    def add_job(
+        self, func, trigger=None, args=None, kwargs=None, id=None, name=None, **trigger_args
+    ):
         """代理 add_job 方法"""
-        return self.scheduler.add_job(func, trigger=trigger, args=args, kwargs=kwargs, id=id, name=name, **trigger_args)
+        return self.scheduler.add_job(
+            func, trigger=trigger, args=args, kwargs=kwargs, id=id, name=name, **trigger_args
+        )
+
+    def remove_job(self, job_id):
+        """Remove an owned job without starting a new scheduler during shutdown."""
+        if self._scheduler is not None and self._scheduler.get_job(job_id) is not None:
+            self._scheduler.remove_job(job_id)
 
     def add_listener(self, callback, mask=None):
         """代理 add_listener 方法"""
         return self.scheduler.add_listener(callback, mask)
+
 
 scheduler = SchedulerManager()

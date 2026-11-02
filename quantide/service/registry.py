@@ -57,11 +57,13 @@ class BrokerRegistry:
                     name = broker.portfolio_name
                 if hasattr(broker, "status"):
                     status = broker.status
-                result.append({
-                    "id": portfolio_id,
-                    "name": name,
-                    "status": status,
-                })
+                result.append(
+                    {
+                        "id": portfolio_id,
+                        "name": name,
+                        "status": status,
+                    }
+                )
         return result
 
     def get_default(self) -> tuple[str, str] | None:

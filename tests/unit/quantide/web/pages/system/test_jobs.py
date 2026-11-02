@@ -39,7 +39,7 @@ class TestJobsPage:
         """页面包含定时任务内容"""
         resp = client.get("/system/jobs/", follow_redirects=True)
         assert "定时任务" in resp.text
-        assert "日线数据同步" in resp.text
+        assert "每日数据维护" in resp.text
 
     def test_jobs_has_table(self, client):
         """页面包含任务表格"""

@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING, Protocol
 import polars as pl
 from loguru import logger
 
+from quantide.core.bar_schema import bar_schema
 from quantide.core.enums import FrameType
 from quantide.core.ports import MarketDataPort
+from quantide.core.ports.data_fetcher import STANDARD_BAR_COLUMNS
 
 if TYPE_CHECKING:
     from quantide.data.models.daily_bars import DailyBars
@@ -91,9 +93,7 @@ class BarsFeed(Protocol):
         """
         ...
 
-    def get_price_for_match(
-        self, asset: str, tm: datetime.datetime
-    ) -> pl.DataFrame | None:
+    def get_price_for_match(self, asset: str, tm: datetime.datetime) -> pl.DataFrame | None:
         """获取用于撮合的行情数据（回测/模拟盘使用）
 
         对于日线，返回当日行情数据。
@@ -110,9 +110,7 @@ class BarsFeed(Protocol):
         """
         ...
 
-    def get_close_adjust_factor(
-        self, assets: list[str], start: Frame, end: Frame
-    ) -> pl.DataFrame:
+    def get_close_adjust_factor(self, assets: list[str], start: Frame, end: Frame) -> pl.DataFrame:
         """获取指定日期范围内的收盘价和复权因子
 
         用于计算市值和除权。
@@ -151,9 +149,7 @@ class BarsFeedImpl:
         """
         self._daily_bars = daily_bars
         self._market_data = market_data if market_data is not None else live_quote
-        self._is_backtest = (
-            self._market_data is None or not self._market_data.is_running
-        )
+        self._is_backtest = self._market_data is None or not self._market_data.is_running
 
     def get_bars(
         self,
@@ -180,10 +176,10 @@ class BarsFeedImpl:
 
             if not self._is_backtest and self._market_data is not None:
                 today = datetime.date.today()
-                need_live = end is None or (
-                    isinstance(end, datetime.date) and end >= today
-                ) or (
-                    isinstance(end, datetime.datetime) and end.date() >= today
+                need_live = (
+                    end is None
+                    or (isinstance(end, datetime.date) and end >= today)
+                    or (isinstance(end, datetime.datetime) and end.date() >= today)
                 )
 
                 if need_live:
@@ -221,10 +217,12 @@ class BarsFeedImpl:
             )
 
             if not df.is_empty():
-                df = df.rename({
-                    "date": "frame",
-                    "asset": "asset",
-                })
+                df = df.rename(
+                    {
+                        "date": "frame",
+                        "asset": "asset",
+                    }
+                )
 
             return df
 
@@ -248,9 +246,7 @@ class BarsFeedImpl:
             logger.error(f"Error getting live bar: {e}")
             return None
 
-    def _merge_history_live(
-        self, history_df: pl.DataFrame, live_df: pl.DataFrame
-    ) -> pl.DataFrame:
+    def _merge_history_live(self, history_df: pl.DataFrame, live_df: pl.DataFrame) -> pl.DataFrame:
         """合并历史数据和实时数据"""
         if history_df.is_empty():
             return live_df
@@ -268,10 +264,7 @@ class BarsFeedImpl:
         if df.is_empty():
             return self._empty_df()
 
-        required_cols = [
-            "asset", "frame", "open", "high", "low", "close",
-            "volume", "amount", "adjust", "is_st", "up_limit", "down_limit"
-        ]
+        required_cols = ["asset", "frame", *STANDARD_BAR_COLUMNS[2:]]
 
         if "st" in df.columns and "is_st" not in df.columns:
             df = df.rename({"st": "is_st"})
@@ -290,20 +283,9 @@ class BarsFeedImpl:
     def _empty_df(self) -> pl.DataFrame:
         """返回空 DataFrame（统一格式）"""
         return pl.DataFrame(
-            schema={
-                "asset": pl.Utf8,
-                "frame": pl.Datetime,
-                "open": pl.Float64,
-                "high": pl.Float64,
-                "low": pl.Float64,
-                "close": pl.Float64,
-                "volume": pl.Float64,
-                "amount": pl.Float64,
-                "adjust": pl.Float64,
-                "is_st": pl.Boolean,
-                "up_limit": pl.Float64,
-                "down_limit": pl.Float64,
-            }
+            schema=bar_schema(
+                time_column="frame", time_type=pl.Datetime, asset_column="asset", extended=True
+            )
         )
 
     def _to_datetime(self, frame: Frame) -> datetime.datetime:
@@ -319,9 +301,7 @@ class BarsFeedImpl:
 
         if self._daily_bars is not None:
             try:
-                return self._daily_bars.get_trade_price_limits(
-                    asset, datetime.date.today()
-                )
+                return self._daily_bars.get_trade_price_limits(asset, datetime.date.today())
             except Exception as e:
                 logger.error(f"Error getting price limits: {e}")
 
@@ -338,9 +318,7 @@ class BarsFeedImpl:
 
         return quote.get("price")
 
-    def get_price_for_match(
-        self, asset: str, tm: datetime.datetime
-    ) -> pl.DataFrame | None:
+    def get_price_for_match(self, asset: str, tm: datetime.datetime) -> pl.DataFrame | None:
         """获取用于撮合的行情数据"""
         df = self.get_bars(
             asset=asset,
@@ -359,9 +337,7 @@ class BarsFeedImpl:
 
         return df
 
-    def get_close_adjust_factor(
-        self, assets: list[str], start: Frame, end: Frame
-    ) -> pl.DataFrame:
+    def get_close_adjust_factor(self, assets: list[str], start: Frame, end: Frame) -> pl.DataFrame:
         """获取收盘价和复权因子"""
         if self._daily_bars is None:
             return pl.DataFrame(

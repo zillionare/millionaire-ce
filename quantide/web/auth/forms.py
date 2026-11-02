@@ -54,294 +54,7 @@ def create_login_form(error=None, action="/auth/login", redirect_to="/"):
     branding = get_branding()
 
     return Div(
-        Style(
-            """
-            .qt-login-page {
-                min-height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 24px;
-                background: #ffffff;
-                font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-            }
-            .qt-login-card {
-                position: relative;
-                display: grid;
-                grid-template-columns: minmax(220px, 0.9fr) minmax(300px, 1fr);
-                width: min(640px, 100%);
-                min-height: 380px;
-                border-radius: 0 24px 0 24px;
-                overflow: hidden;
-                background: #ffffff;
-                box-shadow: 0 3px 5px rgba(0, 0, 0, 0.14);
-                border: 1px solid rgba(131, 108, 76, 0.12);
-            }
-            .qt-login-brand {
-                background: #fafafa;
-                color: #171717;
-                padding: 30px 24px 24px;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                position: relative;
-            }
-            .qt-brand-mark {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 10px;
-                margin-top: 2px;
-            }
-            .qt-brand-logo {
-                width: 108px;
-                max-width: 72%;
-                height: auto;
-                display: block;
-            }
-            .qt-brand-logo-text {
-                font-size: 32px;
-                font-weight: bold;
-                color: white;
-                letter-spacing: 0.1em;
-                text-align: center;
-            }
-            .qt-brand-divider {
-                width: 140px;
-                height: 1px;
-                background: rgba(255, 248, 231, 0.8);
-            }
-            .qt-brand-tagline {
-                font-size: 13px;
-                letter-spacing: 0.12em;
-            }
-            .qt-brand-slogan {
-                align-self: center;
-                text-align: center;
-                font-size: 14px;
-                line-height: 1.6;
-                letter-spacing: 0.08em;
-                font-style: italic;
-                color: rgba(255, 248, 231, 0.9);
-                padding: 10px 0;
-                width: 100%;
-                max-width: 260px;
-            }
-            .qt-brand-footer {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 6px;
-                text-align: center;
-                font-size: 11px;
-                letter-spacing: 0.12em;
-            }
-            .qt-brand-contact {
-                font-size: 10px;
-                letter-spacing: 0;
-            }
-            .qt-login-panel {
-                background: #fff;
-                padding: 40px 38px 30px 66px;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            }
-            .qt-login-title {
-                font-size: 28px;
-                color: #2b231c;
-                letter-spacing: 0.08em;
-                margin-bottom: 28px;
-                font-weight: 600;
-            }
-            .qt-login-form {
-                display: flex;
-                flex-direction: column;
-                gap: 16px;
-            }
-            .qt-login-field {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-            }
-            .qt-login-label {
-                color: #8a8278;
-                font-size: 12px;
-                letter-spacing: 0.03em;
-            }
-            .qt-login-input {
-                width: 100%;
-                height: 40px;
-                border: none;
-                background: #f0ede8;
-                color: #2d241d;
-                padding: 0 12px;
-                font-size: 14px;
-                border-radius: 0;
-                box-shadow: inset 0 0 0 1px rgba(86, 69, 54, 0.05);
-            }
-            .qt-login-input::placeholder {
-                color: #c2bbb0;
-            }
-            .qt-login-input:focus {
-                outline: 2px solid rgba(201, 5, 5, 0.25);
-                outline-offset: 2px;
-            }
-            .qt-login-remember {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                color: #6c6258;
-                font-size: 12px;
-                margin-top: 2px;
-            }
-            .qt-login-remember input {
-                width: 14px;
-                height: 14px;
-                accent-color: #c90505;
-            }
-            .qt-login-error {
-                background: #fff3f2;
-                color: #e41815;
-                border-left: 4px solid #e41815;
-                padding: 8px 10px;
-                font-size: 12px;
-            }
-            .qt-login-button {
-                margin-top: 10px;
-                height: 42px;
-                border: none;
-                background: #e41815;
-                color: #ffffff;
-                font-size: 18px;
-                letter-spacing: 0.3em;
-                text-indent: 0.3em;
-                cursor: pointer;
-                border-radius: 4px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.08);
-                transition: box-shadow 0.2s ease, transform 0.1s ease;
-            }
-            .qt-login-button:hover {
-                box-shadow: 0 6px 16px rgba(0,0,0,0.12);
-            }
-            .qt-login-button:active {
-                transform: translateY(1px);
-                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            }
-            .qt-emblem-yinyang {
-                position: absolute;
-                left: 47%;
-                top: 45%;
-                transform: translate(-50%, -50%);
-                width: 46px;
-                height: 46px;
-                border-radius: 50%;
-                z-index: 3;
-                overflow: hidden;
-                background:
-                    linear-gradient(90deg, #262626 0 50%, #e41815 50% 100%);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-            }
-            .qt-emblem-yinyang::before,
-            .qt-emblem-yinyang::after {
-                content: '';
-                position: absolute;
-                left: 50%;
-                transform: translateX(-50%);
-                width: 23px;
-                height: 23px;
-                border-radius: 50%;
-            }
-            .qt-emblem-yinyang::before {
-                top: 0;
-                background: #121212;
-            }
-            .qt-emblem-yinyang::after {
-                bottom: 0;
-                background: #c90505;
-            }
-            .qt-emblem-eye-top {
-                position: absolute;
-                left: 50%;
-                transform: translateX(-50%);
-                width: 4px;
-                height: 4px;
-                border-radius: 50%;
-                background: #ffffff;
-                z-index: 4;
-                top: 11px;
-            }
-            .qt-emblem-eye-bottom {
-                position: absolute;
-                left: 50%;
-                transform: translateX(-50%);
-                width: 4px;
-                height: 4px;
-                border-radius: 50%;
-                background: #121212;
-                z-index: 4;
-                bottom: 11px;
-            }
-            .qt-emblem-text {
-                position: absolute;
-                inset: 0;
-                # display: flex;
-                display: none;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                font-weight: 700;
-                letter-spacing: 0.04em;
-            }
-            .qt-emblem-char {
-                display: block;
-                line-height: 1;
-                font-size: 20px;
-                margin: 8px 0;
-            }
-            .qt-emblem-char-top {
-                color: #c90505;
-            }
-            .qt-emblem-char-bottom {
-                color: #ffffff;
-                z-index: 2;
-            }
-            @media (max-width: 900px) {
-                .qt-login-page {
-                    padding: 18px;
-                }
-                .qt-login-card {
-                    grid-template-columns: 1fr;
-                    min-height: auto;
-                    width: min(360px, 100%);
-                    border-radius: 0 18px 0 18px;
-                }
-                .qt-login-brand {
-                    padding: 28px 22px 84px;
-                    min-height: 240px;
-                }
-                .qt-brand-slogan {
-                    font-size: 16px;
-                    max-width: 220px;
-                }
-                .qt-login-panel {
-                    padding: 72px 24px 28px;
-                }
-                .qt-login-title {
-                    font-size: 24px;
-                    margin-bottom: 20px;
-                    text-align: center;
-                }
-                .qt-emblem-yinyang {
-                    left: 50%;
-                    top: 240px;
-                    transform: translate(-50%, -50%);
-                    width: 82px;
-                    height: 82px;
-                }
-            }
-            """
-        ),
+        Link(rel="stylesheet", href="/static/login.css"),
         Div(
             Div(
                 Div(
@@ -368,7 +81,14 @@ def create_login_form(error=None, action="/auth/login", redirect_to="/"):
                         Input(type="hidden", name="redirect_to", value=redirect_to),
                         Alert(error_message, cls="qt-login-error") if error_message else None,
                         _login_field("账号", "Account", "username", "username", "请输入账户"),
-                        _login_field("密码", "Password", "password", "password", "请输入密码", field_type="password"),
+                        _login_field(
+                            "密码",
+                            "Password",
+                            "password",
+                            "password",
+                            "请输入密码",
+                            field_type="password",
+                        ),
                         Label(
                             Input(type="checkbox", name="remember_me", value="on"),
                             Span("记住我/Remember me"),
@@ -454,17 +174,13 @@ def create_register_form(error=None, action="/auth/register"):
                     ),
                     Div(
                         Label(
-                            CheckboxX(
-                                name="accept_terms", selected=False, required=True
-                            ),
+                            CheckboxX(name="accept_terms", selected=False, required=True),
                             Span(" I accept the Terms and Conditions", cls="ml-2"),
                             cls="flex items-center text-sm cursor-pointer",
                         ),
                         cls="mb-4",
                     ),
-                    Button(
-                        "Create Account", type="submit", cls=(ButtonT.primary, "w-full")
-                    ),
+                    Button("Create Account", type="submit", cls=(ButtonT.primary, "w-full")),
                     method="post",
                     action=action,
                 ),
@@ -586,9 +302,7 @@ def create_reset_password_form(token, error=None, action="/auth/reset"):
                         required=True,
                         minlength=8,
                     ),
-                    Button(
-                        "Reset Password", type="submit", cls=(ButtonT.primary, "w-full")
-                    ),
+                    Button("Reset Password", type="submit", cls=(ButtonT.primary, "w-full")),
                     method="post",
                     action=action,
                 ),
@@ -618,11 +332,7 @@ def create_profile_form(user, success=None, error=None, action="/auth/profile"):
             Card(
                 CardHeader(H3("账户信息")),
                 CardBody(
-                    (
-                        Alert("个人设置已更新。", cls=AlertT.success)
-                        if success
-                        else None
-                    ),
+                    (Alert("个人设置已更新。", cls=AlertT.success) if success else None),
                     Alert(error, cls=AlertT.error) if error else None,
                     Form(
                         Grid(
@@ -632,20 +342,17 @@ def create_profile_form(user, success=None, error=None, action="/auth/profile"):
                                 disabled=True,
                                 cls="bg-muted",
                             ),
-                            LabelInput(
-                                "邮箱",
-                                name="email",
-                                type="email",
-                                value=user.email,
-                                required=True,
-                            ),
+                            user_email_input(user),
                             cols=1,
                             cols_md=2,
                         ),
                         Div(
                             Hr(cls="my-6"),
                             H4("重设密码", cls="text-lg font-semibold mb-2"),
-                            P("如需修改登录密码，请先输入当前密码。", cls="mb-4 text-sm text-muted-foreground"),
+                            P(
+                                "如需修改登录密码，请先输入当前密码。",
+                                cls="mb-4 text-sm text-muted-foreground",
+                            ),
                             LabelInput(
                                 "当前密码",
                                 name="current_password",
@@ -725,3 +432,7 @@ def create_message_alert(message, type="info"):
     }.get(type, AlertT.info)
 
     return Alert(message, cls=alert_class)
+
+
+def user_email_input(user, label="邮箱"):
+    return LabelInput(label, name="email", type="email", value=user.email, required=True)

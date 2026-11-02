@@ -72,7 +72,7 @@ async def test_run_daily():
     end_date = datetime.date(2024, 1, 2)
 
     # Mock dependencies
-    with patch("quantide.service.runner.calendar") as mock_calendar, \
+    with patch("quantide.service.runner.record_backtest_log"), patch("quantide.service.runner.calendar") as mock_calendar, \
          patch("quantide.service.runner.BacktestBroker") as MockBroker, \
          patch("quantide.service.runner.daily_bars"), \
          patch("quantide.service.runner.db"), \
@@ -170,7 +170,7 @@ async def test_run_minute():
     end_date = datetime.date(2024, 1, 1) # 1 day
 
     # Mock dependencies
-    with patch("quantide.service.runner.calendar") as mock_calendar, \
+    with patch("quantide.service.runner.record_backtest_log"), patch("quantide.service.runner.calendar") as mock_calendar, \
          patch("quantide.service.runner.BacktestBroker") as MockBroker, \
          patch("quantide.service.runner.daily_bars"), \
          patch("quantide.service.runner.db"), \

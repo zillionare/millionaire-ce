@@ -20,7 +20,9 @@ trading through the edition gate.
   gateway fields cannot enable a live gateway in CE.
 - Paper/simulation accounts and strategy runtimes remain available after
   initialization. Their quotes continue to come from `MarketDataHub`,
-  including the existing Tencent quote publisher path.
+  including explicitly enabled user quote extensions or the single, fixed 30-day
+  Tencent demonstration. Tencent is disabled by default and cannot be renewed
+  after expiry.
 - A persisted `live` runtime mode is not resumed: persisted live strategy
   runtimes are marked `status=blocked`, with `block_scope=edition`, and the
   gateway broker is never started. Generic gateway and live adapter modules

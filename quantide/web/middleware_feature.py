@@ -14,6 +14,28 @@ from quantide.config.features import (
 )
 from quantide.service.init_wizard import init_wizard
 
+
+def _request_feature_key(request):
+    """Resolve the feature being requested, including HTMX target views."""
+    feature_key = _match_feature_for_path(request.url.path)
+    if feature_key is None and request.url.path.startswith("/broker"):
+        requested_kind = str(request.query_params.get("kind", "")).lower()
+        active_kind = str(
+            (request.scope.get("session") or {}).get("active_account_kind", "")
+        ).lower()
+        if requested_kind in {"qmt", "live"} or active_kind in {"qmt", "live"}:
+            feature_key = "live_trading"
+    if feature_key is None and (
+        request.url.path == "/trade/set-active" or request.url.path.startswith("/trade/cancel/")
+    ):
+        active_kind = str(
+            (request.scope.get("session") or {}).get("active_account_kind", "")
+        ).lower()
+        if active_kind in {"qmt", "live"}:
+            feature_key = "live_trading"
+    return feature_key
+
+
 FEATURE_ROUTE_PREFIXES = {
     "/live": "live_trading",
     "/trade/simulation": "simulation",
@@ -23,6 +45,23 @@ FEATURE_ROUTE_PREFIXES = {
     "/init-wizard/gateway-test": "live_settings",
     "/system/accounts/live": "live_trading",
 }
+
+
+def _edition_feature(feature_key):
+    """Edition feature."""
+    if feature_key == "live_settings":
+        if not supports_live_trading():
+            feature = {
+                "name": "实盘设置",
+                "available": False,
+            }
+        else:
+            # The settings page is how a private edition configures
+            # the gateway, so it must remain reachable before setup.
+            feature = {"name": "实盘设置", "available": True}
+    else:
+        feature = get_feature_status().get(feature_key, {})
+    return feature
 
 
 def _match_feature_for_path(path: str) -> str | None:
@@ -40,21 +79,29 @@ def _is_htmx_request(headers) -> bool:
 
 def _disabled_fragment_html(feature_name: str) -> str:
     if not supports_live_trading() and feature_name in {"实盘交易", "live_trading", "实盘设置"}:
-        return f"""
-        <div class="max-w-xl mx-auto mt-10 p-6 bg-white rounded-lg shadow border border-gray-200 text-center">
-            <h3 class="text-lg font-semibold text-gray-700 mb-3">🔒 实盘交易暂不可用</h3>
-            <p class="text-gray-700 mb-2">{live_trading_unavailable_message()}。</p>
-            <p class="text-gray-600">当前版本可继续使用回测、仿真账户和纸面运行。</p>
-        </div>
-        """
-    return f"""
-    <div class="max-w-xl mx-auto mt-10 p-6 bg-white rounded-lg shadow border border-gray-200 text-center">
-        <h3 class="text-lg font-semibold text-red-700 mb-3">🔒 {feature_name}功能已禁用</h3>
-        <p class="text-gray-700 mb-2">您当前未配置 gateway，因此无法使用{feature_name}功能。</p>
-        <p class="text-gray-600 mb-4">如需启用，请先前往交易网关页面完成配置。</p>
-        <a href="/system/gateway/" class="btn btn-primary" style="background: #D13527; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; display: inline-block;">前往交易网关</a>
-    </div>
-    """
+        return (
+            '\n        <div class="max-w-xl mx-auto mt-10 p-6 bg-white rounded-lg shadow '
+            'border border-gray-200 text-center">\n            <h3 class="text-lg '
+            'font-semibold text-gray-700 mb-3">🔒 实盘交易暂不可用</h3>\n            <p '
+            'class="text-gray-700 mb-2">'
+            f"{live_trading_unavailable_message()}"
+            '。</p>\n            <p class="text-gray-600">当前版本可继续使用回测、仿真账'
+            "户和纸面运行。</p>\n        </div>\n        "
+        )
+    return (
+        '\n    <div class="max-w-xl mx-auto mt-10 p-6 bg-white rounded-lg shadow border '
+        'border-gray-200 text-center">\n        <h3 class="text-lg font-semibold '
+        'text-red-700 mb-3">🔒 '
+        f"{feature_name}"
+        '功能已禁用</h3>\n        <p class="text-gray-700 mb-2">您当前未配置 '
+        "gateway，因此无法使用"
+        f"{feature_name}"
+        '功能。</p>\n        <p class="text-gray-600 '
+        'mb-4">如需启用，请先前往交易网关页面完成配置。</p>\n        <a '
+        'href="/system/gateway/" class="btn btn-primary" style="background: #D13527; '
+        "color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; "
+        'display: inline-block;">前往交易网关</a>\n    </div>\n    '
+    )
 
 
 def _disabled_page_html(feature_name: str) -> str:
@@ -96,36 +143,9 @@ class FeatureCheckMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request, call_next):
         """处理请求"""
-        feature_key = _match_feature_for_path(request.url.path)
-        if feature_key is None and request.url.path.startswith("/broker"):
-            requested_kind = str(request.query_params.get("kind", "")).lower()
-            active_kind = str(
-                (request.scope.get("session") or {}).get("active_account_kind", "")
-            ).lower()
-            if requested_kind in {"qmt", "live"} or active_kind in {"qmt", "live"}:
-                feature_key = "live_trading"
-        if feature_key is None and (
-            request.url.path == "/trade/set-active"
-            or request.url.path.startswith("/trade/cancel/")
-        ):
-            active_kind = str(
-                (request.scope.get("session") or {}).get("active_account_kind", "")
-            ).lower()
-            if active_kind in {"qmt", "live"}:
-                feature_key = "live_trading"
+        feature_key = _request_feature_key(request)
         if feature_key is not None:
-            if feature_key == "live_settings":
-                if not supports_live_trading():
-                    feature = {
-                        "name": "实盘设置",
-                        "available": False,
-                    }
-                else:
-                    # The settings page is how a private edition configures
-                    # the gateway, so it must remain reachable before setup.
-                    feature = {"name": "实盘设置", "available": True}
-            else:
-                feature = get_feature_status().get(feature_key, {})
+            feature = _edition_feature(feature_key)
             if not feature.get("available", False):
                 feature_name = str(feature.get("name") or feature_key)
                 if request.method == "GET":

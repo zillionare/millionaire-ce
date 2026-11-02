@@ -18,62 +18,31 @@ from typing import Protocol
 
 import pandas as pd
 
+from quantide.core.bar_schema import (
+    STANDARD_BAR_COLUMNS as STANDARD_BAR_COLUMNS,
+)
+from quantide.core.bar_schema import (
+    STANDARD_INDEX_BAR_COLUMNS as STANDARD_INDEX_BAR_COLUMNS,
+)
+from quantide.core.bar_schema import (
+    STANDARD_INDEX_WEIGHT_COLUMNS as STANDARD_INDEX_WEIGHT_COLUMNS,
+)
+from quantide.core.bar_schema import (
+    STANDARD_MINUTE_BAR_COLUMNS as STANDARD_MINUTE_BAR_COLUMNS,
+)
+from quantide.core.bar_schema import (
+    STANDARD_STOCK_LIST_COLUMNS as STANDARD_STOCK_LIST_COLUMNS,
+)
+
 #: 标准扩展日线字段（顺序即存储列顺序）
-STANDARD_BAR_COLUMNS: list[str] = [
-    "date",
-    "asset",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-    "amount",
-    "adjust",
-    "is_st",
-    "up_limit",
-    "down_limit",
-]
 
 #: 标准指数日线字段
-STANDARD_INDEX_BAR_COLUMNS: list[str] = [
-    "date",
-    "index_code",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-    "amount",
-]
 
 #: 标准指数成分字段（point-in-time）
-STANDARD_INDEX_WEIGHT_COLUMNS: list[str] = [
-    "date",
-    "index_code",
-    "con_code",
-    "weight",
-]
 
 #: 标准股票列表字段
-STANDARD_STOCK_LIST_COLUMNS: list[str] = [
-    "asset",
-    "name",
-    "pinyin",
-    "list_date",
-    "delist_date",
-]
 
 #: 标准分钟线字段（``date`` 为 datetime64[ms]，含时分）
-STANDARD_MINUTE_BAR_COLUMNS: list[str] = [
-    "date",
-    "asset",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-    "amount",
-]
 
 #: 错误记录格式：[func_name, identifier, message]
 ErrorRecord = list[list]
@@ -236,9 +205,7 @@ class DataFetcherPort(Protocol):
         """
         ...
 
-    def fetch_quote_snapshot(
-        self, symbols: Iterable[str] | str
-    ) -> dict[str, dict]:
+    def fetch_quote_snapshot(self, symbols: Iterable[str] | str) -> dict[str, dict]:
         """获取实时行情快照。
 
         Returns:

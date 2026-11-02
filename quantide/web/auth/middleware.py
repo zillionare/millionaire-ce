@@ -1,3 +1,4 @@
+import functools
 import inspect
 from typing import Any
 
@@ -30,31 +31,15 @@ class AuthBeforeware:
 
     def create_beforeware(self, additional_public_paths=None):
         """Create beforeware for fastHTML"""
-        skip_patterns = self._build_skip_patterns(
-            additional_paths=additional_public_paths
-        )
+        skip_patterns = self._build_skip_patterns(additional_paths=additional_public_paths)
 
         # Create Beforeware authentication check function
         def auth_check(req, sess):
             """Check authentication prior to check"""
             auth_username = sess.get("auth")
 
-            # If no session auth, check for remember me cookie
-            if not auth_username:
-                remember_user = req.cookies.get("remember_user")
-                if remember_user:
-                    # Verify user still exists and is active
-                    user = self.auth_manager.get_user(remember_user)
-                    if user and user.active:
-                        # Restore session from remember me cookie
-                        sess["auth"] = user.username
-                        sess["user_id"] = user.id
-                        sess["role"] = user.role
-                        sess["remember_me"] = True
-                        auth_username = user.username
-                    else:
-                        # Invalid remember me cookie, continue to redirect
-                        pass
+            # Authentication comes only from the signed session middleware.
+            # A legacy remember_user cookie is client-controlled identity, not proof of login.
 
             if not auth_username:
                 # No auth, redirect to login
@@ -103,25 +88,34 @@ class AuthBeforeware:
         """Decorate paths requiring the admin role."""
         return self.require_role("admin")
 
-    import functools
-    from typing import Any
-
     def require_role(self, *allowed_roles):
-        """Decorate paths requiring a specific role."""
+        """Guard synchronous and asynchronous routes before running any handler code."""
 
-        def decorator(func):
-            @functools.wraps(func)  # ← Copy original function signature
-            def wrapper(req, *args: Any, **kwargs: Any):  # ← Add type annotations
-                user = req.scope.get("user")
-                if not user or user.role not in allowed_roles:
+        def decorator(function):
+            only_request = len(inspect.signature(function).parameters) == 1
+
+            def invoke(request, args, kwargs):
+                return function(request) if only_request else function(request, *args, **kwargs)
+
+            def denied(request):
+                user = request.scope.get("user")
+                return not user or user.role not in allowed_roles
+
+            if inspect.iscoroutinefunction(function):
+
+                @functools.wraps(function)
+                async def async_wrapper(req, *args: Any, **kwargs: Any):
+                    if denied(req):
+                        return Response("Forbidden", status_code=403)
+                    return await invoke(req, args, kwargs)
+
+                return async_wrapper
+
+            @functools.wraps(function)
+            def wrapper(req, *args: Any, **kwargs: Any):
+                if denied(req):
                     return Response("Forbidden", status_code=403)
-
-                # Check if function accepts extra args
-                sig = inspect.signature(func)
-                if len(sig.parameters) == 1:  # Only takes req
-                    return func(req)
-                else:
-                    return func(req, *args, **kwargs)
+                return invoke(req, args, kwargs)
 
             return wrapper
 

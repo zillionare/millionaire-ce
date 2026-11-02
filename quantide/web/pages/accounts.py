@@ -14,10 +14,22 @@ from quantide.core.runtime.registration import register_port_backed_broker
 from quantide.data.sqlite import db
 from quantide.service.registry import BrokerRegistry
 from quantide.service.sim_broker import PaperBroker
+from quantide.web.application import fast_app
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import AppTheme
 
 accounts_app, rt = fast_app(hdrs=AppTheme.headers())
+
+
+def _account_capital_values(broker, principal, total):
+    """Account capital values."""
+    if broker:
+        # QMTBroker 使用 asset 属性
+        asset = getattr(broker, "asset", None)
+        if asset:
+            total = getattr(asset, "total", 0)
+            principal = getattr(asset, "principal", 0)
+    return principal, total
 
 
 def _get_registry(req) -> BrokerRegistry:
@@ -33,7 +45,9 @@ def _get_market_data(req):
 
 def LiveAccountCard(account: dict, is_active: bool = False):
     """实盘账号卡片"""
-    status_color = "bg-green-100 text-green-700" if account.get("status") else "bg-gray-100 text-gray-500"
+    status_color = (
+        "bg-green-100 text-green-700" if account.get("status") else "bg-gray-100 text-gray-500"
+    )
     status_text = "已连接" if account.get("status") else "未连接"
 
     return Div(
@@ -66,14 +80,20 @@ def LiveAccountCard(account: dict, is_active: bool = False):
                 ),
                 Button(
                     "删除",
-                    cls="uk-button uk-button-default uk-button-small text-red-600 border-red-600 hover:bg-red-50 ml-2",
+                    cls=(
+                        "uk-button uk-button-default uk-button-small text-red-600 "
+                        "border-red-600 hover:bg-red-50 ml-2"
+                    ),
                     hx_delete=f"/system/accounts/live/{account.get('id')}",
                     hx_confirm="确定要删除此账号吗？",
                     hx_target="#live-accounts-list",
                 ),
                 Button(
                     "刷新",
-                    cls="uk-button uk-button-default uk-button-small text-gray-600 border-gray-300 hover:bg-gray-50 ml-2",
+                    cls=(
+                        "uk-button uk-button-default uk-button-small text-gray-600 "
+                        "border-gray-300 hover:bg-gray-50 ml-2"
+                    ),
                     hx_post=f"/system/accounts/live/{account.get('id')}/refresh",
                     hx_target="#live-accounts-list",
                 ),
@@ -105,7 +125,10 @@ def SimAccountCard(account: dict, is_active: bool = False):
                         Span(account.get("name", ""), cls="font-medium text-gray-900"),
                         cls="flex items-center",
                     ),
-                    Div(f"创建时间: {account.get('created_at', '未知')}", cls="text-sm text-gray-500"),
+                    Div(
+                        f"创建时间: {account.get('created_at', '未知')}",
+                        cls="text-sm text-gray-500",
+                    ),
                     cls="ml-4",
                 ),
                 cls="flex items-center",
@@ -113,36 +136,42 @@ def SimAccountCard(account: dict, is_active: bool = False):
             Div(
                 Div(
                     Div("初始资金", cls="text-xs text-gray-500"),
-                    Div(f"{principal/10000:.2f}万", cls="text-sm font-medium text-gray-900"),
+                    Div(f"{principal / 10000:.2f}万", cls="text-sm font-medium text-gray-900"),
                     cls="text-right mr-6",
                 ),
                 Div(
                     Div("当前资金", cls="text-xs text-gray-500"),
-                    Div(f"{total/10000:.2f}万", cls=f"text-sm font-medium {pnl_color}"),
+                    Div(f"{total / 10000:.2f}万", cls=f"text-sm font-medium {pnl_color}"),
                     cls="text-right mr-6",
                 ),
                 Button(
                     "删除",
                     type="button",
-                    cls="text-sm text-red-600 hover:text-red-800 px-3 py-1 border border-red-600 rounded hover:bg-red-50",
+                    cls=(
+                        "text-sm text-red-600 hover:text-red-800 px-3 py-1 border "
+                        "border-red-600 rounded hover:bg-red-50"
+                    ),
                     onclick=f"document.getElementById('delete-dialog-{account.get('id')}').classList.remove('hidden')",
                 ),
                 ConfirmDialogModal(
                     dialog_id=f"delete-dialog-{account.get('id')}",
                     title="删除账户",
-                    message=f"确定要删除账户 \"{account.get('name')}\" 吗？此操作不可恢复。",
+                    message=f'确定要删除账户 "{account.get("name")}" 吗？此操作不可恢复。',
                     confirm_url=f"/system/accounts/sim/{account.get('id')}/delete",
                 ),
                 Button(
                     "重置",
                     type="button",
-                    cls="text-sm text-gray-600 hover:text-gray-900 px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 ml-2",
+                    cls=(
+                        "text-sm text-gray-600 hover:text-gray-900 px-3 py-1 border "
+                        "border-gray-300 rounded hover:bg-gray-50 ml-2"
+                    ),
                     onclick=f"document.getElementById('reset-dialog-{account.get('id')}').classList.remove('hidden')",
                 ),
                 ConfirmDialogModal(
                     dialog_id=f"reset-dialog-{account.get('id')}",
                     title="重置账户",
-                    message=f"确定要重置账户 \"{account.get('name')}\" 吗？这将清空所有持仓和订单。",
+                    message=f'确定要重置账户 "{account.get("name")}" 吗？这将清空所有持仓和订单。',
                     confirm_url=f"/system/accounts/sim/{account.get('id')}/reset",
                 ),
                 cls="flex items-center",
@@ -153,7 +182,9 @@ def SimAccountCard(account: dict, is_active: bool = False):
     )
 
 
-def ConfirmDialogModal(dialog_id: str, title: str, message: str, confirm_url: str, confirm_method: str = "POST"):
+def ConfirmDialogModal(
+    dialog_id: str, title: str, message: str, confirm_url: str, confirm_method: str = "POST"
+):
     """确认对话框组件"""
     return Div(
         Div(
@@ -174,7 +205,10 @@ def ConfirmDialogModal(dialog_id: str, title: str, message: str, confirm_url: st
                     "取消",
                     type="button",
                     onclick=f"document.getElementById('{dialog_id}').classList.add('hidden')",
-                    cls="ml-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50",
+                    cls=(
+                        "ml-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg "
+                        "hover:bg-gray-50"
+                    ),
                 ),
                 cls="flex justify-end",
             ),
@@ -185,17 +219,26 @@ def ConfirmDialogModal(dialog_id: str, title: str, message: str, confirm_url: st
     )
 
 
-def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kind: str = "", active_id: str = "", show_create_modal: bool = False):
+def AccountsPage(
+    live_accounts: list[dict],
+    sim_accounts: list[dict],
+    active_kind: str = "",
+    active_id: str = "",
+    show_create_modal: bool = False,
+):
     """账号管理页面主内容"""
     # 弹窗显示脚本
-    modal_script = Script("""
+    modal_script = Script(
+        """
         document.addEventListener('DOMContentLoaded', function() {
             var modal = document.getElementById('create-sim-modal');
             if (modal && %s) {
                 modal.classList.remove('hidden');
             }
         });
-    """ % ("true" if show_create_modal else "false"))
+    """
+        % ("true" if show_create_modal else "false")
+    )
 
     return Div(
         modal_script,
@@ -222,23 +265,36 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
             ),
             Div(
                 Div(
-                    *[LiveAccountCard(a, is_active=(active_kind == a.get("kind") and active_id == a.get("id"))) for a in live_accounts],
+                    *[
+                        LiveAccountCard(
+                            a, is_active=(active_kind == a.get("kind") and active_id == a.get("id"))
+                        )
+                        for a in live_accounts
+                    ],
                     id="live-accounts-list",
-                ) if live_accounts else P("暂无实盘账户", cls="text-gray-500 italic py-4"),
+                )
+                if live_accounts
+                else P("暂无实盘账户", cls="text-gray-500 italic py-4"),
                 # 配置新账户按钮
                 Div(
                     A(
                         UkIcon("plus", size=16),
                         " 配置新实盘账户",
                         href="#",
-                        cls="flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400",
+                        cls=(
+                            "flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 "
+                            "border border-dashed border-gray-300 rounded-lg "
+                            "hover:bg-gray-50 hover:border-gray-400"
+                        ),
                     ),
                     cls="mt-4",
                 ),
                 cls="p-6",
             ),
             cls="bg-white rounded-lg shadow mb-6",
-        ) if supports_live_trading() else None,
+        )
+        if supports_live_trading()
+        else None,
         # 模拟交易账户区域
         Div(
             Div(
@@ -246,7 +302,10 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
                 Button(
                     "清空所有模拟交易账户",
                     type="button",
-                    cls="text-sm text-red-600 hover:text-red-800 px-3 py-1 border border-red-600 rounded hover:bg-red-50",
+                    cls=(
+                        "text-sm text-red-600 hover:text-red-800 px-3 py-1 border "
+                        "border-red-600 rounded hover:bg-red-50"
+                    ),
                     onclick="document.getElementById('delete-all-dialog').classList.remove('hidden')",
                 ),
                 ConfirmDialogModal(
@@ -259,9 +318,16 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
             ),
             Div(
                 Div(
-                    *[SimAccountCard(a, is_active=(active_kind == a.get("kind") and active_id == a.get("id"))) for a in sim_accounts],
+                    *[
+                        SimAccountCard(
+                            a, is_active=(active_kind == a.get("kind") and active_id == a.get("id"))
+                        )
+                        for a in sim_accounts
+                    ],
                     id="sim-accounts-list",
-                ) if sim_accounts else P("暂无模拟交易账户", cls="text-gray-500 italic py-4"),
+                )
+                if sim_accounts
+                else P("暂无模拟交易账户", cls="text-gray-500 italic py-4"),
                 # 新建模拟交易账户按钮
                 Div(
                     Button(
@@ -269,7 +335,11 @@ def AccountsPage(live_accounts: list[dict], sim_accounts: list[dict], active_kin
                         " 新建模拟交易账户",
                         type="button",
                         onclick="document.getElementById('create-sim-modal').classList.remove('hidden')",
-                        cls="flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400",
+                        cls=(
+                            "flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 "
+                            "border border-dashed border-gray-300 rounded-lg "
+                            "hover:bg-gray-50 hover:border-gray-400"
+                        ),
                     ),
                     cls="mt-4",
                 ),
@@ -300,54 +370,8 @@ def accounts_list(request):
     live_accounts = []
     sim_accounts = []
 
-    if reg:
-        # 实盘账户（CE 不加载或渲染实盘账户）
-        for info in reg.list_by_kind(BrokerKind.QMT) if supports_live_trading() else []:
-            account_id = info.get("id")
-            if not account_id:
-                continue
-            broker = reg.get(BrokerKind.QMT, account_id)
-            total = 0
-            principal = 0
-            if broker:
-                # QMTBroker 使用 asset 属性
-                asset = getattr(broker, "asset", None)
-                if asset:
-                    total = getattr(asset, "total", 0)
-                    principal = getattr(asset, "principal", 0)
-
-            live_accounts.append({
-                "id": account_id,
-                "name": info.get("name") or account_id,
-                "kind": BrokerKind.QMT.value,
-                "status": info.get("status", False),
-                "created_at": datetime.now().strftime("%Y-%m-%d"),
-                "total": total,
-                "principal": principal,
-            })
-
-        # 模拟交易账户
-        for info in reg.list_by_kind(BrokerKind.SIMULATION):
-            account_id = info.get("id")
-            if not account_id:
-                continue
-            broker = reg.get(BrokerKind.SIMULATION, account_id)
-            total = 0
-            principal = 0
-            if broker:
-                # SimulationBroker 使用 principal 和 total_assets 属性
-                principal = getattr(broker, "principal", 0)
-                total = getattr(broker, "total_assets", 0)
-
-            sim_accounts.append({
-                "id": account_id,
-                "name": info.get("name") or account_id,
-                "kind": BrokerKind.SIMULATION.value,
-                "status": info.get("status", False),
-                "created_at": datetime.now().strftime("%Y-%m-%d"),
-                "total": total,
-                "principal": principal,
-            })
+    live_accounts = _managed_accounts(reg, BrokerKind.QMT) if supports_live_trading() else []
+    sim_accounts = _managed_accounts(reg, BrokerKind.SIMULATION)
 
     # 检查是否需要显示创建弹窗
     show_create_modal = request.query_params.get("create_sim") == "1"
@@ -392,11 +416,13 @@ def _auto_select_latest_account(reg, session):
             # 从数据库获取创建时间
             pf = db.get_portfolio(account_id)
             if pf:
-                sim_accounts.append({
-                    "id": account_id,
-                    "kind": BrokerKind.SIMULATION.value,
-                    "start": pf.start,
-                })
+                sim_accounts.append(
+                    {
+                        "id": account_id,
+                        "kind": BrokerKind.SIMULATION.value,
+                        "start": pf.start,
+                    }
+                )
 
     if sim_accounts:
         # 按创建时间排序，选择最新的
@@ -504,21 +530,47 @@ def CreateSimAccountForm():
             Form(
                 Div(
                     Span("账户名称", cls="block text-sm text-gray-700 mb-1"),
-                    Input(type="text", name="name", placeholder="例如：模拟账户A", required=True,
-                          cls="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#e41815]/20"),
+                    Input(
+                        type="text",
+                        name="name",
+                        placeholder="例如：模拟账户A",
+                        required=True,
+                        cls=(
+                            "w-full px-3 py-2 border border-gray-300 rounded-lg "
+                            "focus:ring-2 focus:ring-[#e41815]/20"
+                        ),
+                    ),
                     cls="mb-4",
                 ),
                 Div(
                     Span("初始资金（万元）", cls="block text-sm text-gray-700 mb-1"),
-                    Input(type="text", name="principal", value="100", required=True,
-                          cls="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#e41815]/20"),
+                    Input(
+                        type="text",
+                        name="principal",
+                        value="100",
+                        required=True,
+                        cls=(
+                            "w-full px-3 py-2 border border-gray-300 rounded-lg "
+                            "focus:ring-2 focus:ring-[#e41815]/20"
+                        ),
+                    ),
                     cls="mb-4",
                 ),
                 Div(
-                    Button("创建", type="submit",
-                           cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]"),
-                    Button("取消", type="button", onclick="document.getElementById('create-sim-modal').classList.add('hidden')",
-                           cls="ml-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"),
+                    Button(
+                        "创建",
+                        type="submit",
+                        cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412]",
+                    ),
+                    Button(
+                        "取消",
+                        type="button",
+                        onclick="document.getElementById('create-sim-modal').classList.add('hidden')",
+                        cls=(
+                            "ml-2 px-4 py-2 border border-gray-300 text-gray-700 "
+                            "rounded-lg hover:bg-gray-50"
+                        ),
+                    ),
                     cls="flex justify-end",
                 ),
                 method="POST",
@@ -551,21 +603,30 @@ def _get_sim_accounts_list(reg, active_kind: str = "", active_id: str = ""):
                 principal = getattr(broker, "principal", 0)
                 total = getattr(broker, "total_assets", 0)
 
-            sim_accounts.append({
-                "id": account_id,
-                "name": info.get("name") or account_id,
-                "kind": BrokerKind.SIMULATION.value,
-                "status": info.get("status", False),
-                "created_at": datetime.now().strftime("%Y-%m-%d"),
-                "total": total,
-                "principal": principal,
-            })
+            sim_accounts.append(
+                {
+                    "id": account_id,
+                    "name": info.get("name") or account_id,
+                    "kind": BrokerKind.SIMULATION.value,
+                    "status": info.get("status", False),
+                    "created_at": datetime.now().strftime("%Y-%m-%d"),
+                    "total": total,
+                    "principal": principal,
+                }
+            )
 
     return Div(
         Div(
-            *[SimAccountCard(a, is_active=(active_kind == a.get("kind") and active_id == a.get("id"))) for a in sim_accounts],
+            *[
+                SimAccountCard(
+                    a, is_active=(active_kind == a.get("kind") and active_id == a.get("id"))
+                )
+                for a in sim_accounts
+            ],
             id="sim-accounts-list",
-        ) if sim_accounts else P("暂无模拟交易账户", cls="text-gray-500 italic py-4"),
+        )
+        if sim_accounts
+        else P("暂无模拟交易账户", cls="text-gray-500 italic py-4"),
         # 新建模拟交易账户按钮
         Div(
             Button(
@@ -573,7 +634,11 @@ def _get_sim_accounts_list(reg, active_kind: str = "", active_id: str = ""):
                 " 新建模拟交易账户",
                 type="button",
                 onclick="document.getElementById('create-sim-modal').classList.remove('hidden')",
-                cls="flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400",
+                cls=(
+                    "flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 border "
+                    "border-dashed border-gray-300 rounded-lg hover:bg-gray-50 "
+                    "hover:border-gray-400"
+                ),
             ),
             cls="mt-4",
         ),
@@ -644,3 +709,31 @@ async def create_sim_account(req):
         return RedirectResponse(url="/system/accounts", status_code=303)
     except Exception as e:
         return Div(f"创建失败：{str(e)}", cls="text-red-500 p-4")
+
+
+def _managed_accounts(reg, kind):
+    """Collect balances for one account kind using its native accounting interface."""
+    accounts = []
+    for info in reg.list_by_kind(kind) if reg else []:
+        account_id = info.get("id")
+        if not account_id:
+            continue
+        broker = reg.get(kind, account_id)
+        principal, total = 0, 0
+        if kind == BrokerKind.QMT:
+            principal, total = _account_capital_values(broker, principal, total)
+        elif broker:
+            principal = getattr(broker, "principal", 0)
+            total = getattr(broker, "total_assets", 0)
+        accounts.append(
+            {
+                "id": account_id,
+                "name": info.get("name") or account_id,
+                "kind": kind.value,
+                "status": info.get("status", False),
+                "created_at": datetime.now().strftime("%Y-%m-%d"),
+                "total": total,
+                "principal": principal,
+            }
+        )
+    return accounts

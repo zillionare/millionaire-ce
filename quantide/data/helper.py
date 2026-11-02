@@ -33,36 +33,24 @@ def qfq_adjustment(
 
     # 按asset分组，计算每个股票的最新复权因子
     result = (
-        lf.with_columns(
-            [pl.col(adj_factor_col).last().over("asset").alias("latest_adj_factor")]
-        )
+        lf.with_columns([pl.col(adj_factor_col).last().over("asset").alias("latest_adj_factor")])
         .with_columns(
             [
                 # 前复权价格计算：price * adj_factor / latest_adj_factor
-                (
-                    pl.col("open")
-                    * pl.col(adj_factor_col)
-                    / pl.col("latest_adj_factor")
-                ).alias("open"),
-                (
-                    pl.col("high")
-                    * pl.col(adj_factor_col)
-                    / pl.col("latest_adj_factor")
-                ).alias("high"),
-                (
-                    pl.col("low") * pl.col(adj_factor_col) / pl.col("latest_adj_factor")
-                ).alias("low"),
-                (
-                    pl.col("close")
-                    * pl.col(adj_factor_col)
-                    / pl.col("latest_adj_factor")
-                ).alias("close"),
+                (pl.col("open") * pl.col(adj_factor_col) / pl.col("latest_adj_factor")).alias(
+                    "open"
+                ),
+                (pl.col("high") * pl.col(adj_factor_col) / pl.col("latest_adj_factor")).alias(
+                    "high"
+                ),
+                (pl.col("low") * pl.col(adj_factor_col) / pl.col("latest_adj_factor")).alias("low"),
+                (pl.col("close") * pl.col(adj_factor_col) / pl.col("latest_adj_factor")).alias(
+                    "close"
+                ),
                 # 前复权成交量计算：volume * latest_adj_factor / adj_factor（反向调整）
-                (
-                    pl.col("volume")
-                    * pl.col("latest_adj_factor")
-                    / pl.col(adj_factor_col)
-                ).alias("volume"),
+                (pl.col("volume") * pl.col("latest_adj_factor") / pl.col(adj_factor_col)).alias(
+                    "volume"
+                ),
             ]
         )
         .drop("latest_adj_factor")
@@ -101,25 +89,17 @@ def hfq_adjustment(
         lf = df
 
     result = (
-        lf.with_columns(
-            [pl.col(adj_factor_col).first().over("asset").alias("base_adj_factor")]
-        )
+        lf.with_columns([pl.col(adj_factor_col).first().over("asset").alias("base_adj_factor")])
         .with_columns(
             [
                 # 后复权价格计算：price * adj_factor / base_adj_factor
                 # 以最早的复权因子为基准，后续价格根据复权因子调整
-                (
-                    pl.col("open") * pl.col(adj_factor_col) / pl.col("base_adj_factor")
-                ).alias("open"),
-                (
-                    pl.col("high") * pl.col(adj_factor_col) / pl.col("base_adj_factor")
-                ).alias("high"),
-                (
-                    pl.col("low") * pl.col(adj_factor_col) / pl.col("base_adj_factor")
-                ).alias("low"),
-                (
-                    pl.col("close") * pl.col(adj_factor_col) / pl.col("base_adj_factor")
-                ).alias("close"),
+                (pl.col("open") * pl.col(adj_factor_col) / pl.col("base_adj_factor")).alias("open"),
+                (pl.col("high") * pl.col(adj_factor_col) / pl.col("base_adj_factor")).alias("high"),
+                (pl.col("low") * pl.col(adj_factor_col) / pl.col("base_adj_factor")).alias("low"),
+                (pl.col("close") * pl.col(adj_factor_col) / pl.col("base_adj_factor")).alias(
+                    "close"
+                ),
                 # 后复权成交量：不调整，保持原始值
                 pl.col("volume").alias("volume"),
             ]
@@ -193,16 +173,11 @@ def train_test_split(
         lf.with_columns([total_expr.alias("_total"), idx_expr.alias("_idx")])
         .with_columns(
             [
-                pl.when(
-                    pl.col("_idx")
-                    < (pl.col("_total") * train_ratio).round().cast(pl.Int64)
-                )
+                pl.when(pl.col("_idx") < (pl.col("_total") * train_ratio).round().cast(pl.Int64))
                 .then(pl.lit("train"))
                 .when(
                     pl.col("_idx")
-                    < (pl.col("_total") * (train_ratio + val_ratio))
-                    .round()
-                    .cast(pl.Int64)
+                    < (pl.col("_total") * (train_ratio + val_ratio)).round().cast(pl.Int64)
                 )
                 .then(pl.lit("valid"))
                 .otherwise(pl.lit("test"))

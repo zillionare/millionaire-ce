@@ -6,14 +6,12 @@
 import datetime
 import json
 
-from fasthtml.common import fast_app
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from quantide.config.branding import get_runtime_version
 from quantide.config.settings import get_settings
 from quantide.core.enums import FrameType
 from quantide.core.errors import TradeError, TradeErrors
-from quantide.data.models import Asset
 from quantide.service.discovery import strategy_loader
 from quantide.service.param_optimizer import (
     OptimizationSpec,
@@ -21,6 +19,8 @@ from quantide.service.param_optimizer import (
     rank_results,
 )
 from quantide.service.runner import BacktestRunner
+from quantide.web.application import fast_app
+from quantide.web.components.account_summary import build_asset_overview as build_asset_overview
 
 app, rt = fast_app()
 
@@ -30,19 +30,6 @@ import arrow
 import numpy as np
 
 ver = get_runtime_version()
-
-
-def build_asset_overview(asset: Asset) -> dict:
-    pnl = asset.total - asset.principal
-    ppnl = pnl / asset.principal if asset.principal else 0.0
-    return {
-        "total": asset.total,
-        "cash": asset.cash,
-        "frozen_cash": asset.frozen_cash,
-        "market_value": asset.market_value,
-        "pnl": pnl,
-        "pnl_pct": ppnl,
-    }
 
 
 def _get_broker(req):
@@ -257,7 +244,8 @@ async def account_info(req, asset: str, date: datetime.date | None = None):
     Args:
         request Request: 以args方式传入，包含以下字段
 
-            - date: 日期，格式为YYYY-MM-DD,待获取账户信息的日期，如果为空，则意味着取当前日期的账户信息
+            - date: 日期，格式为YYYY-MM-DD,待获取账户信息的日期，如果为空，
+            则意味着取当前日期的账户信息
 
     Returns:
         Response: 结果以binary方式返回。结果为一个dict，其中包含以下字段：
@@ -272,7 +260,8 @@ async def account_info(req, asset: str, date: datetime.date | None = None):
         - market_value: 股票市值
         - pnl: 盈亏(绝对值)
         - ppnl: 盈亏(百分比)，即pnl/principal
-        - positions: 当前持仓，dtype为[backtest.trade.datatypes.position_dtype][]的numpy structured array
+        - positions: 当前持仓，dtype为[backtest.trade.datatypes.position_dtype][]的numpy
+        structured array
     """
     broker = _require_broker(req)
     return broker.get_account_info(asset, date)
@@ -358,8 +347,8 @@ async def get_assets(request):
             - end: 日期，格式为YYYY-MM-DD,待获取账户信息的日期，如果为空，则取最后交易日
 
     Returns:
-        Response: 从`start`到`end`期间的账户资产信息，结果以binary方式返回,参考[backtest.trade.datatypes.rich_assets_dtype][]
-
+        Response: 从`start`到`end`期间的账户资产信息，
+        结果以binary方式返回,参考[backtest.trade.datatypes.rich_assets_dtype][]
     """
     broker = _require_broker(request)
 
@@ -378,9 +367,7 @@ async def get_assets(request):
     filter = np.argwhere(
         (broker._assets["date"] >= start) & (broker._assets["date"] <= end)
     ).flatten()
-    return Response(
-        pickle.dumps(broker._assets[filter]), media_type="application/octet-stream"
-    )
+    return Response(pickle.dumps(broker._assets[filter]), media_type="application/octet-stream")
 
 
 @rt("/asset_overview", methods=["GET"])
@@ -422,9 +409,7 @@ async def save_backtest(request):
     token = request.token
     accounts = request.app.ctx.accounts
 
-    name = await accounts.save_backtest(
-        name_prefix, strategy_params, token, baseline, desc
-    )
+    name = await accounts.save_backtest(name_prefix, strategy_params, token, baseline, desc)
     return PlainTextResponse(name)
 
 
@@ -439,14 +424,13 @@ async def load_backtest(request):
     """
     name = request.args.get("name", None)
     if name is None:
-        raise TradeError(
-            TradeErrors.ERROR_BAD_PARAMS, "name of the backtest is required"
-        )
+        raise TradeError(TradeErrors.ERROR_BAD_PARAMS, "name of the backtest is required")
 
     token = request.token
     accounts = request.app.ctx.accounts
 
     return JSONResponse(accounts.load_backtest(name, token))
+
 
 @rt("/strategies", methods=["GET"])
 async def list_strategies(req):
@@ -465,18 +449,20 @@ async def list_strategies(req):
 
         is_builtin = bool(info.file_path and info.file_path.startswith(builtin_dir))
 
-        strategies.append({
-            "strategy_id": f"{info.module_path}.{info.name}",
-            "name": info.name,
-            "description": info.description or "",
-            "strategy_type": info.strategy_type or "independent",
-            "module": info.module_path or "",
-            "is_builtin": is_builtin,
-            "default_config": default_config,
-            "skipped_reasons": [],
-        })
+        strategies.append(
+            {
+                "strategy_id": f"{info.module_path}.{info.name}",
+                "name": info.name,
+                "description": info.description or "",
+                "strategy_type": info.strategy_type or "independent",
+                "module": info.module_path or "",
+                "is_builtin": is_builtin,
+                "default_config": default_config,
+                "skipped_reasons": [],
+            }
+        )
 
-    # diagnostics 暂固定 []: enumerate_strategies() 的真实填充待 PR2/3 (接口契约见 interfaces.md §2.4).
+    # Diagnostics currently follows the empty-list protocol contract.
     return {"strategies": strategies, "diagnostics": []}
 
 
@@ -489,13 +475,8 @@ async def run_grid_search_job(req):
         params = {}
 
     strategy_name = params.get("strategy_name")
-    base_config = params.get("base_config", {})
-    param_grid = params.get("param_grid", {})
     start_date = params.get("start_date")
     end_date = params.get("end_date")
-    interval = params.get("interval", "1d")
-    initial_cash = params.get("initial_cash", 1_000_000)
-    max_workers = params.get("max_workers", None)
 
     strategies = strategy_loader.load_from_cache()
 
@@ -512,17 +493,17 @@ async def run_grid_search_job(req):
 
     spec = OptimizationSpec(
         strategy_name=strategy_name,
-        base_config=base_config,
-        param_grid=param_grid,
+        base_config=params.get("base_config", {}),
+        param_grid=params.get("param_grid", {}),
         start_date=start,
         end_date=end,
         objective=params.get("objective", "sharpe"),
         in_sample_ratio=params.get("in_sample_ratio", 0.7),
         mode=params.get("mode", "grid"),
         n_random=params.get("n_random", 20),
-        max_workers=max_workers or 4,
-        interval=interval,
-        initial_cash=initial_cash,
+        max_workers=params.get("max_workers", None) or 4,
+        interval=params.get("interval", "1d"),
+        initial_cash=params.get("initial_cash", 1000000),
     )
 
     try:
@@ -546,12 +527,8 @@ async def run_backtest_job(req):
         params = {}
 
     strategy_name = params.get("strategy_name")
-    config = params.get("config", {})
     start_date = params.get("start_date")
     end_date = params.get("end_date")
-    interval = params.get("interval", "1d")
-    initial_cash = params.get("initial_cash", 1_000_000)
-    portfolio_id = params.get("portfolio_id")
 
     strategies = strategy_loader.load_from_cache()
 
@@ -572,12 +549,12 @@ async def run_backtest_job(req):
     try:
         result = await runner.run(
             strategy_cls=strategy_cls,
-            config=config,
+            config=params.get("config", {}),
             start_date=start,
             end_date=end,
-            frame_type=FrameType(interval),
-            initial_cash=initial_cash,
-            portfolio_id=portfolio_id
+            frame_type=FrameType(params.get("interval", "1d")),
+            initial_cash=params.get("initial_cash", 1000000),
+            portfolio_id=params.get("portfolio_id"),
         )
         return result
     except Exception as e:

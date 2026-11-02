@@ -8,12 +8,12 @@ web 层不感知具体模型：策略类通过 ``ATTRIBUTION`` 声明自己支�
 from __future__ import annotations
 
 import datetime
-import json
 from typing import Any
 
 import polars as pl
 from loguru import logger
 
+from quantide.core.strategy_config import stored_strategy_config
 from quantide.data.sqlite import db
 from quantide.factors import FACTOR_VERSION
 from quantide.service.discovery import strategy_loader
@@ -113,9 +113,7 @@ def backtest_range(portfolio: Any) -> tuple[datetime.date, datetime.date] | None
     return bt_start, end
 
 
-def load_holdings_at(
-    portfolio_id: str, signal_date: datetime.date
-) -> dict[str, Any]:
+def load_holdings_at(portfolio_id: str, signal_date: datetime.date) -> dict[str, Any]:
     """读取回测在决策日的持仓（用于还原当时的选股池）。
 
     Args:
@@ -181,19 +179,7 @@ def load_backtest_config(portfolio_id: str) -> dict[str, Any]:
     portfolio = db.get_portfolio(portfolio_id)
     if portfolio is None:
         return {}
-    info = getattr(portfolio, "info", "") or ""
-    if not info:
-        return {}
-    try:
-        payload = json.loads(info)
-    except (TypeError, ValueError):
-        return {}
-    if isinstance(payload, dict):
-        config = payload.get("config")
-        if isinstance(config, dict):
-            return config
-        return payload
-    return {}
+    return stored_strategy_config(getattr(portfolio, "info", "") or "")
 
 
 def explain_features(
@@ -237,9 +223,7 @@ def explain_features(
         return _EXPLAIN_FEATURE_CACHE[cache_key]
     try:
         strategy = strategy_cls(
-            _AttributionBroker(
-                load_holdings_at(portfolio_id, signal_date), bt_end
-            ),
+            _AttributionBroker(load_holdings_at(portfolio_id, signal_date), bt_end),
             config,
         )
         strategy._positions_by_date = load_positions_by_date(portfolio_id)
@@ -299,9 +283,7 @@ def explain_prediction(
         return _EXPLAIN_RESULT_CACHE[cache_key]
     try:
         strategy = strategy_cls(
-            _AttributionBroker(
-                load_holdings_at(portfolio_id, signal_date), bt_end
-            ),
+            _AttributionBroker(load_holdings_at(portfolio_id, signal_date), bt_end),
             config,
         )
         strategy._positions_by_date = load_positions_by_date(portfolio_id)

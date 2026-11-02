@@ -78,7 +78,12 @@ class IndexWeightStore(ParquetStorage):
             return pl.DataFrame()
         lf = lf.filter(pl.col("index_code") == index_code)
         if as_of is not None:
-            lf = lf.filter(pl.col("date") <= pl.lit(datetime.datetime.combine(as_of, datetime.time.min), dtype=pl.Datetime("ms")))
+            lf = lf.filter(
+                pl.col("date")
+                <= pl.lit(
+                    datetime.datetime.combine(as_of, datetime.time.min), dtype=pl.Datetime("ms")
+                )
+            )
         snapshot_dates = (
             lf.select(pl.col("date").cast(pl.Date))
             .unique()
@@ -89,18 +94,12 @@ class IndexWeightStore(ParquetStorage):
         if not len(snapshot_dates):
             return pl.DataFrame()
         latest = snapshot_dates[-1]
-        out = (
-            lf.filter(pl.col("date").cast(pl.Date) == latest)
-            .collect()
-            .sort("con_code")
-        )
+        out = lf.filter(pl.col("date").cast(pl.Date) == latest).collect().sort("con_code")
         if not include_weight and "weight" in out.columns:
             out = out.drop("weight")
         return out
 
-    def snapshot_dates(
-        self, index_code: str | None = None
-    ) -> list[datetime.date]:
+    def snapshot_dates(self, index_code: str | None = None) -> list[datetime.date]:
         """列出某指数（或全部指数）已有的快照日。"""
         lf = self._scan_store(keep_partition_col=False)
         if lf is None:

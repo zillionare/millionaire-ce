@@ -21,22 +21,61 @@ from typing import Any
 
 import polars as pl
 
+from quantide.core.bar_schema import (
+    STANDARD_BAR_COLUMNS as STANDARD_BAR_COLUMNS,
+)
 from quantide.core.enums import FrameType
+from quantide.data.models.calendar import calendar
+from quantide.service.bar_access import (
+    history_end,
+    history_source,
+    previous_session,
+    provider_history,
+)
 
-STANDARD_BAR_COLUMNS = [
-    "date",
-    "asset",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-    "amount",
-    "adjust",
-    "is_st",
-    "up_limit",
-    "down_limit",
-]
+
+def _snapshot_from_port(asset, self, snapshot):
+    """Snapshot from port."""
+    if self._market_data is not None and hasattr(self._market_data, "snapshot"):
+        try:
+            snap = self._market_data.snapshot([asset]).get(asset)
+        except Exception:
+            snap = None
+        if isinstance(snap, dict):
+            snapshot = snap
+        elif snap is not None:
+            snapshot = {
+                field: getattr(snap, field, None)
+                for field in (
+                    "price",
+                    "open",
+                    "high",
+                    "low",
+                    "volume",
+                    "amount",
+                    "ts",
+                )
+            }
+    return snapshot
+
+
+def _current_snapshot_price(snapshot, today):
+    """Reject absent prices and snapshots carrying another session's timestamp."""
+    if not isinstance(snapshot, dict):
+        return None
+    price = snapshot.get("price")
+    if price is None or price <= 0:
+        price = snapshot.get("close")
+    if price is None or price <= 0:
+        return None
+    stamp = snapshot.get("ts") or snapshot.get("dt")
+    if stamp is not None:
+        day = stamp.date() if hasattr(stamp, "date") else stamp
+        if isinstance(day, datetime.datetime):
+            day = day.date()
+        if day != today:
+            return None
+    return price
 
 
 class BarViewError(Exception):
@@ -56,25 +95,13 @@ class HistBarView:
         from quantide.data.models.minute_bars import minute_bars as default_minute_bars
 
         self._bars = bars if bars is not None else daily_bars
-        self._minute_bars = (
-            minute_bars if minute_bars is not None else default_minute_bars
-        )
+        self._minute_bars = minute_bars if minute_bars is not None else default_minute_bars
 
     def _resolve_end_date(self, end_dt):
-        end_date = end_dt.date() if isinstance(end_dt, datetime.datetime) else end_dt
-        if isinstance(end_dt, datetime.datetime) and end_dt.time() <= datetime.time(9, 30):
-            try:
-                from quantide.data.models.calendar import calendar
-
-                return calendar.day_shift(end_date, -1)
-            except Exception:
-                return end_date - datetime.timedelta(days=1)
-        return end_date
+        return history_end(end_dt, None, calendar)
 
     def _fetch_completed(self, asset, count, end_date, frame_type="1d"):
-        return self._bars.get_bars(
-            n=count, end=end_date, assets=[asset], adjust=None
-        )
+        return self._bars.get_bars(n=count, end=end_date, assets=[asset], adjust=None)
 
     #: 兼容历史字符串写法
     _MINUTE_ALIASES = {
@@ -113,9 +140,7 @@ class HistBarView:
             raise NotImplementedError(f"BarView 不支持的周期: {frame_type}") from exc
 
     @classmethod
-    def _minute_frame_type(
-        cls, frame_type: FrameType | str | None
-    ) -> FrameType | None:
+    def _minute_frame_type(cls, frame_type: FrameType | str | None) -> FrameType | None:
         """分钟周期返回对应 FrameType，否则返回 None。"""
         from quantide.data.models.calendar import calendar
 
@@ -148,9 +173,7 @@ class HistBarView:
             end_dt = datetime.datetime.now()
         if end_dt.tzinfo is not None:
             end_dt = end_dt.replace(tzinfo=None)
-        return self._minute_bars.get_bars(
-            count, end=end_dt, assets=[asset], adjust="qfq"
-        )
+        return self._minute_bars.get_bars(count, end=end_dt, assets=[asset], adjust="qfq")
 
     def get_history(
         self,
@@ -164,13 +187,14 @@ class HistBarView:
         ft = self._frame_type(frame_type)
         if self._minute_frame_type(ft) is not None:
             return self.get_minute_history(
-                asset, count, end_dt, frame_type=ft,
+                asset,
+                count,
+                end_dt,
+                frame_type=ft,
                 include_forming_bar=False,
             )
         if ft is not FrameType.DAY:
-            raise NotImplementedError(
-                f"BarView 不支持的历史周期: {frame_type}"
-            )
+            raise NotImplementedError(f"BarView 不支持的历史周期: {frame_type}")
         end_date = self._resolve_end_date(end_dt)
         return self._fetch_completed(asset, count, end_date, ft.value)
 
@@ -256,9 +280,7 @@ class LiveBarView(HistBarView):
             return stored
         return 0.0, 0.0
 
-    def _previous_raw_close(
-        self, asset: str, day: datetime.date
-    ) -> float | None:
+    def _previous_raw_close(self, asset: str, day: datetime.date) -> float | None:
         """上一交易日的原始收盘价（用于识别除权日）。"""
         from quantide.data.models.calendar import calendar as market_calendar
 
@@ -267,9 +289,7 @@ class LiveBarView(HistBarView):
         except Exception:
             prev_day = day - datetime.timedelta(days=1)
         try:
-            frame = self._bars.get_bars(
-                n=1, end=prev_day, assets=[asset], adjust=None
-            )
+            frame = self._bars.get_bars(n=1, end=prev_day, assets=[asset], adjust=None)
         except Exception:
             return None
         if frame is None or frame.is_empty() or "close" not in frame.columns:
@@ -315,10 +335,7 @@ class LiveBarView(HistBarView):
         for col in ("open", "high", "low", "close", "up_limit", "down_limit"):
             if col in frame.columns:
                 exprs.append(
-                    pl.when(mask)
-                    .then(pl.col(col) * ratio)
-                    .otherwise(pl.col(col))
-                    .alias(col)
+                    pl.when(mask).then(pl.col(col) * ratio).otherwise(pl.col(col)).alias(col)
                 )
         if "volume" in frame.columns:
             exprs.append(
@@ -335,49 +352,15 @@ class LiveBarView(HistBarView):
         return datetime.datetime.now().date()
 
     def _snapshot_for(self, asset: str) -> dict[str, Any] | None:
-        """把一只股票的今日行情快照转成 forming bar 字典。"""
-        snapshot = None
-        if self._market_data is not None and hasattr(self._market_data, "snapshot"):
-            try:
-                snap = self._market_data.snapshot([asset]).get(asset)
-            except Exception:
-                snap = None
-            if isinstance(snap, dict):
-                snapshot = snap
-            elif snap is not None:
-                snapshot = {
-                    field: getattr(snap, field, None)
-                    for field in (
-                        "price",
-                        "open",
-                        "high",
-                        "low",
-                        "volume",
-                        "amount",
-                        "ts",
-                    )
-                }
+        """Build today's forming bar only from a usable, current snapshot."""
+        snapshot = _snapshot_from_port(asset, self, None)
         if snapshot is None:
             from quantide.service.market_data_hub import market_data_hub
 
-            bar = market_data_hub.get_daily_bar(asset)
-            if bar is None:
-                return None
-            snapshot = bar
-        price = snapshot.get("price") if isinstance(snapshot, dict) else None
-        if price is None or price <= 0:
-            price = snapshot.get("close") if isinstance(snapshot, dict) else None
-        if price is None or price <= 0:
+            snapshot = market_data_hub.get_daily_bar(asset)
+        price = _current_snapshot_price(snapshot, self._today())
+        if price is None:
             return None
-        ts = snapshot.get("ts") if isinstance(snapshot, dict) else None
-        if ts is None:
-            ts = snapshot.get("dt") if isinstance(snapshot, dict) else None
-        if ts is not None:
-            ts_date = ts.date() if hasattr(ts, "date") else ts
-            if isinstance(ts_date, datetime.datetime):
-                ts_date = ts_date.date()
-            if ts_date != self._today():
-                return None
         down_limit, up_limit = self._limits(asset)
         return {
             "date": self._today(),
@@ -388,8 +371,6 @@ class LiveBarView(HistBarView):
             "close": price,
             "volume": snapshot.get("volume") or 0,
             "amount": snapshot.get("amount") or 0,
-            # forming 行必须显式给出 is_st/adjust/涨跌停：策略在 14:57 会用
-            # ``~is_st`` 过滤候选，null 会被 Polars 当作不满足而丢掉全部标的。
             "adjust": 1.0,
             "is_st": bool(self._is_st(asset)),
             "up_limit": up_limit,
@@ -408,28 +389,13 @@ class LiveBarView(HistBarView):
             return pl.DataFrame()
         return pl.DataFrame(rows)
 
-    def _prev_trade_date(self, today: datetime.date) -> datetime.date:
-        try:
-            from quantide.data.models.calendar import calendar
-
-            return calendar.day_shift(today, -1)
-        except Exception:
-            return today - datetime.timedelta(days=1)
+    def _prev_trade_date(self, today):
+        return previous_session(calendar, today)
 
     def _fetch_completed(self, asset, count, end_date, frame_type="1d"):
-        # 优先使用行情端口自身的历史行情（网关等），回落 daily_bars 存储
-        if self._market_data is not None and hasattr(self._market_data, "get_history"):
-            return self._market_data.get_history(asset, count, end_date, frame_type)
-        if self._market_data is not None and hasattr(self._market_data, "get_bars"):
-            return self._market_data.get_bars(
-                n=count, end=end_date, assets=[asset], adjust=None
-            )
-        bars_get = getattr(self._bars, "get_bars", None)
-        if bars_get is not None:
-            return bars_get(
-                n=count, end=end_date, assets=[asset], adjust=None
-            )
-        return pl.DataFrame()
+        provider = history_source(self._market_data, self._bars)
+        frame = provider_history(provider, asset, count, end_date, frame_type)
+        return frame if frame is not None else pl.DataFrame()
 
     def _inject_forming(
         self,
@@ -447,7 +413,11 @@ class LiveBarView(HistBarView):
         ):
             return completed
         today = self._today()
-        date_col = "date" if "date" in completed.columns else ("frame" if "frame" in completed.columns else None)
+        date_col = (
+            "date"
+            if "date" in completed.columns
+            else ("frame" if "frame" in completed.columns else None)
+        )
         if date_col is None:
             return completed
         if date_col != "date":
@@ -525,9 +495,7 @@ class LiveBarView(HistBarView):
             "up_limit": up_limit,
             "down_limit": down_limit,
         }
-        forming = pl.DataFrame([row]).with_columns(
-            pl.col("date").cast(pl.Datetime("ms"))
-        )
+        forming = pl.DataFrame([row]).with_columns(pl.col("date").cast(pl.Datetime("ms")))
         if completed is None or completed.is_empty():
             return forming
         forming = forming.select(completed.columns)
@@ -579,13 +547,14 @@ class LiveBarView(HistBarView):
         ft = self._frame_type(frame_type)
         if self._minute_frame_type(ft) is not None:
             return self.get_minute_history(
-                asset, count, end_dt, frame_type=ft,
+                asset,
+                count,
+                end_dt,
+                frame_type=ft,
                 include_forming_bar=include_forming_bar,
             )
         if ft is not FrameType.DAY:
-            raise NotImplementedError(
-                f"LiveBarView 不支持的历史周期: {frame_type}"
-            )
+            raise NotImplementedError(f"LiveBarView 不支持的历史周期: {frame_type}")
         end_date = self._resolve_end_date(end_dt)
         if not include_forming_bar and end_date == self._today():
             end_date = self._prev_trade_date(end_date)
@@ -618,6 +587,9 @@ class LiveBarView(HistBarView):
             else datetime.datetime.combine(end_date, datetime.time(15, 0))
         )
         completed = self._inject_forming(
-            completed, forming_dt, assets or completed["asset"].unique().to_list(), include_forming_bar
+            completed,
+            forming_dt,
+            assets or completed["asset"].unique().to_list(),
+            include_forming_bar,
         )
         return completed.sort(["date", "asset"])

@@ -4,6 +4,7 @@ import datetime
 from typing import Any
 
 from quantide.core.enums import BidType, BrokerKind, OrderSide, OrderStatus
+from quantide.core.order_values import coerce_order_status
 from quantide.core.ports import BrokerPort
 from quantide.data.models import Asset, Order, Position
 
@@ -206,23 +207,113 @@ class PortBackedBroker:
             **kwargs,
         )
 
-    async def buy_percent(self, asset: str, percent: float, price: float = 0, order_time: datetime.datetime | None = None, timeout: float = 0.5, **kwargs):
-        return await self._port.buy_percent(asset=asset, percent=percent, price=price, order_time=order_time, timeout=timeout, **kwargs)
+    async def buy_percent(
+        self,
+        asset: str,
+        percent: float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs,
+    ):
+        return await self._port.buy_percent(
+            asset=asset,
+            percent=percent,
+            price=price,
+            order_time=order_time,
+            timeout=timeout,
+            **kwargs,
+        )
 
-    async def buy_amount(self, asset: str, amount: int | float, price: float = 0, order_time: datetime.datetime | None = None, timeout: float = 0.5, **kwargs):
-        return await self._port.buy_amount(asset=asset, amount=amount, price=price, order_time=order_time, timeout=timeout, **kwargs)
+    async def buy_amount(
+        self,
+        asset: str,
+        amount: int | float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs,
+    ):
+        return await self._port.buy_amount(
+            asset=asset,
+            amount=amount,
+            price=price,
+            order_time=order_time,
+            timeout=timeout,
+            **kwargs,
+        )
 
-    async def sell(self, asset: str, shares: int | float, price: float = 0, order_time: datetime.datetime | None = None, timeout: float = 0.5, **kwargs):
-        return await self._port.sell(asset=asset, shares=shares, price=price, order_time=order_time, timeout=timeout, **kwargs)
+    async def sell(
+        self,
+        asset: str,
+        shares: int | float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs,
+    ):
+        return await self._port.sell(
+            asset=asset,
+            shares=shares,
+            price=price,
+            order_time=order_time,
+            timeout=timeout,
+            **kwargs,
+        )
 
-    async def sell_percent(self, asset: str, percent: float, price: float = 0, order_time: datetime.datetime | None = None, timeout: float = 0.5, **kwargs):
-        return await self._port.sell_percent(asset=asset, percent=percent, price=price, order_time=order_time, timeout=timeout, **kwargs)
+    async def sell_percent(
+        self,
+        asset: str,
+        percent: float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs,
+    ):
+        return await self._port.sell_percent(
+            asset=asset,
+            percent=percent,
+            price=price,
+            order_time=order_time,
+            timeout=timeout,
+            **kwargs,
+        )
 
-    async def sell_amount(self, asset: str, amount: int | float, price: float = 0, order_time: datetime.datetime | None = None, timeout: float = 0.5, **kwargs):
-        return await self._port.sell_amount(asset=asset, amount=amount, price=price, order_time=order_time, timeout=timeout, **kwargs)
+    async def sell_amount(
+        self,
+        asset: str,
+        amount: int | float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs,
+    ):
+        return await self._port.sell_amount(
+            asset=asset,
+            amount=amount,
+            price=price,
+            order_time=order_time,
+            timeout=timeout,
+            **kwargs,
+        )
 
-    async def trade_target_pct(self, asset: str, target_pct: float, price: float = 0, order_time: datetime.datetime | None = None, timeout: float = 0.5, **kwargs):
-        return await self._port.trade_target_pct(asset=asset, target_pct=target_pct, price=price, order_time=order_time, timeout=timeout, **kwargs)
+    async def trade_target_pct(
+        self,
+        asset: str,
+        target_pct: float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs,
+    ):
+        return await self._port.trade_target_pct(
+            asset=asset,
+            target_pct=target_pct,
+            price=price,
+            order_time=order_time,
+            timeout=timeout,
+            **kwargs,
+        )
 
     async def cancel_order(self, qt_oid: str):
         return await self._port.cancel(qt_oid)
@@ -265,37 +356,4 @@ class PortBackedBroker:
         return OrderSide.UNKNOWN
 
     def _to_status(self, value: Any) -> OrderStatus:
-        if isinstance(value, OrderStatus):
-            return value
-        if isinstance(value, int):
-            try:
-                return OrderStatus(value)
-            except ValueError:
-                return OrderStatus.UNKNOWN
-        text = str(value).strip().upper()
-        if text.startswith("ORDERSTATUS."):
-            text = text.split(".", 1)[1]
-        if text.isdigit():
-            try:
-                return OrderStatus(int(text))
-            except ValueError:
-                return OrderStatus.UNKNOWN
-        aliases = {
-            "SUBMITTED": OrderStatus.REPORTED,
-            "REJECTED": OrderStatus.JUNK,
-            "CANCELED": OrderStatus.CANCELED,
-            "CANCELLED": OrderStatus.CANCELED,
-            "PARTIAL": OrderStatus.PART_SUCC,
-            "FILLED": OrderStatus.SUCCEEDED,
-            "SUCCEEDED": OrderStatus.SUCCEEDED,
-            "REPORTED": OrderStatus.REPORTED,
-            "UNREPORTED": OrderStatus.UNREPORTED,
-            "WAIT_REPORTING": OrderStatus.WAIT_REPORTING,
-            "REPORTED_CANCEL": OrderStatus.REPORTED_CANCEL,
-            "PARTSUCC_CANCEL": OrderStatus.PARTSUCC_CANCEL,
-            "PART_CANCEL": OrderStatus.PART_CANCEL,
-            "PART_SUCC": OrderStatus.PART_SUCC,
-            "JUNK": OrderStatus.JUNK,
-            "UNKNOWN": OrderStatus.UNKNOWN,
-        }
-        return aliases.get(text, OrderStatus.UNKNOWN)
+        return coerce_order_status(value)

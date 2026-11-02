@@ -1,0 +1,94 @@
+#ifndef Payload
+  #error Payload must name the tested standalone payload directory
+#endif
+#ifndef OutputDir
+  #error OutputDir must name an external build directory
+#endif
+#ifndef AppVersion
+  #error AppVersion must match package metadata
+#endif
+[Setup]
+AppId={{D87B676D-DC50-4E39-8DC4-120A9303E77B}
+AppName=Millionaire CE
+AppVersion={#AppVersion}
+DefaultDirName={autopf}\MillionaireCE
+DefaultGroupName=Millionaire CE
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=admin
+Compression=lzma2
+SolidCompression=yes
+OutputBaseFilename=millionaire-ce-{#AppVersion}-windows-x64
+OutputDir={#OutputDir}
+UninstallDisplayName=Millionaire CE
+CloseApplications=yes
+RestartApplications=no
+
+[Files]
+Source: "{#Payload}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Dirs]
+Name: "{commonappdata}\MillionaireCE"; Permissions: admins-full system-full
+
+[Icons]
+Name: "{group}\Millionaire CE Controller"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m quantide.cli control"; WorkingDir: "{app}"
+Name: "{commondesktop}\Millionaire CE"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m quantide.cli control"; WorkingDir: "{app}"
+
+[Run]
+Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m quantide.cli control"; Description: "Open service controller"; Flags: postinstall nowait skipifsilent runasoriginaluser
+
+[UninstallRun]
+Filename: "{app}\runtime\python.exe"; Parameters: "-m quantide.cli service stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopMillionaireService"
+Filename: "{app}\runtime\python.exe"; Parameters: "-m quantide.cli service uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "UninstallMillionaireService"
+
+[Code]
+var
+  ServiceInstallFailed: Boolean;
+
+function GetCustomSetupExitCode(): Integer;
+begin
+  if ServiceInstallFailed then Result := 10 else Result := 0;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExitCode: Integer;
+begin
+  Result := '';
+  if FileExists(ExpandConstant('{app}\runtime\python.exe')) then
+    if not Exec(ExpandConstant('{app}\runtime\python.exe'),
+      '-m quantide.cli service stop', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+      Result := 'Unable to stop the existing service. Stop it before upgrading.'
+    else if ExitCode <> 0 then
+      Result := 'The existing service could not be stopped. Check its service logs.';
+end;
+
+procedure RunServiceChecked(Action: String);
+var
+  ExitCode: Integer;
+begin
+  if not Exec(ExpandConstant('{app}\runtime\python.exe'),
+    '-m quantide.cli service ' + Action, '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+    RaiseException('Unable to execute service command: ' + Action);
+  if ExitCode <> 0 then
+    RaiseException('Service command failed: ' + Action + '. Check the service logs.');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then begin
+    ServiceInstallFailed := True;
+    RunServiceChecked('install');
+    RunServiceChecked('start');
+    ServiceInstallFailed := False;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    if not UninstallSilent then
+      if MsgBox('Delete all Millionaire CE settings, account databases and market data?',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+        DelTree(ExpandConstant('{commonappdata}\MillionaireCE'), True, True, True);
+end;

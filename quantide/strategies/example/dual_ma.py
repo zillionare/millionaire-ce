@@ -19,7 +19,12 @@ class DualMAStrategy(BaseStrategy):
 
     async def init(self):
         self.log(
-            f"DualMAStrategy Initialized: {self.symbol} Fast={self.fast_window} Slow={self.slow_window}"
+            "DualMAStrategy Initialized: "
+            f"{self.symbol}"
+            " Fast="
+            f"{self.fast_window}"
+            " Slow="
+            f"{self.slow_window}"
         )
 
     async def on_day_open(self, tm: datetime.datetime):

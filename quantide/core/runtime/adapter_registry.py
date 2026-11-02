@@ -51,7 +51,5 @@ class AdapterRegistry:
         result: list[AdapterSpec] = []
         for capability, adapters in self._items.items():
             for name, adapter in adapters.items():
-                result.append(
-                    AdapterSpec(name=name, capability=capability, adapter=adapter)
-                )
+                result.append(AdapterSpec(name=name, capability=capability, adapter=adapter))
         return result

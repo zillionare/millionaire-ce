@@ -142,6 +142,7 @@ quantide.db-shm
 .kilo/
 
 coverage.json
+quality-reports/
 .opencode/agents/
 .louke/web-users.json
 .louke/project/.serve-activity.jsonl

@@ -56,9 +56,7 @@ def _values_equal(left: Any, right: Any) -> bool:
     return left == right
 
 
-def changed_params(
-    config: dict[str, Any], defaults: dict[str, Any]
-) -> dict[str, Any]:
+def changed_params(config: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
     """返回与默认值不同的参数。
 
     Args:
@@ -86,9 +84,7 @@ def changed_params(
     return changed
 
 
-def format_changed_params(
-    config: dict[str, Any], defaults: dict[str, Any]
-) -> str:
+def format_changed_params(config: dict[str, Any], defaults: dict[str, Any]) -> str:
     """格式化"仅显示被修改的参数"的文本。
 
     Args:

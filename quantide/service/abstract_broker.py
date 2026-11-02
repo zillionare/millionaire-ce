@@ -82,11 +82,7 @@ class AbstractBroker:
         extra_str = json.dumps(extra) if extra else ""
 
         log = StrategyLog(
-            portfolio_id=self._portfolio_id,
-            dt=dt,
-            key=key,
-            value=value,
-            extra=extra_str
+            portfolio_id=self._portfolio_id, dt=dt, key=key, value=value, extra=extra_str
         )
         db.insert_strategy_logs(log)
 
@@ -123,7 +119,7 @@ class AbstractBroker:
 
     @property
     def portfolio_name(self) -> str:
-        """Portfolio 对应的账户名称，是一个适合人类阅读的名字。一般应与 portfolio一一对应，不建议重复"""
+        """返回与组合对应的账户名称。"""
         return self._portfolio_name
 
     @property
@@ -140,10 +136,11 @@ class AbstractBroker:
     def portfolio_id(self) -> str:
         return self._portfolio_id
 
-    def _validate_sell_shares(
-        self, pos: Position, shares: float
-    ) ->None:
-        """卖出时，如果是清仓或零股 (不足一手的零散股) 则不限 100 整倍数；否则必须以 100 整数倍为单位 (FR-150)."""
+    def _validate_sell_shares(self, pos: Position, shares: float) -> None:
+        """卖出时，如果是清仓或零股 (不足一手的零散股) 则不限 100 整倍数；否则必须以 100
+
+        整数倍为单位 (FR-150).
+        """
         # 1. 基础检查：没有可用持仓
         if pos.avail == 0:
             raise InsufficientPosition(pos.asset, shares)
@@ -161,7 +158,7 @@ class AbstractBroker:
 
         # 4. 数量检查: 非清仓情况下, 卖出量不能超过可用量
         if shares > pos.avail:
-             raise InsufficientPosition(pos.asset, shares)
+            raise InsufficientPosition(pos.asset, shares)
 
         # 5. 整手检查
         if shares % 100 != 0 or shares == 0:
@@ -327,43 +324,57 @@ class AbstractBroker:
         if request.style == "shares":
             if request.side == OrderSide.BUY:
                 return await self.buy(
-                    asset=request.asset, shares=request.value,
-                    price=request.price, order_time=request.order_time,
+                    asset=request.asset,
+                    shares=request.value,
+                    price=request.price,
+                    order_time=request.order_time,
                     timeout=request.timeout,
                 )
             return await self.sell(
-                asset=request.asset, shares=request.value,
-                price=request.price, order_time=request.order_time,
+                asset=request.asset,
+                shares=request.value,
+                price=request.price,
+                order_time=request.order_time,
                 timeout=request.timeout,
             )
         if request.style == "amount":
             if request.side == OrderSide.BUY:
                 return await self.buy_amount(
-                    asset=request.asset, amount=request.value,
-                    price=request.price, order_time=request.order_time,
+                    asset=request.asset,
+                    amount=request.value,
+                    price=request.price,
+                    order_time=request.order_time,
                     timeout=request.timeout,
                 )
             return await self.sell_amount(
-                asset=request.asset, amount=request.value,
-                price=request.price, order_time=request.order_time,
+                asset=request.asset,
+                amount=request.value,
+                price=request.price,
+                order_time=request.order_time,
                 timeout=request.timeout,
             )
         if request.style == "percent":
             if request.side == OrderSide.BUY:
                 return await self.buy_percent(
-                    asset=request.asset, percent=request.value,
-                    price=request.price, order_time=request.order_time,
+                    asset=request.asset,
+                    percent=request.value,
+                    price=request.price,
+                    order_time=request.order_time,
                     timeout=request.timeout,
                 )
             return await self.sell_percent(
-                asset=request.asset, percent=request.value,
-                price=request.price, order_time=request.order_time,
+                asset=request.asset,
+                percent=request.value,
+                price=request.price,
+                order_time=request.order_time,
                 timeout=request.timeout,
             )
         # target_pct
         return await self.trade_target_pct(
-            asset=request.asset, target_pct=request.value,
-            price=request.price, order_time=request.order_time,
+            asset=request.asset,
+            target_pct=request.value,
+            price=request.price,
+            order_time=request.order_time,
             timeout=request.timeout,
         )
 
@@ -407,4 +418,3 @@ class AbstractBroker:
         if isinstance(value, str):
             return datetime.datetime.fromisoformat(value)
         return datetime.datetime.now()
-

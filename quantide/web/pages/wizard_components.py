@@ -1,0 +1,238 @@
+"""Wizard components."""
+
+from typing import Any
+
+from fasthtml.common import *
+from monsterui.all import *
+
+from quantide.config.branding import get_branding
+from quantide.config.dev_stubs import (
+    dev_stubs_enabled,
+)
+from quantide.config.features import supports_live_trading
+from quantide.web.pages.wizard_state import (
+    FONT_STYLES,
+    PRIMARY_COLOR,
+)
+
+
+def _render_inline_error(message: str):
+    return Div(
+        Div(
+            Span("❌", cls="mr-2"),
+            Span(message),
+            cls="text-sm text-red-600 mt-3 flex items-center",
+        ),
+        id="wizard-error",
+    )
+
+
+def RequiredMark():
+    """必填项标记 - 红色星号"""
+    return Span("*", style=FONT_STYLES["required"])
+
+
+def InfoTooltip(tooltip_text: str):
+    """信息提示图标 - 鼠标悬停显示 tooltip
+
+    Args:
+        tooltip_text: 提示文本内容
+    """
+    return Span(
+        "ⓘ",
+        title=tooltip_text,
+        style="color: #9ca3af; cursor: help; margin-left: 4px; font-size: 12px;",
+        cls="tooltip-icon",
+    )
+
+
+def FormLabel(label: str, required: bool = False, tooltip: str | None = None):
+    """表单标签组件
+
+    Args:
+        label: 标签文本
+        required: 是否为必填项
+        tooltip: 可选的提示文本
+    """
+    children = [Span(label, style=FONT_STYLES["label"])]
+    if required:
+        children.append(RequiredMark())
+    if tooltip:
+        children.append(InfoTooltip(tooltip))
+    return Div(*children, cls="mb-1")
+
+
+def FormRow(label: str, input_component: Any, required: bool = False, tooltip: str | None = None):
+    """横向排列的表单项（label 和 input 在同一行）
+
+    Args:
+        label: 标签文本
+        input_component: 输入组件
+        required: 是否为必填项
+        tooltip: 可选的提示文本
+    """
+    label_children = [Span(label, style=FONT_STYLES["label"])]
+    if required:
+        label_children.append(RequiredMark())
+    if tooltip:
+        label_children.append(InfoTooltip(tooltip))
+
+    return Div(
+        Div(
+            *label_children,
+            cls="flex items-center gap-1",
+            style="min-width: 100px; flex-shrink: 0;",
+        ),
+        Div(input_component, cls="flex-1"),
+        cls="flex items-center gap-4 mb-4",
+    )
+
+
+def FormHint(text: str):
+    """表单提示文本"""
+    return P(text, style=FONT_STYLES["hint"], cls="mt-1 mb-3")
+
+
+def SectionTitle(text: str):
+    """章节标题"""
+    return H3(text, cls="mb-4", style=f"{FONT_STYLES['title']} color: {PRIMARY_COLOR};")
+
+
+def SectionDescription(text: str):
+    """章节描述"""
+    return P(text, style=FONT_STYLES["description"], cls="mb-4")
+
+
+def _wizard_step_meta() -> dict[int, dict[str, str]]:
+    """Build step metadata using the active product brand."""
+    product_name = get_branding().product_name
+    return {
+        1: {
+            "title": f"欢迎使用 {product_name}!",
+            "description": (
+                f"{product_name} 是为量化人打造的集成开发环境 -- 数据、研究、回测、"
+                + ("实盘。" if supports_live_trading() else "仿真。")
+            ),
+        },
+        2: {
+            "title": "运行环境",
+            ("description"): (
+                "配置行情数据存储位置、访问控制、监听端口和路径前缀。默认仅允许本机访问。"
+                "配置数据库固定保存在系统配置目录。"
+            ),
+        },
+        3: {
+            "title": "设置管理员密码",
+            ("description"): (
+                "首次初始化时必须设置管理员密码。系统不会创建默认管理员或默认密码；当前版"
+                "本固定使用 admin 作为管理员账号。"
+            ),
+        },
+        4: {
+            "title": ("配置交易/实时行情网关" if supports_live_trading() else "确认仿真行情"),
+            "description": (
+                "配置 gateway 连接信息，用于获取实时行情和执行交易。"
+                if supports_live_trading()
+                else (
+                    "CE 使用 MarketDataHub 接收行情（可通过 Tencent "
+                    "行情发布路径提供），仿真交易无需配置实盘网关。"
+                )
+            ),
+        },
+        5: {
+            "title": "数据源设置及下载",
+            ("description"): (
+                "配置数据源，触发首次下载。首次下载可以仅下载少量数据，后续系统会以后台任"
+                "务继续下载，直到数据补齐到您设定的数据起始日。将下载以下数据：证券日历、"
+                "全A证券列表、历史日线行情（含复权因子与涨跌停价格）、ST数据。"
+            ),
+        },
+        6: {
+            "title": "初始化完成",
+            "description": "恭喜！您的系统已经初始化完成。点击下方按钮，立即进入系统。",
+        },
+    }
+
+
+def _get_step_meta(step: int) -> dict[str, str]:
+    step_meta = _wizard_step_meta()
+    meta = dict(step_meta.get(step, step_meta[1]))
+    if not dev_stubs_enabled():
+        return meta
+    if step == 4:
+        return {
+            "title": "开发 Stub 交易网关",
+            ("description"): (
+                "当前进程已自动启动并启用本地 gateway "
+                "stub，本步骤只展示运行时网关信息，不需要手工配置。"
+            ),
+        }
+    if step == 5:
+        return {
+            "title": "导入开发 Stub 样本数据",
+            ("description"): (
+                "当前进程会直接把内置样本数据导入本地数据目录，不访问真实 "
+                "Tushare，也不会触发首次下载对话框。将准备以下数据：证券日历、全A证券列表"
+                "、历史日线样本（含复权因子与涨跌停价格）、ST 数据。"
+            ),
+        }
+    return meta
+
+
+def StepIndicator(current_step: int, steps: list[dict]):
+    """Render a vertical wizard timeline with a fixed layout grid."""
+    elements = []
+    for index, step in enumerate(steps, 1):
+        elements.extend(_step_indicator_nodes(index, step, current_step, len(steps)))
+    height = (len(steps) - 1) * 70 + 32 + 20
+    return Div(
+        *elements,
+        cls="step-indicator-container",
+        style=f"position: relative; width: 48px; height: {height}px; flex-shrink: 0;",
+    )
+
+
+def _step_indicator_nodes(index, step, current_step, total):
+    completed = step.get("completed", False)
+    highlighted = index == current_step or completed
+    top = (index - 1) * 70
+    nodes = [
+        Div(
+            "✓" if completed else str(index),
+            title=step["name"],
+            style=f"""
+            position: absolute;
+            top: {top}px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: {PRIMARY_COLOR if highlighted else "white"};
+            color: {"white" if highlighted else "#9ca3af"};
+            border: {"none" if highlighted else "2px solid #e5e7eb"};
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: {"600" if highlighted else "500"};
+            z-index: 2;
+        """,
+        )
+    ]
+    if index < total:
+        nodes.append(
+            Div(
+                style=f"""
+            position: absolute;
+            left: 50%;
+            top: {top + 32}px;
+            transform: translateX(-50%);
+            width: 2px;
+            height: 38px;
+            background: {PRIMARY_COLOR if completed else "#e5e7eb"};
+            z-index: 1;
+        """
+            )
+        )
+    return nodes

@@ -178,7 +178,9 @@ class KlineChart:
     def render(self) -> FT:
         """渲染组件"""
         # Lightweight Charts CDN
-        chart_lib = Script(src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js")
+        chart_lib = Script(
+            src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"
+        )
 
         # 图表容器
         chart_container = Div(
@@ -219,9 +221,10 @@ class KlineChart:
         buttons = []
         for freq, label in freqs:
             is_active = freq == current_freq
-            btn_cls = (
-                "px-3 py-1 text-sm rounded "
-                + ("bg-[#e41815] text-white" if is_active else "bg-gray-200 text-gray-700 hover:bg-gray-300")
+            btn_cls = "px-3 py-1 text-sm rounded " + (
+                "bg-[#e41815] text-white"
+                if is_active
+                else "bg-gray-200 text-gray-700 hover:bg-gray-300"
             )
             js_chart_id = chart_id.replace("-", "_")
             buttons.append(
@@ -245,8 +248,7 @@ class KlineChart:
         js_chart_id = chart_id.replace("-", "_")
         for period in ma_periods:
             btn_cls = (
-                "px-2 py-1 text-xs rounded border "
-                "border-gray-300 text-gray-600 hover:bg-gray-100"
+                "px-2 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
             )
             buttons.append(
                 Button(

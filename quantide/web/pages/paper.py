@@ -1,4 +1,5 @@
 """仿真（paper）交易页面。"""
+
 from typing import Any
 
 from fasthtml.common import *
@@ -6,8 +7,10 @@ from loguru import logger
 from monsterui.all import UkIcon
 
 from quantide.core.enums import BrokerKind
+from quantide.web.application import fast_app
 from quantide.web.components.asset_label import resolve_asset_name
 from quantide.web.layouts.main import MainLayout
+from quantide.web.services.trade_orders import submit_share_form
 from quantide.web.theme import AppTheme
 
 paper_app, rt = fast_app(hdrs=AppTheme.headers())
@@ -65,11 +68,7 @@ def AssetSummary(asset_overview: dict | None = None, **kwargs):
     """资产概览：白底卡片 + 分隔线，与项目整体风格一致。"""
     overview = asset_overview or {}
     pnl = float(overview.get("pnl") or 0.0)
-    pnl_cls = (
-        "text-red-500"
-        if pnl > 0
-        else ("text-green-600" if pnl < 0 else "text-gray-900")
-    )
+    pnl_cls = "text-red-500" if pnl > 0 else ("text-green-600" if pnl < 0 else "text-gray-900")
     pnl_pct = float(overview.get("pnl_pct") or 0.0) * 100
 
     def stat(label: str, value: str, value_cls: str = "text-gray-900") -> Any:
@@ -95,6 +94,28 @@ def AssetSummary(asset_overview: dict | None = None, **kwargs):
     )
 
 
+def _paper_position_row(p):
+    """Render one row with its display values and available actions."""
+    pnl_pct = (p.profit / (p.mv - p.profit)) if (p.mv - p.profit) != 0 else 0
+    current_price = p.mv / p.shares if p.shares > 0 else 0
+    color_cls = (
+        "text-red-500" if p.profit > 0 else ("text-green-600" if p.profit < 0 else "text-gray-900")
+    )
+    return Tr(
+        Td(p.asset, cls="font-mono text-xs text-gray-700"),
+        Td(resolve_asset_name(p.asset), cls="text-gray-700"),
+        Td(f"{p.shares:,}", cls="text-right tabular-nums"),
+        Td(f"{p.avail:,}", cls="text-right tabular-nums"),
+        Td(f"{p.shares - p.avail:,}", cls="text-right tabular-nums"),
+        Td(f"{p.mv:,.2f}", cls="text-right tabular-nums"),
+        Td(f"{current_price:,.2f}", cls="text-right tabular-nums"),
+        Td(f"{p.price:,.2f}", cls="text-right tabular-nums"),
+        Td(f"{p.profit:,.2f}", cls=f"text-right tabular-nums {color_cls}"),
+        Td(f"{pnl_pct * 100:.2f}%", cls=f"text-right tabular-nums {color_cls}"),
+        cls="border-b border-gray-50 last:border-0",
+    )
+
+
 def PositionInfo(positions: list[Any] | None = None, portfolio_id: str = "") -> Any:
     """持仓面板：白底卡片、红色强调，刷新走 paper 路由。"""
     headers = [
@@ -112,29 +133,7 @@ def PositionInfo(positions: list[Any] | None = None, portfolio_id: str = "") -> 
 
     rows = []
     if positions:
-        for p in positions:
-            pnl_pct = (p.profit / (p.mv - p.profit)) if (p.mv - p.profit) != 0 else 0
-            current_price = p.mv / p.shares if p.shares > 0 else 0
-            color_cls = (
-                "text-red-500"
-                if p.profit > 0
-                else ("text-green-600" if p.profit < 0 else "text-gray-900")
-            )
-            rows.append(
-                Tr(
-                    Td(p.asset, cls="font-mono text-xs text-gray-700"),
-                    Td(resolve_asset_name(p.asset), cls="text-gray-700"),
-                    Td(f"{p.shares:,}", cls="text-right tabular-nums"),
-                    Td(f"{p.avail:,}", cls="text-right tabular-nums"),
-                    Td(f"{p.shares - p.avail:,}", cls="text-right tabular-nums"),
-                    Td(f"{p.mv:,.2f}", cls="text-right tabular-nums"),
-                    Td(f"{current_price:,.2f}", cls="text-right tabular-nums"),
-                    Td(f"{p.price:,.2f}", cls="text-right tabular-nums"),
-                    Td(f"{p.profit:,.2f}", cls=f"text-right tabular-nums {color_cls}"),
-                    Td(f"{pnl_pct * 100:.2f}%", cls=f"text-right tabular-nums {color_cls}"),
-                    cls="border-b border-gray-50 last:border-0",
-                )
-            )
+        rows.extend(_paper_position_row(p) for p in positions)
     else:
         rows.append(
             Tr(
@@ -182,7 +181,11 @@ def PositionInfo(positions: list[Any] | None = None, portfolio_id: str = "") -> 
                         *[
                             Th(
                                 label,
-                                cls=f"whitespace-nowrap border-b border-gray-100 px-3 py-2 text-xs font-medium text-gray-500 {align}",
+                                cls=(
+                                    "whitespace-nowrap border-b border-gray-100 px-3 "
+                                    "py-2 text-xs font-medium text-gray-500 "
+                                    f"{align}"
+                                ),
                             )
                             for label, align in headers
                         ]
@@ -413,7 +416,10 @@ def _render_paper_picker(layout: MainLayout, sims: list[dict]) -> Any:
     table = Table(
         Thead(Tr(Th("账户ID"), Th("账户名称"), Th("操作"))),
         Tbody(*rows),
-        cls="uk-table uk-table-divider uk-table-small uk-table-hover border border-gray-100 rounded-lg overflow-hidden",
+        cls=(
+            "uk-table uk-table-divider uk-table-small uk-table-hover border "
+            "border-gray-100 rounded-lg overflow-hidden"
+        ),
     )
 
     def main_block():
@@ -471,17 +477,8 @@ async def place_order(req, portfolio_id: str):
     if not broker:
         return Div("Broker not found", cls="text-red-500 p-4")
 
-    form = await req.form()
-    side = form.get("side", "BUY")
-    asset = form.get("asset")
-    price = float(form.get("price", 0))
-    shares = int(form.get("shares", 0))
-
     try:
-        if side == "BUY":
-            await broker.buy(asset, shares, price)
-        else:
-            await broker.sell(asset, shares, price)
+        await submit_share_form(broker, await req.form())
 
         positions = list(broker.positions) if hasattr(broker, "positions") else []
         asset_overview = {

@@ -1,4 +1,3 @@
-
 import datetime
 
 
@@ -18,9 +17,7 @@ def get_stock_type(stock_code):
     stock_code = str(stock_code).upper()
     if stock_code.startswith(("sh", "sz", "bj")):
         return stock_code[:2].upper()
-    if stock_code.startswith(
-        ("50", "51", "60", "73", "90", "110", "113", "132", "204", "78")
-    ):
+    if stock_code.startswith(("50", "51", "60", "73", "90", "110", "113", "132", "204", "78")):
         return "SH"
     if stock_code.startswith(
         ("00", "12", "13", "18", "15", "16", "18", "20", "30", "39", "115", "1318")
@@ -102,6 +99,8 @@ def open_time_delta(dt: datetime.datetime):
         14: 180 + minute,
         15: 240,
     }.get(hour, 0)
+
+
 """Notification and stock-code helpers."""
 
 # Preserve the established multilingual API documentation layout.

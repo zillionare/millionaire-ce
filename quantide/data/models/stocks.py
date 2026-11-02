@@ -8,6 +8,7 @@ from loguru import logger
 
 from quantide.config.dev_stubs import dev_stubs_enabled
 from quantide.config.settings import get_timezone
+from quantide.core.atomic_files import atomic_path
 from quantide.core.singleton import singleton
 from quantide.data.fetchers.registry import get_data_fetcher
 
@@ -75,7 +76,8 @@ class StockList:
         """保存股票列表"""
         self._data = pl.from_pandas(df)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(self.path, index=False)
+        with atomic_path(self.path) as temporary:
+            df.to_parquet(temporary, index=False)
         self._last_update_time = datetime.datetime.now(get_timezone())
 
     def update(self, df: pd.DataFrame | None = None) -> None:
@@ -115,9 +117,7 @@ class StockList:
         """
         return self.data.filter(pl.col("asset") == asset).item(0, "delist_date")
 
-    def fuzzy_search(
-        self, query: str, id_only: bool = True
-    ) -> pd.DataFrame | list[str]:
+    def fuzzy_search(self, query: str, id_only: bool = True) -> pd.DataFrame | list[str]:
         """根据输入模式进行模糊搜索。
 
         搜索规则：
@@ -140,9 +140,7 @@ class StockList:
         q = query.strip()
 
         # 提取 symbol（不含后缀的代码）
-        tmp = self.data.with_columns(
-            pl.col("asset").str.split(".").list.get(0).alias("symbol")
-        )
+        tmp = self.data.with_columns(pl.col("asset").str.split(".").list.get(0).alias("symbol"))
 
         # 判断输入类型
         is_all_digits = q.isdigit()
@@ -161,9 +159,7 @@ class StockList:
             result = tmp.filter(pl.col("pinyin").str.to_uppercase().str.starts_with(q_upper))
         else:
             # 混合输入：匹配代码或名称
-            result = tmp.filter(
-                pl.col("symbol").str.contains(q) | pl.col("name").str.contains(q)
-            )
+            result = tmp.filter(pl.col("symbol").str.contains(q) | pl.col("name").str.contains(q))
 
         if id_only:
             return result["asset"].to_list()

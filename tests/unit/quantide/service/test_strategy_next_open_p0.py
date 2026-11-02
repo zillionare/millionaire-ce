@@ -186,6 +186,7 @@ async def test_next_open_processor_drains_persisted_intent(monkeypatch, tmp_path
 
     store = TrackingStore(tmp_path / "intents.db")
     monkeypatch.setattr(runtime_module, "tracking_store", store)
+    monkeypatch.setattr("quantide.service.runtime_proxies.tracking_store", store)
     store.enqueue_next_open_intent(
         runtime_id="paper:p1:s1",
         portfolio_id="p1",
@@ -233,6 +234,7 @@ async def test_next_open_proxy_is_async_and_returns_empty_execution_result(
 
     store = TrackingStore(tmp_path / "proxy.db")
     monkeypatch.setattr(runtime_module, "tracking_store", store)
+    monkeypatch.setattr("quantide.service.runtime_proxies.tracking_store", store)
     proxy = NextOpenBrokerProxy(
         object(),
         runtime_id="paper:p1:s1",
@@ -326,7 +328,10 @@ async def test_30m_next_open_survives_restart_and_does_not_resubmit(
     store_path = tmp_path / "30m-restart.db"
     store = TrackingStore(store_path)
     monkeypatch.setattr(runtime_module, "tracking_store", store)
+    monkeypatch.setattr("quantide.service.runtime_proxies.tracking_store", store)
     monkeypatch.setattr(runtime_module, "calendar", _Calendar)
+    monkeypatch.setattr("quantide.service.runtime_proxies.calendar", _Calendar)
+    monkeypatch.setattr("quantide.service.runtime_intents.calendar", _Calendar)
 
     first_proxy = NextOpenBarBrokerProxy(
         object(),
@@ -410,6 +415,7 @@ async def test_30m_restart_fails_closed_for_ambiguous_inflight_intent(monkeypatc
 
     store = TrackingStore(tmp_path / "30m-inflight.db")
     monkeypatch.setattr(runtime_module, "tracking_store", store)
+    monkeypatch.setattr("quantide.service.runtime_proxies.tracking_store", store)
     intent = store.enqueue_next_open_intent(
         runtime_id="paper:p1:s30",
         portfolio_id="p1",
@@ -467,6 +473,8 @@ def test_30m_next_open_target_skips_lunch_and_overnight(monkeypatch):
             return boundaries[moment]
 
     monkeypatch.setattr(runtime_module, "calendar", _Calendar)
+    monkeypatch.setattr("quantide.service.runtime_proxies.calendar", _Calendar)
+    monkeypatch.setattr("quantide.service.runtime_intents.calendar", _Calendar)
     assert StrategyRuntimeManager._next_eligible_30m_bar(
         datetime.datetime(2026, 10, 27, 11, 30)
     ) == datetime.datetime(2026, 10, 27, 13, 0)

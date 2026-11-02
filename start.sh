@@ -5,7 +5,6 @@ set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$PROJECT_DIR/.venv"
-LOG_FILE="/tmp/millionaire.log"
 
 # 解析参数
 STUB_MODE=""
@@ -44,6 +43,9 @@ fi
 
 # 进入项目目录
 cd "$PROJECT_DIR"
+
+# 使用配置的日志目录；未配置时落到系统临时目录的项目子目录。
+LOG_FILE="$(python -c 'from quantide.config.output_paths import console_log_path; print(console_log_path())')"
 
 # 确保日志目录存在
 mkdir -p "$(dirname "$LOG_FILE")"

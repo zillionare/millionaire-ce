@@ -62,6 +62,8 @@ from loguru import logger
 
 from quantide.core.domain.events import MarketEvent, QuoteSnapshot
 from quantide.core.enums import Topics
+from quantide.core.market_time import market_now
+from quantide.core.market_values import float_or_none as _to_float
 from quantide.core.message import msg_hub
 
 #: 快照字段名（与 QuoteSnapshot 对应）
@@ -104,16 +106,6 @@ def parse_snapshot(symbol: str, payload: dict[str, Any]) -> QuoteSnapshot | None
         prev_close=_to_float(payload.get(FIELD_PREV_CLOSE)),
         name=payload.get(FIELD_NAME),
     )
-
-
-def _to_float(value: Any) -> float | None:
-    """任意值转 float，失败返回 None。"""
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _to_datetime(value: Any) -> datetime.datetime | None:
@@ -187,6 +179,11 @@ class MarketDataHub:
     # ------------------------------------------------------------------
     # 订阅
     # ------------------------------------------------------------------
+    def subscribed_symbols(self) -> list[str]:
+        """Expose the active universe to opt-in quote publishers."""
+        with self._lock:
+            return sorted(self._subscribed)
+
     def subscribe(self, symbols: list[str]) -> None:
         """订阅标的（仅用于过滤，收到全量推送时按此过滤）。"""
         with self._lock:
@@ -237,7 +234,7 @@ class MarketDataHub:
         """把快照转成事件推入流队列。"""
         if self._stream_queue is None or self._stream_loop is None:
             return
-        now = datetime.datetime.now()
+        now = market_now()
         for symbol, snapshot in snapshots.items():
             event = MarketEvent(
                 symbol=symbol,
@@ -270,11 +267,7 @@ class MarketDataHub:
     def snapshot(self, symbols: list[str]) -> dict[str, QuoteSnapshot]:
         """返回指定标的的最新快照。"""
         with self._lock:
-            return {
-                str(s): self._snapshots[str(s)]
-                for s in symbols
-                if str(s) in self._snapshots
-            }
+            return {str(s): self._snapshots[str(s)] for s in symbols if str(s) in self._snapshots}
 
     def get_limits(self, symbol: str) -> tuple[float, float]:
         """返回标的的涨跌停价（未推送时返回 (0, 0)）。"""
@@ -313,7 +306,7 @@ class MarketDataHub:
         return {
             "asset": str(symbol),
             "frame": "1d",
-            "dt": (snapshot.ts or datetime.datetime.now()).date(),
+            "dt": (snapshot.ts or market_now()).date(),
             "open": snapshot.open,
             "high": snapshot.high,
             "low": snapshot.low,

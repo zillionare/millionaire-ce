@@ -11,7 +11,7 @@ import pytest
 
 from quantide.service.init_wizard import init_wizard
 from tests.e2e.support.init_wizard_session import init_wizard_e2e_session
-from tests.e2e.support.tushare_stub import patched_tushare_fetcher
+from tests.e2e.support.initialization_sources import complete_initialization_sources
 
 
 ASSETS_ROOT = Path(__file__).resolve().parents[2] / "assets"
@@ -76,7 +76,7 @@ def _wait_for_sync_completion(client) -> dict:
 @pytest.mark.e2e
 @pytest.mark.release_gate
 def test_init_wizard_download_uses_fixture_backed_tushare_data() -> None:
-    with init_wizard_e2e_session() as session, patched_tushare_fetcher():
+    with init_wizard_e2e_session() as session, complete_initialization_sources() as sources:
         _advance_to_data_setup(session.client, session.market_home)
 
         response = session.client.post(
@@ -118,7 +118,7 @@ def test_init_wizard_download_uses_fixture_backed_tushare_data() -> None:
         )
 
         assert calendar_df.height > 200
-        assert stock_df.height > 5000
+        assert stock_df.height == 1
         assert "000001.SZ" in stock_df["asset"].to_list()
 
         expected_slice = expected_bars.filter(
@@ -134,3 +134,19 @@ def test_init_wizard_download_uses_fixture_backed_tushare_data() -> None:
 
         assert actual_slice.height == 98
         assert actual_slice.equals(expected_slice)
+        from quantide.data import get_index_bars_store, get_index_weight_store, get_minute_bars_store
+        from quantide.data.models.daily_basic import daily_basic
+        from quantide.data.models.sync_task import SYNC_STAGES
+        from quantide.service.data_sync import data_sync_service
+        from quantide.web.pages import wizard_state
+
+        task = data_sync_service.get_task(wizard_state._sync_status["current_task"])
+        assert task.status == "done"
+        assert task.stage_list() == list(SYNC_STAGES)
+        assert not daily_basic.data.is_empty()
+        assert not get_index_bars_store().get(eager_mode=True).is_empty()
+        assert get_index_weight_store().end is not None
+        minute_frame = get_minute_bars_store().get(eager_mode=True)
+        assert not minute_frame.is_empty()
+        assert minute_frame.height == actual_bars.height * 8
+        assert sources[1].closed is True

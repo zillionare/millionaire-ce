@@ -11,6 +11,7 @@ from loguru import logger
 from monsterui.all import *
 
 from quantide.data.models.calendar import calendar as trade_calendar
+from quantide.web.application import fast_app
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -41,11 +42,13 @@ def _get_calendar_data(year: int, month: int) -> list[dict]:
         else:
             is_trading = current_date.weekday() < 5
 
-        data.append({
-            "date": current_date,
-            "is_trading": is_trading,
-            "day_of_week": current_date.weekday(),
-        })
+        data.append(
+            {
+                "date": current_date,
+                "is_trading": is_trading,
+                "day_of_week": current_date.weekday(),
+            }
+        )
 
     return data
 
@@ -80,48 +83,19 @@ def _build_calendar_grid(year: int, month: int) -> Div:
 
     weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     header_cells = [
-        Div(name, cls="text-center font-bold p-2 text-gray-600")
-        for name in weekday_names
+        Div(name, cls="text-center font-bold p-2 text-gray-600") for name in weekday_names
     ]
 
     rows = []
-    for week in weeks:
-        cells = []
-        for item in week:
-            if item is None:
-                cells.append(Div(cls="p-3 min-h-[70px] bg-gray-50"))
-            else:
-                day_num = item["date"].day
-                if item["is_trading"]:
-                    cells.append(
-                        Div(
-                            Span(str(day_num), cls="text-gray-800 font-medium text-lg"),
-                            cls="p-3 text-center min-h-[70px] flex flex-col items-center justify-center"
-                        )
-                    )
-                else:
-                    day_of_week = item["day_of_week"]
-                    if day_of_week < 5:
-                        cells.append(
-                            Div(
-                                Span(str(day_num), cls="text-red-500 font-medium text-lg"),
-                                Span("休市", cls="text-xs text-red-400 mt-1"),
-                                cls="p-3 text-center bg-red-50 min-h-[70px] flex flex-col items-center justify-center"
-                            )
-                        )
-                    else:
-                        cells.append(
-                            Div(
-                                Span(str(day_num), cls="text-red-500 font-medium text-lg"),
-                                cls="p-3 text-center bg-red-50 min-h-[70px] flex flex-col items-center justify-center"
-                            )
-                        )
-        rows.append(Div(*cells, cls="grid grid-cols-7 gap-1 mb-1"))
+    rows = [
+        Div(*[_calendar_day_cell(item) for item in week], cls="grid grid-cols-7 gap-1 mb-1")
+        for week in weeks
+    ]
 
     return Div(
         Div(*header_cells, cls="grid grid-cols-7 gap-1 mb-2 bg-gray-200 p-2 rounded-t-lg"),
         *rows,
-        cls="bg-white rounded-lg shadow-lg overflow-hidden"
+        cls="bg-white rounded-lg shadow-lg overflow-hidden",
     )
 
 
@@ -135,22 +109,6 @@ async def index(req, year: int = None, month: int = None):
         month = now.month
 
     # 计算导航参数
-    prev_month = month - 1 if month > 1 else 12
-    prev_month_year = year if month > 1 else year - 1
-    next_month = month + 1 if month < 12 else 1
-    next_month_year = year if month < 12 else year + 1
-    prev_year = year - 1
-    next_year = year + 1
-
-    year_options = [
-        Option(str(y), value=str(y), selected=(y == year))
-        for y in range(year - 5, year + 6)
-    ]
-
-    month_options = [
-        Option(str(m), value=str(m), selected=(m == month))
-        for m in range(1, 13)
-    ]
 
     layout = MainLayout(title="交易日历")
     layout.set_sidebar_active("/system/calendar")
@@ -168,9 +126,9 @@ async def index(req, year: int = None, month: int = None):
             Div(
                 UkIcon("calendar", size=32, cls="mr-3", style=f"color: {PRIMARY_COLOR};"),
                 H2("交易日历", cls="text-2xl font-bold"),
-                cls="flex items-center"
+                cls="flex items-center",
             ),
-            cls="mb-6"
+            cls="mb-6",
         ),
         Div(
             UkIcon("alert-triangle", cls="text-gray-500 mr-2"),
@@ -180,64 +138,36 @@ async def index(req, year: int = None, month: int = None):
                 "请点击右上角「立即更新」拉取最新数据以获得准确的节假日标红。",
                 cls="text-sm text-gray-600",
             ),
-            cls=("flex items-center p-3 mb-4 bg-gray-50 border border-gray-200 "
-                 "rounded-lg")
-        ) if stale else None,
+            cls=("flex items-center p-3 mb-4 bg-gray-50 border border-gray-200 rounded-lg"),
+        )
+        if stale
+        else None,
         Div(
             Button(
                 "立即更新",
                 hx_post="/system/calendar/sync",
                 hx_target="#calendar-content",
                 hx_swap="innerHTML",
-                cls="btn btn-sm btn-secondary"
+                cls="btn btn-sm btn-secondary",
             ),
-            cls="flex justify-end mb-4"
+            cls="flex justify-end mb-4",
         ),
-        Div(
-            Div(
-                A("<<", href=f"/system/calendar/?year={prev_year}&month={month}",
-                  cls="btn btn-sm btn-outline", title="上一年"),
-                A("<", href=f"/system/calendar/?year={prev_month_year}&month={prev_month}",
-                  cls="btn btn-sm btn-outline ml-1", title="上一月"),
-                A(">", href=f"/system/calendar/?year={next_month_year}&month={next_month}",
-                  cls="btn btn-sm btn-outline ml-1", title="下一月"),
-                A(">>", href=f"/system/calendar/?year={next_year}&month={month}",
-                  cls="btn btn-sm btn-outline ml-1", title="下一年"),
-                cls="flex items-center space-x-1"
-            ),
-                  Form(
-                  Div(
-                      _Select(*year_options, name="year", id="year-select",
-                          cls="select select-bordered select-sm w-24", onchange="this.form.submit()"),
-                      Span(" 年 ", cls="mx-1"),
-                      _Select(*month_options, name="month", id="month-select",
-                          cls="select select-bordered select-sm w-20", onchange="this.form.submit()"),
-                      Span(" 月", cls="ml-1"),
-                      cls="flex items-center"
-                  ),
-                  action="/system/calendar/",
-                  method="get",
-            ),
-            cls="flex justify-between items-center mb-6 p-4 bg-white rounded-lg shadow"
-        ),
-        Div(
-            _build_calendar_grid(year, month),
-            id="calendar-content"
-        ),
+        _calendar_navigation(year, month),
+        Div(_build_calendar_grid(year, month), id="calendar-content"),
         Div(
             Div(
                 Div(cls="w-4 h-4 bg-white mr-2 border border-gray-300"),
                 Span("交易日", cls="text-sm"),
-                cls="flex items-center mr-4"
+                cls="flex items-center mr-4",
             ),
             Div(
                 Div(cls="w-4 h-4 bg-red-50 mr-2 border border-gray-300"),
                 Span("休市日（含周末）", cls="text-sm text-red-500"),
-                cls="flex items-center"
+                cls="flex items-center",
             ),
-            cls="flex mt-4 p-4 bg-white rounded-lg shadow"
+            cls="flex mt-4 p-4 bg-white rounded-lg shadow",
         ),
-        cls="p-8"
+        cls="p-8",
     )
 
     layout.main_block = page_content
@@ -249,6 +179,7 @@ async def sync_calendar():
     """同步交易日历数据"""
     try:
         import asyncio
+
         await asyncio.to_thread(trade_calendar.update)
         logger.info("交易日历同步完成")
 
@@ -259,5 +190,90 @@ async def sync_calendar():
         return Div(
             UkIcon("alert-circle", cls="text-red-500 mr-2"),
             f"同步失败: {str(e)}",
-            cls="flex items-center p-4 bg-red-50 text-red-700 rounded-lg"
+            cls="flex items-center p-4 bg-red-50 text-red-700 rounded-lg",
         )
+
+
+def _calendar_day_cell(item):
+    if item is None:
+        return Div(cls="p-3 min-h-[70px] bg-gray-50")
+    day = str(item["date"].day)
+    if item["is_trading"]:
+        return Div(
+            Span(day, cls="text-gray-800 font-medium text-lg"),
+            cls="p-3 text-center min-h-[70px] flex flex-col items-center justify-center",
+        )
+    return Div(
+        Span(day, cls="text-red-500 font-medium text-lg"),
+        *([Span("休市", cls="text-xs text-red-400 mt-1")] if item["day_of_week"] < 5 else []),
+        cls="p-3 text-center bg-red-50 min-h-[70px] flex flex-col items-center justify-center",
+    )
+
+
+def _calendar_navigation(year, month):
+    """Render adjacent month/year links and the explicit date selectors."""
+    prev_month = month - 1 if month > 1 else 12
+    prev_month_year = year if month > 1 else year - 1
+    next_month = month + 1 if month < 12 else 1
+    next_month_year = year if month < 12 else year + 1
+    prev_year = year - 1
+    next_year = year + 1
+
+    year_options = [
+        Option(str(y), value=str(y), selected=(y == year)) for y in range(year - 5, year + 6)
+    ]
+
+    month_options = [Option(str(m), value=str(m), selected=(m == month)) for m in range(1, 13)]
+    return Div(
+        Div(
+            A(
+                "<<",
+                href=f"/system/calendar/?year={prev_year}&month={month}",
+                cls="btn btn-sm btn-outline",
+                title="上一年",
+            ),
+            A(
+                "<",
+                href=f"/system/calendar/?year={prev_month_year}&month={prev_month}",
+                cls="btn btn-sm btn-outline ml-1",
+                title="上一月",
+            ),
+            A(
+                ">",
+                href=f"/system/calendar/?year={next_month_year}&month={next_month}",
+                cls="btn btn-sm btn-outline ml-1",
+                title="下一月",
+            ),
+            A(
+                ">>",
+                href=f"/system/calendar/?year={next_year}&month={month}",
+                cls="btn btn-sm btn-outline ml-1",
+                title="下一年",
+            ),
+            cls="flex items-center space-x-1",
+        ),
+        Form(
+            Div(
+                _Select(
+                    *year_options,
+                    name="year",
+                    id="year-select",
+                    cls="select select-bordered select-sm w-24",
+                    onchange="this.form.submit()",
+                ),
+                Span(" 年 ", cls="mx-1"),
+                _Select(
+                    *month_options,
+                    name="month",
+                    id="month-select",
+                    cls="select select-bordered select-sm w-20",
+                    onchange="this.form.submit()",
+                ),
+                Span(" 月", cls="ml-1"),
+                cls="flex items-center",
+            ),
+            action="/system/calendar/",
+            method="get",
+        ),
+        cls="flex justify-between items-center mb-6 p-4 bg-white rounded-lg shadow",
+    )
