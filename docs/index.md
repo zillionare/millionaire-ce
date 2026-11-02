@@ -30,7 +30,7 @@ SHAP 预测解释，再逐步添加自己的因子。见[因子与 LightGBM](fac
 | 第一次使用 | [快速开始](quickstart.md) → [安装](native-installation.md) → [初始化](initialization.md) |
 | 验证策略想法 | [第一次回测与报告](backtesting.md) → [成交时序和防呆](execution.md) |
 | 开发策略或因子 | [编写策略](strategies.md) → [因子与 LightGBM](factors-and-ml.md) |
-| 研究和比较结果 | [参数优化](optimization.md) → [预测解释](prediction-explanation.md) |
+| 研究和比较结果 | [因子分析](factor-analysis.md) → [参数优化](optimization.md) → [预测解释](prediction-explanation.md) |
 | 连续运行 | [仿真](paper-trading.md) → [启停、升级与恢复](operations.md) |
 | 自行接入数据/柜台 | [行情扩展](quote-extensions.md) → [柜台适配](broker-adapters.md) |
 | 遇到问题 | [常见问题](troubleshooting.md) |

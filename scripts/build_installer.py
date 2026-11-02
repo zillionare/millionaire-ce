@@ -9,12 +9,16 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import tomllib
 import urllib.request
 import zipfile
 from pathlib import Path
 
+from scripts.artifact_paths import artifact_root, external_path
+
 ROOT = Path(__file__).resolve().parents[1]
+PACKAGING = Path(__file__).resolve().parent / "packaging"
 PYTHON_VERSION = "3.13.11"
 
 
@@ -95,9 +99,9 @@ def bundle_openmp(payload):
 
 def windows_wrapper(payload):
     """Verify the pinned service wrapper before putting it in a distributable."""
-    metadata = json.loads((ROOT / "packaging/winsw.json").read_text(encoding="utf-8"))
+    metadata = json.loads((PACKAGING / "winsw.json").read_text(encoding="utf-8"))
     destination = payload / "millionaire-service.exe"
-    shutil.copy2(ROOT / "packaging/licenses/WinSW.txt", payload / "WinSW-LICENSE.txt")
+    shutil.copy2(PACKAGING / "licenses/WinSW.txt", payload / "WinSW-LICENSE.txt")
     with urllib.request.urlopen(metadata["url"], timeout=60) as response:
         destination.write_bytes(response.read())
     if hashlib.sha256(destination.read_bytes()).hexdigest() != metadata["sha256"]:
@@ -130,7 +134,7 @@ def build_deb(payload, version, output):
         encoding="utf-8",
     )
     for name in ("postinst", "prerm", "postrm"):
-        shutil.copy2(ROOT / "packaging" / f"debian-{name}.sh", control / name)
+        shutil.copy2(PACKAGING / f"debian-{name}.sh", control / name)
         (control / name).chmod(0o755)
     run("dpkg-deb", "--root-owner-group", "--build", root, output)
 
@@ -145,10 +149,11 @@ def build_platform(payload, version, output_dir):
             compiler,
             f"/DPayload={payload}",
             f"/DAppVersion={version}",
-            ROOT / "packaging/windows.iss",
+            f"/DOutputDir={output_dir}",
+            PACKAGING / "windows.iss",
         )
         return
-    shutil.copy2(ROOT / "packaging/launcher.sh", payload / "millionaire-ce")
+    shutil.copy2(PACKAGING / "launcher.sh", payload / "millionaire-ce")
     (payload / "millionaire-ce").chmod(0o755)
     if sys.platform == "linux":
         if architecture not in {"x86_64", "amd64"}:
@@ -156,7 +161,7 @@ def build_platform(payload, version, output_dir):
         build_deb(payload, version, output_dir / f"millionaire-ce-{version}-ubuntu-amd64.deb")
         return
     for filename in ("install.sh", "uninstall.sh"):
-        shutil.copy2(ROOT / "packaging" / filename, payload / filename)
+        shutil.copy2(PACKAGING / filename, payload / filename)
     shutil.copy2(ROOT / "scripts/wait_for_service.py", payload / "wait-for-service.py")
     (payload / "install.sh").chmod(0o755)
     (payload / "VERSION").write_text(version, encoding="utf-8")
@@ -165,28 +170,23 @@ def build_platform(payload, version, output_dir):
         archive.add(payload, arcname=name)
 
 
-def main():
-    """Stage, smoke-test and package the wheel selected by the caller."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--wheel", required=True, type=Path)
-    parser.add_argument("--work", type=Path, default=ROOT / "build/installer")
-    args = parser.parse_args()
+def build_installer(wheel, work, output):
+    """Stage and package inside a caller-owned temporary workspace."""
     version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"][
         "poetry"
     ]["version"]
-    verify_wheel_source(args.wheel)
-    payload = args.work.resolve() / "payload"
+    verify_wheel_source(wheel)
+    payload = work.resolve() / "payload"
     payload.mkdir(parents=True)
-    python = stage_runtime(payload, args.wheel.resolve())
+    python = stage_runtime(payload, wheel.resolve())
     if sys.platform == "darwin":
         bundle_openmp(payload)
     run(
         python,
         "-c",
         "import lightgbm, polars_talib, tkinter; import quantide.cli",
-        cwd=args.work.resolve(),
+        cwd=work.resolve(),
     )
-    output = ROOT / "dist/installers"
     output.mkdir(parents=True, exist_ok=True)
     build_platform(payload, version, output)
     for path in sorted(output.iterdir()):
@@ -197,6 +197,21 @@ def main():
             encoding="utf-8",
         )
     return 0
+
+
+def main():
+    """Build outside the checkout; retain only requested packages after staging."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--wheel", required=True, type=Path)
+    parser.add_argument("--work", type=external_path)
+    parser.add_argument("--output", type=external_path, default=artifact_root() / "installers")
+    args = parser.parse_args()
+    if args.work:
+        return build_installer(args.wheel, args.work, args.output.resolve())
+    directory = artifact_root() / "work"
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="installer-", dir=directory) as temporary:
+        return build_installer(args.wheel, Path(temporary), args.output.resolve())
 
 
 if __name__ == "__main__":

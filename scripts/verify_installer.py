@@ -15,6 +15,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from scripts.artifact_paths import artifact_root, external_path
+
 
 def run(command, environment):
     """Retain installer and service output in the CI log."""
@@ -177,7 +179,10 @@ def verify(installation):
 def main():
     """Publish evidence only for actual native installation checks."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("directory", type=Path)
+    parser.add_argument("directory", nargs="?", type=Path, default=artifact_root() / "installers")
+    parser.add_argument(
+        "--report-dir", type=external_path, default=artifact_root() / "quality/installers"
+    )
     args = parser.parse_args()
     artifacts = [
         path for path in args.directory.iterdir() if path.name.endswith((".tar.gz", ".deb", ".exe"))
@@ -185,9 +190,11 @@ def main():
     if len(artifacts) != 1:
         raise ValueError("Expected exactly one native installer for this platform")
     verify_checksum(artifacts[0])
-    evidence = Path("quality-reports/installers")
+    evidence = args.report_dir
     evidence.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="millionaire-installer-") as temporary:
+    work = artifact_root() / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="millionaire-installer-", dir=work) as temporary:
         installation = NativeInstallation(artifacts[0], Path(temporary))
         try:
             result = verify(installation)

@@ -52,7 +52,7 @@ Poetry 用户可用 `poetry install --with quality,test --without doc`。
 
 ```bash
 # 与 CI 完全相同；非零退出码即不通过
-python scripts/check_quality.py
+python -m scripts.check_quality
 
 # 验证门禁确实拒绝复杂代码、复制、大文件、长行及不合格的验收报告
 python -m unittest discover -s tests/quality -v
@@ -62,10 +62,13 @@ python -m unittest discover -s tests/quality -v
 原有 Ruff 自动格式化和 MyPy hook 保留。生产质量 hook 不运行测试，允许
 Red-Green-Refactor 中先提交失败的测试；生产代码提交仍须满足结构预算。
 
-结果保存在 `quality-reports/quality.json`，包括工具版本、完整文件数、源码和
+结果默认保存在系统临时产物目录的 `quality/quality.json`，包括工具版本、完整文件数、源码和
 配置摘要、每项检查退出码及原始输出。工具缺失、版本不匹配、扫描超时、
 源码清单为空均失败；一个工具失败后仍执行其他扫描以提供完整反馈。
-此目录及 review 材料不进入 CE 发布产物。
+这些产物及 `.louke` 审查材料不进入 CE 发布产物。
+
+运行 `python -m scripts.artifact_paths` 查看产物根目录，使用 `--run` 自动配置工具缓存
+与覆盖率数据路径；完整约定见[仓库布局](project-layout.md)。根目录生成物也属于质量门禁。
 
 ## 日常 CI
 
@@ -118,9 +121,10 @@ GitHub 的 `CI` environment；真实源 job 显式绑定该环境，也允许手
 
 ```bash
 # 本机显式执行真实源检查；要求已设置 TUSHARE_TOKEN
+ce_artifacts=$(python -m scripts.artifact_paths)
 QUANTIDE_REQUIRE_LIVE_DATA=1 python -m pytest tests/live -m live_data \
-  --runxfail --timeout=30 --junitxml=quality-reports/live-data.xml
-python scripts/check_test_results.py quality-reports/live-data.xml
+  --runxfail --timeout=30 --junitxml="$ce_artifacts/quality/live-data.xml"
+python -m scripts.check_test_results "$ce_artifacts/quality/live-data.xml"
 ```
 
 真实源检查只读取 2024-01-02 至 2024-01-03 的 SSE 日历和 `000001.SZ` 日线，
@@ -133,7 +137,7 @@ python scripts/check_test_results.py quality-reports/live-data.xml
 拆分；预算保持上表数值，不使用历史豁免。质量扫描、单元覆盖率和严格验收均需要
 在最终源码重新执行，结果不能复用到后续修改的 wheel 或安装器。
 
-`review/2026-11-02/REPORT.md` 保留原始审查事实；实施结果和尚未验证的运行边界记录
+`.louke/project/reviews/2026-11-02/REPORT.md` 保留原始审查事实；实施结果和尚未验证的运行边界记录
 在同目录的 `IMPLEMENTATION.md`。多交易日无人值守和真实系统断电验收需要单独的
 现场证据；自动进程重启测试不替代这些证据。
 

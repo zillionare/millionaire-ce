@@ -17,6 +17,8 @@
   T+1、可用持仓、资金与涨跌停撮合条件。具体数据前提见[执行与防呆](docs/execution.md)。
 - **自带 LightGBM 研究流程**：选择已有因子，复用训练、选股、调仓、参数优化和 SHAP
   预测解释；新增因子的当前接入步骤见[因子与 LightGBM](docs/factors-and-ml.md)。
+- **先检验因子，再训练模型**：[极简因子分析](docs/factor-analysis.md)提供 Rank IC、
+  十分位前瞻收益和分年结果，可直接研究自定义面板中的因子列。
 
 ## 从这里开始
 
@@ -64,3 +66,5 @@ Windows 使用 `py -3.13 scripts\install.py --ml30m`；激活虚拟环境后可�
 完整步骤、源码专用的离线 stub、质量预算与 CI 门禁见
 [源码安装](docs/installation.md)、[开发者验收](docs/developer-acceptance.md)和
 [质量管理](docs/quality.md)。
+
+仓库布局、临时构建/报告路径及推荐的模块命令见[开发目录约定](docs/project-layout.md)。

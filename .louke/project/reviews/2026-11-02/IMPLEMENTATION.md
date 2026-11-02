@@ -47,9 +47,9 @@
 
 ## 使用入口
 
-- 最终用户：[原生安装](../../docs/native-installation.md)、[行情扩展](../../docs/quote-extensions.md)。
-- Millionaire/开发者：[模拟柜台与 SDK](../../docs/simulated-counter.md)。
-- 固定门禁和发布流程：[quality.md](../../docs/quality.md)。
+- 最终用户：[原生安装](../../../../docs/native-installation.md)、[行情扩展](../../../../docs/quote-extensions.md)。
+- Millionaire/开发者：[模拟柜台与 SDK](../../../../docs/simulated-counter.md)。
+- 固定门禁和发布流程：[quality.md](../../../../docs/quality.md)。
 
 现有 MyPy pre-commit 钩子在全仓检查时被命名空间目录的同名模块冲突阻断，
 尚未形成可用的全仓类型检查证据。它不是本次约定的六项结构预算或发布门禁，

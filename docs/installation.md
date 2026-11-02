@@ -111,7 +111,7 @@ Build and inspect both release formats before publishing:
 
 ```bash
 poetry build
-python3 scripts/validate_release_artifacts.py dist
+python -m scripts.validate_release_artifacts
 ```
 
 The validation rejects the private risk source names (including the

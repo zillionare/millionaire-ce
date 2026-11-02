@@ -19,7 +19,7 @@ class NativeLauncherTests(unittest.TestCase):
             python.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
             python.chmod(0o755)
             launcher = payload / "millionaire-ce"
-            shutil.copy2(root / "packaging/launcher.sh", launcher)
+            shutil.copy2(root / "scripts/packaging/launcher.sh", launcher)
             link = base / "millionaire-ce"
             link.symlink_to(launcher)
             relative = base / "relative"

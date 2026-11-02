@@ -12,6 +12,8 @@ import time
 import tomllib
 from pathlib import Path
 
+from scripts.artifact_paths import artifact_root, external_path, layout_errors
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = ("quantide", "scripts")
 TOOLS = ("ruff", "flake8", "flake8-cognitive-complexity", "cognitive-complexity", "pylint")
@@ -89,7 +91,9 @@ def run_check(name: str, command: list[str], root: Path) -> dict:
 def main(argv: list[str] | None = None) -> int:
     """Exit nonzero for any violation, missing tool or incomplete scan."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", type=Path, default=ROOT / "quality-reports/quality.json")
+    parser.add_argument(
+        "--report", type=external_path, default=artifact_root() / "quality/quality.json"
+    )
     args = parser.parse_args(argv)
     report: dict = {"schema_version": 1, "passed": False, "python": sys.version}
     try:
@@ -98,6 +102,14 @@ def main(argv: list[str] | None = None) -> int:
         report["checks"] = [
             run_check(name, command, ROOT) for name, command in commands(sys.executable)
         ]
+        misplaced = layout_errors(ROOT)
+        report["checks"].append(
+            {
+                "name": "repository-layout",
+                "exit_code": int(bool(misplaced)),
+                "output": "\n".join(misplaced),
+            }
+        )
         report["passed"] = all(item["exit_code"] == 0 for item in report["checks"])
         if source_digest(ROOT) != (report["source_files"], report["source_sha256"]):
             raise ValueError("production sources or quality configuration changed during scan")

@@ -16,7 +16,7 @@ from quantide.data.fetchers.registry import fetcher_registry, register_builtin_f
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 ASSETS_ROOT = TESTS_ROOT / "assets"
 REPO_ROOT = TESTS_ROOT.parent
-DEFAULT_STOCK_LIST_PATH = REPO_ROOT / "data" / "stock_list.parquet"
+DEFAULT_STOCK_LIST_PATH = ASSETS_ROOT / "market_data" / "stock_list.parquet"
 
 
 @dataclass(slots=True)
@@ -45,9 +45,7 @@ def _drop_missing_fields(
     config: TushareStubConfig,
 ) -> pd.DataFrame:
     drop_columns = [
-        column
-        for column in config.missing_fields.get(endpoint, ())
-        if column in frame.columns
+        column for column in config.missing_fields.get(endpoint, ()) if column in frame.columns
     ]
     if not drop_columns:
         return frame
@@ -83,7 +81,6 @@ class FixtureBackedTushareFetcher(DataFetcherPort):
             for name in ("_bars", "_adjust", "_limit", "_st", "_stock_list"):
                 frame = getattr(self, name)
                 setattr(self, name, frame.loc[frame["asset"].isin(self._config.assets)].copy())
-
 
     def _load_stock_list(self) -> pd.DataFrame:
         """Load a realistic stock list for dev-stub search flows.
@@ -185,11 +182,19 @@ class FixtureBackedTushareFetcher(DataFetcherPort):
         codes = [index_codes] if isinstance(index_codes, str) else list(index_codes)
         dates = list(snapshot_dates)
         assets = self._stock_list["asset"].to_list()
-        return pd.DataFrame([
-            {"date": pd.Timestamp(date), "index_code": code, "con_code": asset,
-             "weight": 100.0 / len(assets)}
-            for code in codes for date in dates for asset in assets
-        ]), []
+        return pd.DataFrame(
+            [
+                {
+                    "date": pd.Timestamp(date),
+                    "index_code": code,
+                    "con_code": asset,
+                    "weight": 100.0 / len(assets),
+                }
+                for code in codes
+                for date in dates
+                for asset in assets
+            ]
+        ), []
 
     def fetch_bars_ext(
         self,

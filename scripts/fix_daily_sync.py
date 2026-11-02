@@ -24,8 +24,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from loguru import logger
 
+from quantide.config.paths import normalize_data_home
 
-def init_app_state(token: str, db_path: str | None = None) -> None:
+
+def init_app_state(token: str, db_path: str | None = None, data_home: str | None = None) -> None:
     """Create app_state record with Tushare token."""
     from quantide.data.models.app_state import AppState
     from quantide.data.sqlite import db
@@ -37,7 +39,7 @@ def init_app_state(token: str, db_path: str | None = None) -> None:
         id=1,
         init_completed=True,
         init_step=6,
-        app_home="/Users/openclaw/workspace/quantIDE/data",
+        app_home=normalize_data_home(data_home),
         data_source="tushare",
         tushare_token=token,
         epoch=datetime.date(2005, 1, 1),
@@ -111,14 +113,15 @@ def sync_daily_bars() -> dict:
         return {"status": "error", "error": str(e)}
 
 
-def verify_data() -> dict:
+def verify_data(data_home: str | None = None) -> dict:
     """Verify data completeness after sync."""
     import polars as pl
 
     results = {}
 
     # Daily bars
-    daily_path = Path("/Users/openclaw/workspace/quantIDE/data/bars/daily")
+    home = Path(normalize_data_home(data_home))
+    daily_path = home / "data/bars/daily"
     if daily_path.exists():
         daily = pl.read_parquet(str(daily_path))
         unique_dates = daily["date"].dt.date().unique().sort()
@@ -135,7 +138,7 @@ def verify_data() -> dict:
         results["daily_bars"] = {"error": "daily bars path not found"}
 
     # Stock list
-    stock_path = Path("/Users/openclaw/workspace/quantIDE/data/stock_list.parquet")
+    stock_path = home / "data/stock_list.parquet"
     if stock_path.exists():
         stocks = pl.read_parquet(str(stock_path))
         results["stock_list"] = {
@@ -151,12 +154,13 @@ def main():
     parser = argparse.ArgumentParser(description="Fix QuantIDE daily data sync")
     parser.add_argument("--token", required=True, help="Tushare Pro API token")
     parser.add_argument("--db", default=None, help="Path to quantide.db (optional)")
+    parser.add_argument("--data-home", default=None, help="Persistent market-data home")
     args = parser.parse_args()
 
     logger.info("=== QuantIDE Daily Sync Fix ===")
 
     # Step 1: Initialize
-    init_app_state(args.token, args.db)
+    init_app_state(args.token, args.db, args.data_home)
 
     # Step 2: Sync
     stock_count = sync_stock_list()
@@ -164,7 +168,7 @@ def main():
     bar_result = sync_daily_bars()
 
     # Step 3: Verify
-    verification = verify_data()
+    verification = verify_data(args.data_home)
 
     logger.info("=== Sync Results ===")
     logger.info(f"Stock list: {stock_count} records")

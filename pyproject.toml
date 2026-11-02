@@ -33,6 +33,9 @@ exclude = [
     ".louke/**",
     "review/**",
     "quality-reports/**",
+    "data/**",
+    "dist/**",
+    "site/**",
 ]
 
 [tool.poetry.dependencies]
@@ -82,6 +85,7 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
+cache-dir = "/tmp/millionaire-ce/ruff-cache"
 line-length = 100
 target-version = "py313"
 extend-exclude = [
@@ -147,6 +151,7 @@ max-statements = 50
 max-locals = 15
 
 [tool.pytest.ini_options]
+cache_dir = "/tmp/millionaire-ce/pytest-cache"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-m 'not live_data and not private_only and not e2e_live_smoke'"
@@ -240,6 +245,7 @@ mkdocstrings-python = ">=0.9.0,<3.0.0"
 mike = ">=1.1.2,<3.0.0"
 
 [tool.mypy]
+cache_dir = "/tmp/millionaire-ce/mypy-cache"
 warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unused_configs = true
@@ -256,6 +262,7 @@ module = "fire"
 ignore_missing_imports = true
 
 [tool.coverage.run]
+data_file = "${COVERAGE_FILE-/tmp/millionaire-ce/coverage/.coverage}"
 source = ["quantide"]
 branch = true
 parallel = true

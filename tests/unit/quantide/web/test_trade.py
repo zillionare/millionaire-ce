@@ -1,5 +1,6 @@
 from quantide.web.services import trade_quote_view as trade_quotes
 from tests.web_assets import script_sources
+
 """测试交易模块页面"""
 import datetime
 import re
@@ -59,7 +60,9 @@ def test_app():
             print(f"Failed to create live demo broker: {e}")
 
         try:
-            sim_broker = SimulationBroker(portfolio_id="sim_demo", portfolio_name="演示账户", principal=1000000)
+            sim_broker = SimulationBroker(
+                portfolio_id="sim_demo", portfolio_name="演示账户", principal=1000000
+            )
             reg.register(BrokerKind.SIMULATION, "sim_demo", sim_broker)
         except Exception as e:
             print(f"Failed to create demo broker: {e}")
@@ -97,6 +100,7 @@ def test_app():
         auth = AuthManager(db_path=test_db_path, config={"login_path": "/auth/login"})
 
         app, rt = fast_app(
+            secret_key="ce-trade-fixture-only-not-a-production-secret",
             hdrs=tuple(Theme.neutral.headers()),
             before=auth.create_beforeware(),
             middleware=(
@@ -108,8 +112,16 @@ def test_app():
                 BaseTradeError: exception_handler,
             },
             routes=(
-                Route("/login", lambda req: RedirectResponse("/auth/login", status_code=303), methods=["GET"]),
-                Route("/login/", lambda req: RedirectResponse("/auth/login", status_code=303), methods=["GET"]),
+                Route(
+                    "/login",
+                    lambda req: RedirectResponse("/auth/login", status_code=303),
+                    methods=["GET"],
+                ),
+                Route(
+                    "/login/",
+                    lambda req: RedirectResponse("/auth/login", status_code=303),
+                    methods=["GET"],
+                ),
                 Mount("/home", home_app),
                 Mount("/strategy", strategy_app),
                 Route("/trade", trade_main_page),
@@ -248,8 +260,7 @@ class TestTradeMain:
         # 收紧到具体状态码，500/503/404 等任何错误状态必须被显式断言失败。
         response = test_client.get("/trade", follow_redirects=False)
         assert response.status_code in (200, 303), (
-            f"expected 200 or 303, got {response.status_code}; "
-            f"body[:500]={response.text[:500]!r}"
+            f"expected 200 or 303, got {response.status_code}; body[:500]={response.text[:500]!r}"
         )
 
     def test_positions_refresh_route_returns_200(self, test_client):
@@ -372,9 +383,7 @@ class TestPositionsOrdersTabsHtmx:
 
         html = to_xml(PositionsOrdersTabs([], [], "positions"))
         for tab_key in ("positions", "orders"):
-            assert f'hx-get="/trade?tab={tab_key}"' in html, (
-                f"tab {tab_key!r} 缺少 hx-get"
-            )
+            assert f'hx-get="/trade?tab={tab_key}"' in html, f"tab {tab_key!r} 缺少 hx-get"
             assert f'hx-target="#{POSITIONS_TABS_PANEL_ID}"' in html
             assert 'hx-swap="outerHTML"' in html
             assert 'hx-push-url="true"' in html
@@ -516,16 +525,12 @@ class TestFetchPositionsOrdersViaGateway:
         return _fetch_positions_orders_via_gateway
 
     def test_returns_empty_when_base_url_blank(self) -> None:
-        positions, orders = self._helper()(
-            base_url="", api_key="some-key", timeout=2
-        )
+        positions, orders = self._helper()(base_url="", api_key="some-key", timeout=2)
         assert positions == []
         assert orders == []
 
     def test_returns_empty_when_api_key_blank(self) -> None:
-        positions, orders = self._helper()(
-            base_url="http://127.0.0.1:1", api_key="", timeout=2
-        )
+        positions, orders = self._helper()(base_url="http://127.0.0.1:1", api_key="", timeout=2)
         assert positions == []
         assert orders == []
 
@@ -538,9 +543,7 @@ class TestFetchPositionsOrdersViaGateway:
             host = urlparse(stub.base_url).hostname
             port = urlparse(stub.base_url).port
             base_url = f"http://{host}:{port}/qmt"
-            positions, orders = self._helper()(
-                base_url=base_url, api_key="good-key", timeout=2
-            )
+            positions, orders = self._helper()(base_url=base_url, api_key="good-key", timeout=2)
         assert isinstance(positions, list)
         assert isinstance(orders, list)
         # dev-stub 默认场景是空列表；只要返回了 list 类型就是成功的
@@ -557,17 +560,13 @@ class TestFetchPositionsOrdersViaGateway:
             port = urlparse(stub.base_url).port
             base_url = f"http://{host}:{port}/qmt"
             # 错 key → 网关 401 → helper 必须返回空，不抛
-            positions, orders = self._helper()(
-                base_url=base_url, api_key="bad-key", timeout=2
-            )
+            positions, orders = self._helper()(base_url=base_url, api_key="bad-key", timeout=2)
         assert positions == []
         assert orders == []
 
     def test_unreachable_server_returns_empty(self) -> None:
         # 端口 1 在大多数系统上没有被占用，连接会被立即拒绝
-        positions, orders = self._helper()(
-            base_url="http://127.0.0.1:1", api_key="x", timeout=1
-        )
+        positions, orders = self._helper()(base_url="http://127.0.0.1:1", api_key="x", timeout=1)
         assert positions == []
         assert orders == []
 
@@ -684,7 +683,6 @@ class TestCoerceGatewayOrder:
 
 
 class TestPositionNameResolution:
-
     def _make_position(self, asset: str = "000001.SZ"):
         return Position(
             portfolio_id="pf",
@@ -703,7 +701,14 @@ class TestPositionNameResolution:
 
         if stock_list.size == 0:
             from pathlib import Path
-            stock_list_path = Path(__file__).resolve().parents[4] / "data" / "stock_list.parquet"
+
+            stock_list_path = (
+                Path(__file__).resolve().parents[4]
+                / "tests"
+                / "assets"
+                / "market_data"
+                / "stock_list.parquet"
+            )
             if not stock_list_path.exists():
                 pytest.skip("stock_list.parquet not found in this test env")
             try:
@@ -886,7 +891,9 @@ class TestLoginRoutes:
         assert "gateway-required-modal" in response.text
         assert "/auth/logout" in response.text
 
-    def test_root_redirects_to_strategy_list_when_gateway_unavailable(self, test_client, monkeypatch):
+    def test_root_redirects_to_strategy_list_when_gateway_unavailable(
+        self, test_client, monkeypatch
+    ):
         from quantide.web.pages import home as home_page
 
         monkeypatch.setattr(
@@ -1015,7 +1022,10 @@ class TestLoginRoutes:
         # 1. 第一行无文本标签，placeholder 提示 + search icon
         assert "请输入股票名、拼音或者代码" in text
         # 不再显示"代码"文本标签（作为独立文本）
-        assert '<span class="w-16 text-sm font-medium text-gray-700 dark:text-gray-300">代码</span>' not in text
+        assert (
+            '<span class="w-16 text-sm font-medium text-gray-700 dark:text-gray-300">代码</span>'
+            not in text
+        )
 
         # 2. 第二行有价格模式选择（限价/市价）+ 价格输入
         assert "限价" in text
@@ -1046,7 +1056,9 @@ class TestLoginRoutes:
         pos_pattern = r'<button[^>]*data-fraction="[^"]+"[^>]*>([^<]+)</button>'
         pos_matches = re.findall(pos_pattern, text)
         # 过滤出仓位按钮
-        position_btns = [m.strip() for m in pos_matches if m.strip() in {"1/4", "1/3", "1/2", "全仓"}]
+        position_btns = [
+            m.strip() for m in pos_matches if m.strip() in {"1/4", "1/3", "1/2", "全仓"}
+        ]
         assert position_btns == ["1/4", "1/3", "1/2", "全仓"]
 
         # 7. 买卖按钮有激活状态标识
@@ -1151,9 +1163,7 @@ class TestLoginRoutes:
         assert "pointer-events-auto" in btn_cls, (
             f"Issue #37 回归: × 按钮 class 缺 pointer-events-auto ({btn_cls!r})"
         )
-        assert "cursor-pointer" in btn_cls, (
-            f"Issue #37 回归: × 按钮缺光标提示 ({btn_cls!r})"
-        )
+        assert "cursor-pointer" in btn_cls, f"Issue #37 回归: × 按钮缺光标提示 ({btn_cls!r})"
         assert "slot.innerHTML=''" in text
 
     def test_lightning_toast_close_button_is_clickable(self, test_client, monkeypatch):
@@ -1236,9 +1246,7 @@ class TestLoginRoutes:
         assert "最新价" in update_text
         assert 'hx-swap-oob="outerHTML"' in update_text
 
-        delete_response = test_client.post(
-            f"/trade/lightning/{portfolio_id}/000001.SZ/delete"
-        )
+        delete_response = test_client.post(f"/trade/lightning/{portfolio_id}/000001.SZ/delete")
         delete_text = delete_response.text
         assert delete_response.status_code == 200
         assert "已删除闪电买入单" in delete_text
@@ -1282,9 +1290,7 @@ class TestLoginRoutes:
             },
         )
 
-        response = test_client.get(
-            f"/trade/lightning/{portfolio_id}/000001.SZ/edit-modal"
-        )
+        response = test_client.get(f"/trade/lightning/{portfolio_id}/000001.SZ/edit-modal")
         text = response.text
 
         assert response.status_code == 200
@@ -1316,9 +1322,7 @@ class TestLoginRoutes:
         assert "/trade/lightning/search" in create_text
         assert 'id="lightning-asset-search-dropdown"' in create_text
         for option_value in ("current", "current_p1", "current_p2", "current_p3"):
-            assert f'value="{option_value}"' in create_text, (
-                f"price_ref 选项 {option_value!r} 缺失"
-            )
+            assert f'value="{option_value}"' in create_text, f"price_ref 选项 {option_value!r} 缺失"
         for option_label in ("现价+1%", "现价+2%", "现价+3%"):
             assert option_label in create_text, f"label {option_label!r} 缺失"
         assert "昨收价" not in create_text
@@ -1391,9 +1395,7 @@ class TestLoginRoutes:
         monkeypatch.setattr(lightning_page.stock_list, "get_pinyin", lambda asset: "PAYH")
 
         portfolio_id = "sim_dblclick_test"
-        entry = lightning_svc.add_trade_lightning_entry(
-            portfolio_id, "000001.SZ", 10, "close"
-        )[0]
+        entry = lightning_svc.add_trade_lightning_entry(portfolio_id, "000001.SZ", 10, "close")[0]
         text = to_xml(lightning_page._lightning_row(portfolio_id, entry))
 
         expected_hx_post = f'hx-post="/trade/lightning/{portfolio_id}/000001.SZ/execute"'
@@ -1412,9 +1414,7 @@ class TestLoginRoutes:
         from quantide.web.pages import trade_lightning as lightning_page
 
         portfolio_id = "sim_execute"
-        entry, _ = lightning_svc.add_trade_lightning_entry(
-            portfolio_id, "000001.SZ", 10, "current"
-        )
+        entry, _ = lightning_svc.add_trade_lightning_entry(portfolio_id, "000001.SZ", 10, "current")
         entry.cached_price = 11.50
 
         monkeypatch.setattr(lightning_page, "_resolve_lightning_price", lambda *_: 11.50)
@@ -1439,9 +1439,7 @@ class TestLoginRoutes:
             lambda req, pid: broker,
         )
 
-        response = test_client.post(
-            f"/trade/lightning/{portfolio_id}/000001.SZ/execute"
-        )
+        response = test_client.post(f"/trade/lightning/{portfolio_id}/000001.SZ/execute")
         text = response.text
         assert response.status_code == 200
         assert "闪电买入已提交" in text
@@ -1453,7 +1451,9 @@ class TestLoginRoutes:
         assert response.status_code == 200
         assert "该闪电买入单不存在" in response.text
 
-    def test_trade_lightning_execute_unresolvable_price_returns_error(self, test_client, monkeypatch):
+    def test_trade_lightning_execute_unresolvable_price_returns_error(
+        self, test_client, monkeypatch
+    ):
         """Execute 接口在价格解析为 0 时必须返回 error toast."""
         from types import SimpleNamespace
 
@@ -1463,9 +1463,7 @@ class TestLoginRoutes:
         from quantide.web.pages import trade_lightning as lightning_page
 
         portfolio_id = "sim_no_price"
-        entry, _ = lightning_svc.add_trade_lightning_entry(
-            portfolio_id, "000001.SZ", 10, "current"
-        )
+        entry, _ = lightning_svc.add_trade_lightning_entry(portfolio_id, "000001.SZ", 10, "current")
         entry.cached_price = 0.0
         reg = BrokerRegistry()
         broker = SimpleNamespace()
@@ -1517,9 +1515,7 @@ class TestLoginRoutes:
             lambda req, pid: broker,
         )
 
-        response = test_client.post(
-            f"/trade/lightning/{portfolio_id}/000001.SZ/execute"
-        )
+        response = test_client.post(f"/trade/lightning/{portfolio_id}/000001.SZ/execute")
         assert response.status_code == 200
         assert "闪电买入已提交" in response.text
         assert used_prices == [8.87], f"应使用 cached_price=8.87，实为 {used_prices}"
@@ -1624,8 +1620,8 @@ class TestLoginRoutes:
         html = to_xml(table)
 
         assert 'class="trade-position-row cursor-pointer"' in html
-        assert 'position-sell-btn' in html
-        assert 'bg-green-600 text-white hover:bg-green-700' in html
+        assert "position-sell-btn" in html
+        assert "bg-green-600 text-white hover:bg-green-700" in html
         assert 'type="button"' in html
         assert 'data-asset="000001.SZ"' in html
         assert 'data-display="平安银行（000001.SZ）"' in html
@@ -1695,7 +1691,7 @@ class TestLoginRoutes:
         text = response.text
 
         assert response.status_code == 200
-        assert 'grid-cols-[88px_minmax(0,1fr)]' in text
+        assert "grid-cols-[88px_minmax(0,1fr)]" in text
         assert 'id="value-input"' in text
         assert 'id="est-shares"' in text
 
@@ -1876,7 +1872,9 @@ class TestLoginRoutes:
             }
         ).to_pandas()
 
-        monkeypatch.setattr(trade_page.stock_list, "fuzzy_search", lambda *args, **kwargs: result_df)
+        monkeypatch.setattr(
+            trade_page.stock_list, "fuzzy_search", lambda *args, **kwargs: result_df
+        )
         monkeypatch.setattr(
             trade_quotes.daily_bars,
             "get_price",
@@ -1969,9 +1967,7 @@ class TestLoginRoutes:
         assert payload["current"] == ""
         assert payload["ma5"] == ""
 
-    def test_trade_search_is_bounded_and_does_not_fetch_prices(
-        self, test_client, monkeypatch
-    ):
+    def test_trade_search_is_bounded_and_does_not_fetch_prices(self, test_client, monkeypatch):
         """搜索接口只返回前 20 条代码/名称，不逐条查行情（避免阻塞事件循环）。"""
         from quantide.web.pages import trade_main as trade_page
 
@@ -2124,11 +2120,7 @@ class TestGatewayFirstNavigation:
 
         menu = build_header_menu(False)
 
-        gated_titles = {
-            item["title"]
-            for item in menu
-            if item.get("requires_gateway")
-        }
+        gated_titles = {item["title"] for item in menu if item.get("requires_gateway")}
         assert gated_titles == set()
 
     def test_build_header_menu_keeps_trade_entries_open_when_gateway_ready(self):
@@ -2210,7 +2202,6 @@ class TestGatewayFirstNavigation:
 
 
 class TestDynamicHomeRedirect:
-
     def test_redirects_to_strategy_when_gateway_disabled(self, monkeypatch):
         monkeypatch.setattr(
             "quantide.web.pages.home.init_wizard.get_feature_status",
@@ -2252,7 +2243,6 @@ class TestDynamicHomeRedirect:
 
 
 class TestSidebarLinks:
-
     def test_live_link_points_to_trade_live(self):
         from quantide.web.layouts.main import HEADER_MENU
 
@@ -2276,19 +2266,22 @@ class TestSidebarLinks:
 
     def test_paper_redirect_preserves_account_id(self):
         with system_settings_e2e_session() as session:
-            response = session.client.get(
-                "/trade/paper?account_id=sim_a", follow_redirects=False
-            )
+            response = session.client.get("/trade/paper?account_id=sim_a", follow_redirects=False)
 
         assert response.status_code == 303
         assert response.headers["location"] == "/trade/paper/?account_id=sim_a"
 
 
 class TestPaperEntry:
-
     def _sim_registry(self, sims):
         reg = SimpleNamespace()
-        reg.list_by_kind = lambda kind: sims if (str(kind) == "BrokerKind.SIMULATION" or getattr(kind, "value", kind) == "simulation") else []
+        reg.list_by_kind = lambda kind: (
+            sims
+            if (
+                str(kind) == "BrokerKind.SIMULATION" or getattr(kind, "value", kind) == "simulation"
+            )
+            else []
+        )
         return reg
 
     def test_simulation_disabled_when_no_paper_accounts(self):
@@ -2318,11 +2311,13 @@ class TestPaperEntry:
     def test_simulation_has_dropdown_with_multiple_paper_accounts(self):
         from quantide.web.layouts.main import build_header_menu
 
-        reg = self._sim_registry([
-            {"id": "sim_a", "name": "仿真A", "status": True},
-            {"id": "sim_b", "name": "仿真B", "status": True},
-            {"id": "sim_c", "name": "仿真C", "status": True},
-        ])
+        reg = self._sim_registry(
+            [
+                {"id": "sim_a", "name": "仿真A", "status": True},
+                {"id": "sim_b", "name": "仿真B", "status": True},
+                {"id": "sim_c", "name": "仿真C", "status": True},
+            ]
+        )
         req = SimpleNamespace(scope={"registry": reg})
         menu = build_header_menu(trade_enabled=True, req=req)
         paper = next(item for item in menu if item.get("title") == "仿真")
@@ -2337,9 +2332,7 @@ class TestPaperEntry:
         names = {c["title"] for c in children}
         assert names == {"仿真A", "仿真B", "仿真C"}
 
-    def test_simulation_falls_back_to_disabled_when_registry_unavailable(
-        self, monkeypatch
-    ):
+    def test_simulation_falls_back_to_disabled_when_registry_unavailable(self, monkeypatch):
         from quantide.web.layouts import main as main_module
         from quantide.web.layouts.main import build_header_menu
 
@@ -2356,7 +2349,6 @@ class TestPaperEntry:
 
 
 class TestPaperAccountPage:
-
     def test_paper_route_redirects_to_trade(self):
         with system_settings_e2e_session() as session:
             response = session.client.get(
@@ -2375,16 +2367,17 @@ class TestPaperAccountPage:
             )
 
         assert response.status_code == 303
-        assert response.headers["location"] == (
-            "/trade?account_id=missing_account_xyz_for_test"
-        )
+        assert response.headers["location"] == ("/trade?account_id=missing_account_xyz_for_test")
 
     def test_paper_entry_redirects_to_trade_with_account_id(self):
         """paper 页统一重定向到 /trade，并保留 account_id。"""
         from quantide.web.pages import paper as paper_page
 
         def _build_req(account_id=None):
-            return SimpleNamespace(scope={"registry": None}, query_params={"account_id": account_id} if account_id else {})
+            return SimpleNamespace(
+                scope={"registry": None},
+                query_params={"account_id": account_id} if account_id else {},
+            )
 
         result = paper_page.paper_list(_build_req(), {})
         assert result.status_code == 303

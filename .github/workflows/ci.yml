@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Configure temporary artifacts
+        run: python -m scripts.artifact_paths --github-env
       - name: Install pinned quality tools
         run: |
           python -m pip install --upgrade pip
@@ -27,18 +29,20 @@ jobs:
       - name: Verify the gates reject counterexamples
         run: python -m unittest discover -s tests/quality -v
       - name: Production quality gate
-        run: python scripts/check_quality.py
+        run: python -m scripts.check_quality
       - name: Build user documentation strictly
         run: |
           python -m pip install "mkdocs>=1.2.3,<2.0.0" "mkdocs-material>=8.1.11,<10.0.0"
-          mkdocs build --strict --site-dir site
+          mkdocs build --strict --site-dir "${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/site"
       - name: Upload quality evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: quality-report
-          path: quality-reports/quality.json
+          path: ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/quality.json
           if-no-files-found: error
+      - name: Verify clean checkout layout
+        run: python -m scripts.artifact_paths --check-layout
 
   tests:
     name: tests (${{ matrix.os }})
@@ -53,6 +57,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Configure temporary artifacts
+        run: python -m scripts.artifact_paths --github-env
       - name: Isolate application configuration
         shell: python
         run: |
@@ -73,13 +79,13 @@ jobs:
           python -m pip install build==1.3.0 --group test
       - name: Build and validate release artifacts
         run: |
-          python -m build
-          python scripts/validate_release_artifacts.py dist
+          python -m build --outdir "${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/dist"
+          python -m scripts.validate_release_artifacts
       - name: Install the built wheel with ML extra
         shell: python
         run: |
-          import pathlib, subprocess, sys
-          wheel = next(pathlib.Path('dist').glob('*.whl')).resolve()
+          import os, pathlib, subprocess, sys
+          wheel = next((pathlib.Path(os.environ['MILLIONAIRE_ARTIFACTS_DIR']) / 'dist').glob('*.whl')).resolve()
           subprocess.run([sys.executable, '-m', 'pip', 'install', f'{wheel}[ml30m]'], check=True)
       - name: Smoke test installed CLI and app outside the source checkout
         working-directory: ${{ runner.temp }}
@@ -92,26 +98,28 @@ jobs:
           --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1,localhost
           --timeout=60 -o faulthandler_timeout=90
           --cov=quantide --cov-fail-under=80
-          --cov-report=term-missing --cov-report=xml:quality-reports/coverage.xml
-          --cov-report=json:quality-reports/coverage.json
-          --cov-report=html:quality-reports/htmlcov
-          --junitxml=quality-reports/unit.xml
+          --cov-report=term-missing --cov-report=xml:${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/coverage.xml
+          --cov-report=json:${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/coverage.json
+          --cov-report=html:${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/htmlcov
+          --junitxml=${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/unit.xml
       - name: Upload test and coverage evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tests-${{ matrix.os }}
           path: |
-            quality-reports/unit.xml
-            quality-reports/coverage.xml
-            quality-reports/coverage.json
-            quality-reports/htmlcov/
+            ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/unit.xml
+            ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/coverage.xml
+            ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/coverage.json
+            ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/htmlcov/
           retention-days: 30
+      - name: Verify clean checkout layout
+        run: python -m scripts.artifact_paths --check-layout
       - name: Retain the tested package for release
         uses: actions/upload-artifact@v4
         with:
           name: package-${{ matrix.os }}
-          path: dist/*
+          path: ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/dist/*
           if-no-files-found: error
           retention-days: 30
 
@@ -124,6 +132,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Configure temporary artifacts
+        run: python -m scripts.artifact_paths --github-env
       - name: Install CE and offline test tools
         run: |
           python -m pip install --upgrade pip
@@ -137,15 +147,17 @@ jobs:
           -m 'e2e and release_gate and not private_only and not e2e_live_smoke'
           --runxfail --timeout=60
           --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1,localhost
-          --junitxml=quality-reports/acceptance.xml
+          --junitxml=${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/acceptance.xml
       - name: Require nonempty passing acceptance, with no skips
-        run: python scripts/check_test_results.py quality-reports/acceptance.xml
+        run: python -m scripts.check_test_results ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/acceptance.xml
       - name: Upload acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: acceptance-report
-          path: quality-reports/acceptance.xml
+          path: ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/quality/acceptance.xml
+      - name: Verify clean checkout layout
+        run: python -m scripts.artifact_paths --check-layout
 
   installers:
     needs: [tests, acceptance]

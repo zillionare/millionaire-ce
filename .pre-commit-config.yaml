@@ -19,7 +19,7 @@ repos:
   hooks:
   - id: production-quality
     name: production quality (Ruff, cognitive complexity, duplication, size)
-    entry: python scripts/check_quality.py
+    entry: python -m scripts.check_quality
     language: system
     files: ^(quantide/.*\.py|scripts/.*\.py|pyproject\.toml|\.flake8|\.pre-commit-config\.yaml)$
     pass_filenames: false

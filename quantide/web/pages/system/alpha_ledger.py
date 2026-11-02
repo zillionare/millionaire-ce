@@ -5,6 +5,7 @@
 """
 
 import datetime
+import math
 
 from fasthtml.common import *
 
@@ -208,7 +209,7 @@ def _build_form(
             Input(type="hidden", name="run", value="1"),
             Button("开始检验", type="submit", cls="btn btn-primary"),
             Span(
-                "IC 为负表示该因子在本样本内反向有效；t 值为截面 RankIC 的显著性。",
+                "RankIC 的负值表示样本内反向关联；t 值未调整序列相关，不能单独证明显著性。",
                 cls="text-xs text-gray-500 ml-3",
             ),
             cls="flex items-center",
@@ -297,8 +298,9 @@ def _factor_result_row(factor, by_factor, holdings):
         )
     base = per_holding.get(3) or next(iter(per_holding.values()))
     spread = ""
-    if len(base.deciles) >= 2:
-        spread = (base.deciles[0].mean_forward - base.deciles[-1].mean_forward) * 100
+    buckets = {item.bucket: item.mean_forward for item in base.deciles}
+    if all(index in buckets and math.isfinite(buckets[index]) for index in (1, 10)):
+        spread = (buckets[1] - buckets[10]) * 100
     cells.append(Td(f"{spread:+.2f}%" if spread != "" else "—", cls="tabular-nums"))
     _append_annual_result_cells(base, cells)
     return Tr(*cells, cls="border-b border-gray-100")

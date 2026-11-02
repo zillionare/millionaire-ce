@@ -187,12 +187,17 @@ def prepare_forward_returns(
     )
 
 
+def _average_ranks(values: np.ndarray) -> np.ndarray:
+    """Assign equal values their average zero-based rank, preserving ties."""
+    return pl.Series(values).rank(method="average").to_numpy() - 1.0
+
+
 def _spearman(x: np.ndarray, y: np.ndarray) -> float:
     """两组数值的 Spearman 秩相关。"""
     if x.size < MIN_CROSS_SECTION:
         return float("nan")
-    rx = np.argsort(np.argsort(x)).astype(float)
-    ry = np.argsort(np.argsort(y)).astype(float)
+    rx = _average_ranks(x)
+    ry = _average_ranks(y)
     if rx.std() < 1e-9 or ry.std() < 1e-9:
         return float("nan")
     return float(np.corrcoef(rx, ry)[0, 1])
@@ -219,7 +224,7 @@ def daily_rank_ic(
             continue
         x = group[factor].to_numpy().astype(float)
         y = group[forward].to_numpy().astype(float)
-        mask = ~np.isnan(x) & ~np.isnan(y)
+        mask = np.isfinite(x) & np.isfinite(y)
         if mask.sum() < MIN_CROSS_SECTION:
             continue
         value = _spearman(x[mask], y[mask])
@@ -271,12 +276,12 @@ def decile_profile(
             continue
         x = group[factor].to_numpy().astype(float)
         y = group[forward].to_numpy().astype(float)
-        mask = ~np.isnan(x) & ~np.isnan(y)
+        mask = np.isfinite(x) & np.isfinite(y)
         if mask.sum() < MIN_CROSS_SECTION:
             continue
         x = x[mask]
         y = y[mask]
-        order = np.argsort(np.argsort(x))
+        order = _average_ranks(x)
         labels = np.floor(order / len(order) * buckets).astype(int) + 1
         for bucket in range(1, buckets + 1):
             picked = y[labels == bucket]
@@ -343,7 +348,7 @@ def study_factors(
     price: str = "open",
     buckets: int = 10,
 ) -> list[SingleFactorResult]:
-    """批量检验多个因子（同一持有期），向量化计算以加速。
+    """批量检验多个因子，共用前瞻收益并独立处理缺失值。
 
     Args:
         panel: 因子面板（需含 ``date``/``asset``/因子列）。
@@ -488,11 +493,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--end", default="2026-10-19")
     parser.add_argument("--price", default="open")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
+    parser.add_argument("--data-home", default=None, help="行情目录；默认使用已保存的配置")
     args = parser.parse_args(argv)
 
     from quantide.data import init_data
 
-    init_data("~/.quantide")
+    init_data(args.data_home)
     panel = load_factor_panel(
         datetime.date.fromisoformat(args.start), datetime.date.fromisoformat(args.end)
     )
@@ -523,27 +529,23 @@ class _FactorBatch:
     def add(self, group):
         if group.height < MIN_CROSS_SECTION:
             return
-        x = group.select(self.factors).to_numpy().astype(float)
         y = group["forward"].to_numpy().astype(float)
-        mask = ~np.isnan(x).any(axis=1) & ~np.isnan(y)
+        year = group["date"][0].year if hasattr(group["date"][0], "year") else None
+        for factor in self.factors:
+            self._add_factor(factor, group[factor].to_numpy().astype(float), y, year)
+
+    def _add_factor(self, factor, x, y, year):
+        mask = np.isfinite(x) & np.isfinite(y)
         if int(mask.sum()) < MIN_CROSS_SECTION:
             return
-        x = x[mask]
-        y = y[mask]
-        ranks = np.argsort(np.argsort(x, axis=0), axis=0).astype(float)
-        # Spearman：因子秩与收益秩的相关
-        y_ranks = np.argsort(np.argsort(y)).astype(float)
-        year = group["date"][0].year if hasattr(group["date"][0], "year") else None
-        for col_index, factor in enumerate(self.factors):
-            r = ranks[:, col_index]
-            if r.std() < 1e-9 or y_ranks.std() < 1e-9:
-                continue
-            value = float(np.corrcoef(r, y_ranks)[0, 1])
+        x, y = x[mask], y[mask]
+        value = _spearman(x, y)
+        if not math.isnan(value):
             self.ics[factor].append(value)
             if year is not None:
                 self.year_ics.setdefault(int(year), {}).setdefault(factor, []).append(value)
-            labels = np.floor(r / len(r) * self.buckets).astype(int) + 1
-            self._add_buckets(factor, labels, y)
+        labels = np.floor(_average_ranks(x) / len(x) * self.buckets).astype(int) + 1
+        self._add_buckets(factor, labels, y)
 
     def _add_buckets(self, factor, labels, y):
         for bucket in range(1, self.buckets + 1):

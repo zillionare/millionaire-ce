@@ -1,9 +1,11 @@
 import asyncio
 import datetime
+import tempfile
 
 from quantide.service.simulation_broker import SimulationBroker
 
 from quantide.core.message import msg_hub
+from scripts.artifact_paths import artifact_root
 
 
 class Cfg:
@@ -37,7 +39,9 @@ def _prepare_demo_data():
 
     from quantide.data import init_data
 
-    base = Path("./.demo_store")
+    directory = artifact_root() / "work"
+    directory.mkdir(parents=True, exist_ok=True)
+    base = Path(tempfile.mkdtemp(prefix="event-flow-", dir=directory))
     (base / "data").mkdir(parents=True, exist_ok=True)
     # 预创建最小交易日历，避免远程获取
     t0 = datetime.datetime.now()

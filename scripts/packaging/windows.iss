@@ -1,6 +1,9 @@
 #ifndef Payload
   #error Payload must name the tested standalone payload directory
 #endif
+#ifndef OutputDir
+  #error OutputDir must name an external build directory
+#endif
 #ifndef AppVersion
   #error AppVersion must match package metadata
 #endif
@@ -16,7 +19,7 @@ PrivilegesRequired=admin
 Compression=lzma2
 SolidCompression=yes
 OutputBaseFilename=millionaire-ce-{#AppVersion}-windows-x64
-OutputDir=..\dist\installers
+OutputDir={#OutputDir}
 UninstallDisplayName=Millionaire CE
 CloseApplications=yes
 RestartApplications=no

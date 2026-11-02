@@ -1,4 +1,5 @@
 site_name: Millionaire CE
+site_dir: /tmp/millionaire-ce/site
 site_url: https://zillionare.github.io/millionaire-ce/
 repo_url: https://github.com/zillionare/millionaire-ce
 repo_name: zillionare/millionaire-ce
@@ -17,6 +18,7 @@ nav:
       - 成交时序与策略防呆: execution.md
       - 编写策略: strategies.md
       - 因子与 LightGBM: factors-and-ml.md
+      - 极简因子分析: factor-analysis.md
       - 参数优化: optimization.md
       - 预测解释: prediction-explanation.md
       - AI 辅助开发: ai-development.md
@@ -30,6 +32,7 @@ nav:
       - 独立模拟柜台: simulated-counter.md
   - 开发者参考:
       - 源码安装: installation.md
+      - 仓库布局与临时产物: project-layout.md
       - 开发验收: developer-acceptance.md
       - 质量与发布门禁: quality.md
       - 版本边界: design/edition_features.md

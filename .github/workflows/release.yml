@@ -21,7 +21,6 @@ jobs:
 
   publish:
     name: publish
-    if: github.event_name == 'push'
     needs: [ci, live-data]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -34,7 +33,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Configure temporary artifacts
+        run: python -m scripts.artifact_paths --github-env
       - name: Require tag and package version to match
+        if: github.event_name == 'push'
         shell: python
         run: |
           import os, pathlib, sys, tomllib
@@ -46,36 +48,41 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: package-ubuntu-latest
-          path: dist
+          path: ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/dist
       - name: Download verified native installers
         uses: actions/download-artifact@v4
         with:
           pattern: installer-*
-          path: dist/installers
+          path: ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/installers
           merge-multiple: true
       - name: Revalidate the tested artifacts
-        run: python scripts/validate_release_artifacts.py dist
+        run: python -m scripts.validate_release_artifacts
+      - name: Verify clean checkout layout
+        run: python -m scripts.artifact_paths --check-layout
       - name: Create GitHub Release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            dist/*.whl
-            dist/*.tar.gz
-            dist/installers/*
+            ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/dist/*.whl
+            ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/dist/*.tar.gz
+            ${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/installers/*
           fail_on_unmatched_files: true
       - name: Isolate Python distributions for PyPI
         shell: python
         run: |
-          import pathlib, shutil
-          target = pathlib.Path('pypi-dist')
-          target.mkdir()
-          for path in pathlib.Path('dist').iterdir():
+          import os, pathlib, shutil
+          target = pathlib.Path(os.environ['MILLIONAIRE_ARTIFACTS_DIR']) / 'pypi-dist'
+          target.mkdir(exist_ok=True)
+          for path in (pathlib.Path(os.environ['MILLIONAIRE_ARTIFACTS_DIR']) / 'dist').iterdir():
               if path.is_file() and (path.suffix == '.whl' or path.name.endswith('.tar.gz')):
                   shutil.copy2(path, target)
       - name: Publish to PyPI when configured
-        if: env.PYPI_API_TOKEN != ''
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ env.PYPI_API_TOKEN }}
-          packages-dir: pypi-dist
+        if: github.event_name == 'push' && env.PYPI_API_TOKEN != ''
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m pip install twine==6.2.0
+          python -m twine upload --non-interactive "${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/pypi-dist/"*
