@@ -39,3 +39,7 @@ class AuthDatabase:
     def get_db(self):
         """Get database instance for app to add tables"""
         return self.db
+
+    def close(self):
+        """Release the authentication database's own connection and file handle."""
+        self.db.close()

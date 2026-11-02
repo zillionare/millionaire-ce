@@ -81,6 +81,7 @@ class SQLiteDB:
         self._thread_local = threading.local()
         self._lock = threading.RLock()
         self._connection_generation = 0
+        self._connections: set[sqlite3.Connection] = set()
         self.db_path: str = ""
         self._initialized = False
 
@@ -110,21 +111,26 @@ class SQLiteDB:
                 if self.db_path == ":memory:"
                 else self.db_path
             )
-            conn = sqlite3.connect(self._connection_uri, uri=self.db_path == ":memory:", timeout=30)
-            db = su.Database(conn)
-
-            # 启用 WAL 模式提高并发读性能
-            if db_path != ":memory:":
-                db.enable_wal()
-
-            # 初始化表结构
-            self._init_tables(db)
-            conn.commit()
-            conn.execute("PRAGMA foreign_keys = ON")
+            conn = self._open_connection()
+            db = self._initialize_connection(conn, db_path)
             self._thread_local.conn = conn
             self._thread_local.db = db
             self._thread_local.generation = self._connection_generation
             self._initialized = True
+
+    def _initialize_connection(self, connection, db_path):
+        try:
+            database = su.Database(connection)
+            if db_path != ":memory:":
+                database.enable_wal()
+            self._init_tables(database)
+            connection.commit()
+            connection.execute("PRAGMA foreign_keys = ON")
+            return database
+        except BaseException:
+            connection.close()
+            self._connections.discard(connection)
+            raise
 
     def _close_thread_connection(self) -> None:
         """Close the current thread's connection, if one is open."""
@@ -133,6 +139,7 @@ class SQLiteDB:
             try:
                 conn.close()
             finally:
+                self._connections.discard(conn)
                 del self._thread_local.conn
                 if hasattr(self._thread_local, "db"):
                     del self._thread_local.db
@@ -164,7 +171,7 @@ class SQLiteDB:
             # Rebind stale thread-local state instead of allowing a connection
             # from a previous app/config generation to leak into the request.
             self._close_thread_connection()
-            conn = sqlite3.connect(self._connection_uri, uri=self.db_path == ":memory:", timeout=30)
+            conn = self._open_connection()
 
             # 启用外键约束
             conn.execute("PRAGMA foreign_keys = ON")
@@ -184,14 +191,26 @@ class SQLiteDB:
             return False
         return True
 
-    def close(self) -> None:
-        """Close the current thread's connection.
+    def _open_connection(self):
+        connection = sqlite3.connect(
+            self._connection_uri,
+            uri=self.db_path == ":memory:",
+            timeout=30,
+            check_same_thread=False,
+        )
+        self._connections.add(connection)
+        return connection
 
-        Other thread-owned connections are closed when those threads next
-        access the database after a rebind.  SQLite connections must be closed
-        by the thread that owns them.
+    def close(self) -> None:
+        """Close all connections after the owner has quiesced request/background workers.
+
+        Queries still use one connection per thread. Cross-thread close is enabled
+        solely so idle thread-pool connections cannot retain files after shutdown.
         """
         with self._lock:
+            for connection in tuple(self._connections):
+                connection.close()
+            self._connections.clear()
             self._close_thread_connection()
 
     def _init_tables(self, db: su.Database):

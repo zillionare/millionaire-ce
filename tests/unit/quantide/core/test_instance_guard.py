@@ -14,11 +14,11 @@ def test_guard_rejects_concurrent_process_but_recovers_after_kill_and_stale_pid(
         "print('OWNED', flush=True); input()"
     )
     first = subprocess.Popen([sys.executable, "-c", source], stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env={**os.environ, "PYTHONUTF8": "1"})
     try:
         assert first.stdout.readline().strip() == "OWNED"
         rejected = subprocess.run([sys.executable, "-c", source], input="\n", capture_output=True,
-                                  text=True, timeout=10)
+                                  text=True, encoding="utf-8", env={**os.environ, "PYTHONUTF8": "1"}, timeout=10)
         assert rejected.returncode != 0
         assert "已经在运行" in rejected.stderr
         first.kill()
@@ -26,7 +26,7 @@ def test_guard_rejects_concurrent_process_but_recovers_after_kill_and_stale_pid(
         # The dead process left its PID file; the OS released its real lock.
         assert path.exists()
         recovered = subprocess.run([sys.executable, "-c", source], input="\n", capture_output=True,
-                                   text=True, timeout=10)
+                                   text=True, encoding="utf-8", env={**os.environ, "PYTHONUTF8": "1"}, timeout=10)
         assert recovered.returncode == 0, recovered.stderr
         assert "OWNED" in recovered.stdout
     finally:

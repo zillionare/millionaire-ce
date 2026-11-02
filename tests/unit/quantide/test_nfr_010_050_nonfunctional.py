@@ -77,7 +77,7 @@ def test_nfr_030_paper_broker_module_single_responsibility():
 
     src_path = sim_broker.__file__
     assert src_path is not None
-    src = Path(src_path).read_text()
+    src = Path(src_path).read_text(encoding="utf-8")
     assert "class PaperBroker" in src
 
 
@@ -112,7 +112,7 @@ def test_nfr_050_base_strategy_uses_logger():
     """AC-NFR-050: Strategy 基类使用 logger."""
     from quantide.core import strategy as strat_mod
 
-    src = Path(strat_mod.__file__).read_text()
+    src = Path(strat_mod.__file__).read_text(encoding="utf-8")
     assert "logger" in src, "Strategy 基类应有 logger"
 
 
@@ -122,7 +122,7 @@ def test_nfr_010_performance_marker_exists():
 
     config_path = REPO_ROOT / "pyproject.toml"
     if config_path.exists():
-        content = config_path.read_text()
+        content = config_path.read_text(encoding="utf-8")
         assert "e2e_perf" in content or "performance" in content.lower() or True
 
 

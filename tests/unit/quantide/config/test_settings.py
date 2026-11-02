@@ -53,6 +53,7 @@ class FakeDb:
 
 
 def test_get_settings_uses_defaults_when_db_is_unavailable(monkeypatch):
+    monkeypatch.delenv("QUANTIDE_DATA_HOME", raising=False)
     monkeypatch.setattr(settings_module, "_load_app_state", lambda: None)
 
     settings = get_settings()
@@ -88,7 +89,7 @@ def test_get_settings_honors_explicit_non_localhost_app_host(db):
 
 def test_start_script_binds_localhost_unless_explicitly_overridden():
     project_root = Path(__file__).resolve().parents[4]
-    script = (project_root / "start.sh").read_text()
+    script = (project_root / "start.sh").read_text(encoding="utf-8")
 
     assert '"--host" "0.0.0.0"' not in script
     assert "${QUANTIDE_HOST:-127.0.0.1}" in script
@@ -96,7 +97,7 @@ def test_start_script_binds_localhost_unless_explicitly_overridden():
 
 def test_module_entrypoint_binds_localhost_unless_explicitly_overridden():
     project_root = Path(__file__).resolve().parents[4]
-    source = (project_root / "quantide" / "app.py").read_text()
+    source = (project_root / "quantide" / "app.py").read_text(encoding="utf-8")
 
     assert 'os.getenv("QUANTIDE_HOST", "127.0.0.1")' in source
 

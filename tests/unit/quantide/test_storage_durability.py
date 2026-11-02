@@ -53,3 +53,22 @@ def test_date_index_rebuilds_after_data_commit_without_index_commit(tmp_path):
     restored._dates_file_path().with_suffix(".signature.json").write_text("broken")
     restored._collect_dates()
     assert restored.end == second
+
+
+def test_shutdown_closes_idle_thread_connections_before_directory_cleanup(tmp_path):
+    import sqlite3
+    from concurrent.futures import ThreadPoolExecutor
+    from quantide.data.sqlite import db
+
+    database = tmp_path / "thread-owned.db"
+    db.init(database)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker_connection = pool.submit(lambda: db.db.conn).result()
+        assert worker_connection.execute("SELECT 1").fetchone() == (1,)
+        db.close()
+        with pytest.raises(sqlite3.ProgrammingError):
+            pool.submit(lambda: worker_connection.execute("SELECT 1")).result()
+    # Windows forbids this replacement while a connection retains the old file.
+    destination = tmp_path / "retired.db"
+    database.replace(destination)
+    assert destination.exists()

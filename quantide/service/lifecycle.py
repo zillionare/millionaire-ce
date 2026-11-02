@@ -65,6 +65,9 @@ def shutdown_components(app) -> None:
             close = getattr(broker, "close", None)
             if callable(close):
                 callbacks.append(close)
+    auth = getattr(app.state, "auth_manager", None)
+    if auth is not None:
+        callbacks.append(auth.close)
     callbacks.extend([msg_hub.stop, db.close])
     for callback in callbacks:
         try:
@@ -81,6 +84,9 @@ async def application_lifespan(app):
 
     msg_hub.start()
     try:
+        auth = getattr(app.state, "auth_manager", None)
+        if auth is not None:
+            auth.reopen()
         yield
     finally:
         from quantide.service.background import stop_background

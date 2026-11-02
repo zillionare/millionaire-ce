@@ -439,16 +439,16 @@ def test_normalize_scan_directory_relative_path_raises():
         _normalize_scan_directory("relative/path")
 
 
-def test_normalize_scan_directory_nonexistent_raises():
+def test_normalize_scan_directory_nonexistent_raises(tmp_path):
     """[AC-NFR1101-01] test_normalize_scan_directory_nonexistent_raises."""
     with pytest.raises(FileNotFoundError, match="不存在"):
-        _normalize_scan_directory("/definitely/does/not/exist/12345")
+        _normalize_scan_directory(str(tmp_path / "missing"))
 
 
-def test_normalize_scan_directory_path_is_file():
+def test_normalize_scan_directory_path_is_file(tmp_path):
     """[AC-NFR1101-01] When path is a file, raises NotADirectoryError."""
     import os
-    tmp_file = "/tmp/scan_test_file"
+    tmp_file = str(tmp_path / "scan_test_file")
     with open(tmp_file, "w") as f:
         f.write("test")
     try:

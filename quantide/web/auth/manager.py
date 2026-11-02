@@ -42,6 +42,7 @@ class AuthManager:
         if db_path is None:
             db_path = get_app_db_path()
         self.auth_db = AuthDatabase(db_path)
+        self._closed = False
         self.middleware = AuthBeforeware(self, self.config)
         self.db = None
         self.routes = {}  # Store route references
@@ -61,6 +62,7 @@ class AuthManager:
             prefix: URL prefix for auth routes (default: /auth)
         """
         # Create tables
+        self.reopen()
         self.db = self.auth_db.initialize_auth_tables()
 
         # Create repo to manage users
@@ -79,9 +81,23 @@ class AuthManager:
         Args:
             db_path: Target sqlite database path.
         """
-        self.auth_db = AuthDatabase(db_path)
-        self.db = self.auth_db.initialize_auth_tables()
-        self.user_repo = UserRepository(self.db)
+        replacement = AuthDatabase(db_path)
+        database = replacement.initialize_auth_tables()
+        self.auth_db.close()
+        self.auth_db = replacement
+        self.db = database
+        self.user_repo = UserRepository(database)
+        self._closed = False
+
+    def close(self):
+        """Release auth storage after the ASGI owner has drained requests."""
+        self.auth_db.close()
+        self._closed = True
+
+    def reopen(self):
+        """Support a fresh app lifespan or factory after a previous clean shutdown."""
+        if self._closed:
+            self.rebind_database(self.auth_db.db_path)
 
     def _prioritize_prefixed_routes(self, app, prefix: str) -> None:
         """Move auth routes ahead of catch-all mounts like `/`."""

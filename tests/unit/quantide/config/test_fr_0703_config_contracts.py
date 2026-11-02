@@ -22,6 +22,8 @@ def test_branding_environment_override_is_opt_in_and_restored(monkeypatch):
 
 def test_normalize_data_home_uses_the_isolated_home_for_blank_values(monkeypatch, tmp_path):
     """AC-FR-0703-1: blank homes resolve below pytest's temporary HOME."""
+    monkeypatch.delenv("QUANTIDE_DATA_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     assert normalize_data_home("") == str(tmp_path / ".quantide")

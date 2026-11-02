@@ -15,7 +15,7 @@ def script_sources(html):
                 path = root / source.removeprefix("/static/")
                 assert path.is_relative_to(root)
                 assert path.is_file(), f"Page references a missing script: {source}"
-                scripts.append(path.read_text())
+                scripts.append(path.read_text(encoding="utf-8"))
 
     Parser().feed(html)
     return "\n".join(scripts)

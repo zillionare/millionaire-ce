@@ -308,7 +308,8 @@ def test_save_runtime_config_keeps_auth_on_fixed_config_db(db, monkeypatch, tmp_
     assert rebound["db_path"] == str((tmp_path / "config" / "quantide.db").resolve())
 
 
-def test_save_runtime_config_defaults_blank_home_and_expands_user(db):
+def test_save_runtime_config_defaults_blank_home_and_expands_user(db, monkeypatch):
+    monkeypatch.delenv("QUANTIDE_DATA_HOME", raising=False)
     service = InitWizardService()
 
     service.save_runtime_config(

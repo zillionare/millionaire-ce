@@ -521,6 +521,7 @@ def create_app(
     app.state.startup_error = startup_error
     app.state.strategy_runtime_manager = strategy_runtime_manager
     app.state.app_config_dir = get_app_config_dir()
+    app.state.auth_manager = auth
     _attach_root_app_to_app_states(app)
     _attach_runtime_to_app_states(runtime)
 

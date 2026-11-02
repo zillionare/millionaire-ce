@@ -26,7 +26,8 @@ def test_get_app_config_dir_prefers_explicit_override(tmp_path: Path):
         paths_module.clear_app_config_dir_override()
 
 
-def test_normalize_data_home_expands_user_and_defaults_blank():
+def test_normalize_data_home_expands_user_and_defaults_blank(monkeypatch):
+    monkeypatch.delenv("QUANTIDE_DATA_HOME", raising=False)
     assert paths_module.normalize_data_home("") == str(Path("~/.quantide").expanduser())
     assert paths_module.normalize_data_home("~/market-data") == str(Path("~/market-data").expanduser())
 
