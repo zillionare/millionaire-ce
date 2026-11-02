@@ -48,6 +48,7 @@ class ArtifactPathsTest(unittest.TestCase):
             root = Path(directory)
             (root / "quantide/data").mkdir(parents=True)
             (root / "scripts/packaging").mkdir(parents=True)
+            (root / ".coveragerc").write_text("[run]\nbranch = True\n")
             self.assertEqual(artifact_paths.layout_errors(root), [])
             (root / "site").mkdir()
             (root / ".coverage").touch()

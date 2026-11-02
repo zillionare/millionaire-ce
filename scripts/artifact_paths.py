@@ -29,7 +29,11 @@ UNEXPECTED_ROOTS = (
 def layout_errors(root: Path) -> list[str]:
     """Reject checkout-local generated output and misplaced support resources."""
     misplaced = [name for name in UNEXPECTED_ROOTS if (root / name).exists()]
-    misplaced.extend(path.name for path in root.glob(".coverage*") if path.is_file())
+    misplaced.extend(
+        path.name
+        for path in root.glob(".coverage*")
+        if path.is_file() and path.name != ".coveragerc"
+    )
     return [f"Unexpected checkout artifact: {name}" for name in misplaced]
 
 
