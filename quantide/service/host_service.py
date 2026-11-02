@@ -183,6 +183,78 @@ def _wait_for_exit(pid):
     raise TimeoutError(f"Service process {pid} did not stop")
 
 
+def _windows_service_state():
+    """Read the SCM state without depending on localized sc.exe output."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ServiceStatus(ctypes.Structure):
+        """Native SERVICE_STATUS layout, with no locale-dependent text fields."""
+
+        _fields_ = [
+            (name, wintypes.DWORD)
+            for name in (
+                "service_type",
+                "current_state",
+                "controls",
+                "exit_code",
+                "specific_exit_code",
+                "checkpoint",
+                "wait_hint",
+            )
+        ]
+
+    api = ctypes.WinDLL("advapi32", use_last_error=True)
+    api.OpenSCManagerW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    api.OpenSCManagerW.restype = wintypes.HANDLE
+    api.OpenServiceW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD]
+    api.OpenServiceW.restype = wintypes.HANDLE
+    api.QueryServiceStatus.argtypes = [wintypes.HANDLE, ctypes.POINTER(ServiceStatus)]
+    api.QueryServiceStatus.restype = wintypes.BOOL
+    api.CloseServiceHandle.argtypes = [wintypes.HANDLE]
+    api.CloseServiceHandle.restype = wintypes.BOOL
+    manager = api.OpenSCManagerW(None, None, 1)
+    if not manager:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        handle = api.OpenServiceW(manager, SERVICE_NAME, 4)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            status = ServiceStatus()
+            if not api.QueryServiceStatus(handle, ctypes.byref(status)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return status.current_state
+        finally:
+            api.CloseServiceHandle(handle)
+    finally:
+        api.CloseServiceHandle(manager)
+
+
+def _wait_windows_service_stopped(timeout=35):
+    """Wait for SCM SERVICE_STOPPED even after a successful WinSW command."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _windows_service_state() == 1:
+            return
+        time.sleep(0.2)
+    raise TimeoutError(f"Windows service {SERVICE_NAME} did not finish stopping")
+
+
+def _windows_action(action):
+    """Serialize stop/start and removal against actual service completion."""
+    if action == "uninstall":
+        stopped = _windows_action("stop")
+        if stopped.returncode != 0:
+            return stopped
+    if action == "start" and _windows_service_state() == 3:
+        _wait_windows_service_stopped()
+    result = _run([str(install_root() / "millionaire-service.exe"), action], check=False)
+    if action == "stop" and result.returncode == 0:
+        _wait_windows_service_stopped()
+    return result
+
+
 def manage_service(action, *, system=False, user=None):
     """Manage a registered OS service; controller exit never stops the service."""
     if action == "install":
@@ -200,9 +272,7 @@ def manage_service(action, *, system=False, user=None):
             return 0
         result = _launchd_action(action, system)
     elif sys.platform == "win32":
-        if action == "uninstall":
-            _run([str(install_root() / "millionaire-service.exe"), "stop"], check=False)
-        result = _run([str(install_root() / "millionaire-service.exe"), action], check=False)
+        result = _windows_action(action)
     else:
         if action == "uninstall":
             _run(["systemctl", "disable", "--now", SERVICE_NAME], check=False)

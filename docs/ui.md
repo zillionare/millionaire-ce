@@ -1,7 +1,18 @@
-# UI Documentation Pending
+# 页面与入口
 
-This public page is intentionally minimal during active architectural refactoring.
+浏览器默认地址 `http://127.0.0.1:8130`。首次进入 wizard，完成初始化后登录使用。
+本页列出当前常用入口，具体操作按各教程进行。
 
-Draft UI designs and exploratory interaction notes are not part of the published CE documentation.
+| 入口 | 用途 | 教程 |
+| --- | --- | --- |
+| 策略 → 策略列表 | 扫描、复制示例、查看策略和运行回测 | [策略编写](strategies.md) |
+| 策略 → 回测管理 | 重新打开报告、转入仿真 | [回测](backtesting.md) |
+| 交易/仿真 | 查看模拟账户、委托、成交和资金 | [仿真](paper-trading.md) |
+| 系统维护 → 数据维护 | 交易日历、股票列表、行情数据、实时行情和因子台账 | [数据](data.md) |
+| 系统维护 → 系统设置 | 账号、数据源和定时任务 | [初始化](initialization.md) |
+| 系统维护 → 运行保障 | 风险事件与运行时监控 | [运维](operations.md) |
+| 策略详情 → 参数优化 | 配置搜索和比较结果 | [参数优化](optimization.md) |
+| 报告 → 交易详情 → K 线面板 | 交易时点及支持策略的预测解释 | [预测解释](prediction-explanation.md) |
 
-Only release-validated UI behavior should remain under `docs/`.
+CE 不展示可用的真实交易控制，系统中保留的 gateway 设计材料也不表示 CE 可下实盘单。
+前台服务控制器是独立窗口，关闭网页或控制器不停止后台服务。

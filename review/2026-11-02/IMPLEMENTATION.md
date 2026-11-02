@@ -69,3 +69,7 @@ PR：https://github.com/zillionare/millionaire-ce/pull/1 。发布 workflow 支�
 
 最终用户手册尚未达到正式发布标准，具体内容规划、功能表述边界与验收要求见
 [文档规划](DOCUMENTATION-PLAN.md)。该规划不代表相应用户手册已经完成。
+
+后续已编写中文用户手册首稿与下一版审计/收益归因规格，并修复 Windows 服务停止
+未完成即启动的竞态。本轮验证与尚未完成的文档发布验收见[文档实施记录](DOCUMENTATION.md)。
+前文的 4606 单测数是此前实施证据；本轮为 4615 passed / 3 skipped、覆盖率 84.51%。

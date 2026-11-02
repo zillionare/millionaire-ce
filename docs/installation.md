@@ -1,11 +1,11 @@
-# Installation
+# 源码安装（开发者）
 
 End users should use the [native installers and service controller](native-installation.md).
 This page describes source-checkout installation for contributors.
 
 ## Requirements
 
-- Python 3.13 or newer
+- Python 3.13 (the supported development and CI version)
 - A local Python virtual environment
 - Network access to install the Python dependencies
 

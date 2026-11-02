@@ -71,7 +71,7 @@ Red-Green-Refactor 中先提交失败的测试；生产代码提交仍须满足�
 
 `.github/workflows/ci.yml` 是 PR、分支 push、手工及 release 共用入口：
 
-1. `quality`：安装精确版本的工具，运行门禁反例，然后执行完整生产质量扫描。
+1. `quality`：安装精确版本的工具，运行门禁反例，执行完整生产质量扫描并严格构建用户文档。
 2. `tests (ubuntu-latest)`、`tests (macos-latest)`、`tests (windows-latest)`：
    Python 3.13，构建 wheel/sdist 并验证 CE 内容，安装构建的 wheel 和 ML extra，
    在源码目录之外检查已安装 CLI/应用，再运行全部单元测试及 80% 覆盖率门禁。
