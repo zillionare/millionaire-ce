@@ -6,6 +6,7 @@ import datetime
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -97,11 +98,17 @@ class TrackingStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.ensure_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
+        """Own both the transaction and connection; SQLite's context alone stays open."""
         connection = sqlite3.connect(self.path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def ensure_schema(self) -> None:
         with self._connect() as connection:

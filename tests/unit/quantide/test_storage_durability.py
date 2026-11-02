@@ -72,3 +72,25 @@ def test_shutdown_closes_idle_thread_connections_before_directory_cleanup(tmp_pa
     destination = tmp_path / "retired.db"
     database.replace(destination)
     assert destination.exists()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_tracking_transaction_closes_connection_on_every_exit(tmp_path, fail):
+    import sqlite3
+    from quantide.service.strategy_tracking import TrackingStore
+
+    path = tmp_path / "tracking.db"
+    store = TrackingStore(path)
+    try:
+        with store._connect() as connection:
+            connection.execute("CREATE TABLE probe (value INTEGER)")
+            connection.execute("INSERT INTO probe VALUES (1)")
+            if fail:
+                raise ValueError("interrupted")
+    except ValueError:
+        assert fail
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("SELECT 1")
+    with store._connect() as check:
+        assert check.execute("SELECT COUNT(*) FROM probe").fetchone()[0] == (0 if fail else 1)
+    path.replace(tmp_path / "closed.db")
