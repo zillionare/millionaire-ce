@@ -59,9 +59,7 @@ def _normalize_quotes(quotes: dict[str, dict]) -> dict[str, dict]:
 
 def _load_quotes(args: argparse.Namespace) -> tuple[dict[str, dict], str]:
     if args.quotes:
-        data = _normalize_quotes(
-            json.loads(Path(args.quotes).read_text(encoding="utf-8"))
-        )
+        data = _normalize_quotes(json.loads(Path(args.quotes).read_text(encoding="utf-8")))
         return data, f"file:{args.quotes}"
     symbols = []
     try:
@@ -99,9 +97,7 @@ class _Broker:
     cash = 1_000_000.0
 
     def __init__(self, market_data: _MarketData, today: datetime.date) -> None:
-        self.view = LiveBarView(
-            daily_bars, market_data=market_data, today_func=lambda: today
-        )
+        self.view = LiveBarView(daily_bars, market_data=market_data, today_func=lambda: today)
 
     def get_bars_range(self, assets, start, end=None, adjust=None, include_forming_bar=True):
         return self.view.get_bars_range(
@@ -133,9 +129,7 @@ def build_report(
 
     strategy._ensure_backtest_panel(day)
     panel = strategy._cached_norm_panel
-    ranked, _prices, _ranks = strategy._rank_for_bar(
-        datetime.datetime.combine(day, tm)
-    )
+    ranked, _prices, _ranks = strategy._rank_for_bar(datetime.datetime.combine(day, tm))
     report: dict[str, Any] = {
         "date": day.isoformat(),
         "time": tm.isoformat(),
@@ -160,29 +154,11 @@ def build_report(
         "buy_candidates": [
             item["asset"]
             for item in ranked[: strategy.top_k]
-            if float(item.get("ml_score", 0) or 0) > (
-                0.0 if strategy.custom_assets and len(strategy.custom_assets) == 1 else -0.25
-            )
+            if float(item.get("ml_score", 0) or 0)
+            > (0.0 if strategy.custom_assets and len(strategy.custom_assets) == 1 else -0.25)
         ],
     }
-    if panel is not None:
-        cross = panel.filter(
-            (pl.col("date") == day)
-            & (~pl.col("is_st"))
-            & (pl.col("volume") > 0)
-            & (pl.col("close") > 0)
-        )
-        report["cross_rows"] = cross.height
-        report["is_st_null"] = cross.filter(pl.col("is_st").is_null()).height
-        if not cross.is_empty() and {"up_limit", "down_limit"}.issubset(cross.columns):
-            report["invalid_limit_order"] = cross.filter(
-                (pl.col("up_limit") > 0)
-                & (pl.col("down_limit") > 0)
-                & (pl.col("up_limit") < pl.col("down_limit"))
-            ).height
-            report["close_above_up_limit"] = cross.filter(
-                (pl.col("up_limit") > 0) & (pl.col("close") > pl.col("up_limit") * 1.02)
-            ).height
+    _add_panel_diagnostics(panel, day, report)
     return report
 
 
@@ -222,8 +198,10 @@ def main() -> int:
             f"model: {report['model_key']} train_end={report['model_train_end']} "
             f"effective={report['model_effective_from']} {report['model_engine']}"
         )
-        print(f"invalid_limit_order: {report.get('invalid_limit_order')}  "
-              f"close_above_up_limit: {report.get('close_above_up_limit')}")
+        print(
+            f"invalid_limit_order: {report.get('invalid_limit_order')}  "
+            f"close_above_up_limit: {report.get('close_above_up_limit')}"
+        )
         print("ranked:")
         for item in report["ranked"]:
             print(
@@ -242,6 +220,28 @@ def main() -> int:
         print("ALARM: no ranked candidates")
         return 2
     return 0
+
+
+def _add_panel_diagnostics(panel, day, report):
+    """Add source-coverage and limit consistency diagnostics for the replay date."""
+    if panel is not None:
+        cross = panel.filter(
+            (pl.col("date") == day)
+            & (~pl.col("is_st"))
+            & (pl.col("volume") > 0)
+            & (pl.col("close") > 0)
+        )
+        report["cross_rows"] = cross.height
+        report["is_st_null"] = cross.filter(pl.col("is_st").is_null()).height
+        if not cross.is_empty() and {"up_limit", "down_limit"}.issubset(cross.columns):
+            report["invalid_limit_order"] = cross.filter(
+                (pl.col("up_limit") > 0)
+                & (pl.col("down_limit") > 0)
+                & (pl.col("up_limit") < pl.col("down_limit"))
+            ).height
+            report["close_above_up_limit"] = cross.filter(
+                (pl.col("up_limit") > 0) & (pl.col("close") > pl.col("up_limit") * 1.02)
+            ).height
 
 
 if __name__ == "__main__":

@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned quality tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --group quality
+      - name: Verify the gates reject counterexamples
+        run: python -m unittest discover -s tests/quality -v
+      - name: Production quality gate
+        run: python scripts/check_quality.py
+      - name: Upload quality evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-report
+          path: quality-reports/quality.json
+          if-no-files-found: error
+
+  tests:
+    name: tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Isolate application configuration
+        shell: python
+        run: |
+          import os, pathlib
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              for key, name in [('XDG_CONFIG_HOME', 'config'), ('APPDATA', 'appdata'), ('QUANTIDE_DATA_HOME', 'data')]:
+                  print(f'{key}={root / ("quantide-" + name)}', file=output)
+      - name: Install macOS OpenMP runtime
+        if: runner.os == 'macOS'
+        run: |
+          if ! brew list --versions libomp; then
+            brew install libomp
+          fi
+      - name: Install build and offline test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build==1.3.0 --group test
+      - name: Build and validate release artifacts
+        run: |
+          python -m build
+          python scripts/validate_release_artifacts.py dist
+      - name: Install the built wheel with ML extra
+        shell: python
+        run: |
+          import pathlib, subprocess, sys
+          wheel = next(pathlib.Path('dist').glob('*.whl')).resolve()
+          subprocess.run([sys.executable, '-m', 'pip', 'install', f'{wheel}[ml30m]'], check=True)
+      - name: Smoke test installed CLI and app outside the source checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          millionaire-ce --help
+          python -c "import lightgbm, polars_talib; from quantide.app_factory import create_app; create_app(enforce_single_instance=False)"
+      - name: Unit tests and 80 percent coverage gate (no external network)
+        run: >-
+          python -m pytest tests/unit --strict-markers
+          --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1,localhost
+          --timeout=60 -o faulthandler_timeout=90
+          --cov=quantide --cov-fail-under=80
+          --cov-report=term-missing --cov-report=xml:quality-reports/coverage.xml
+          --cov-report=json:quality-reports/coverage.json
+          --cov-report=html:quality-reports/htmlcov
+          --junitxml=quality-reports/unit.xml
+      - name: Upload test and coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-${{ matrix.os }}
+          path: |
+            quality-reports/unit.xml
+            quality-reports/coverage.xml
+            quality-reports/coverage.json
+            quality-reports/htmlcov/
+          retention-days: 30
+      - name: Retain the tested package for release
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  acceptance:
+    name: acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install CE and offline test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install '.[ml30m]' --group test
+      - name: CE accuracy acceptance (expected failures are real failures)
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/quantide-acceptance-config
+          QUANTIDE_DATA_HOME: ${{ runner.temp }}/quantide-acceptance-data
+        run: >-
+          python -m pytest tests/e2e --strict-markers
+          -m 'e2e and release_gate and not private_only and not e2e_live_smoke'
+          --runxfail --timeout=60
+          --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1,localhost
+          --junitxml=quality-reports/acceptance.xml
+      - name: Require nonempty passing acceptance, with no skips
+        run: python scripts/check_test_results.py quality-reports/acceptance.xml
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-report
+          path: quality-reports/acceptance.xml
+
+  installers:
+    needs: [tests, acceptance]
+    uses: ./.github/workflows/installers.yml

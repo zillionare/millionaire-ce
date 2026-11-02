@@ -58,9 +58,18 @@ def build_risk_event_center_content(limit: int = 20) -> Div:
                 cls="flex flex-col",
             ),
             Div(
-                Span(f"账户封控 {summary['blocked_accounts']}", cls="px-2 py-1 rounded bg-red-50 text-red-700 text-xs"),
-                Span(f"策略封控 {summary['blocked_strategies']}", cls="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs"),
-                Span(f"活动告警 {summary['open_events']}", cls="px-2 py-1 rounded bg-[#fff3f2] text-[#e41815] text-xs"),
+                Span(
+                    f"账户封控 {summary['blocked_accounts']}",
+                    cls="px-2 py-1 rounded bg-red-50 text-red-700 text-xs",
+                ),
+                Span(
+                    f"策略封控 {summary['blocked_strategies']}",
+                    cls="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs",
+                ),
+                Span(
+                    f"活动告警 {summary['open_events']}",
+                    cls="px-2 py-1 rounded bg-[#fff3f2] text-[#e41815] text-xs",
+                ),
                 cls="flex items-center gap-2 flex-wrap",
             ),
             cls="p-6 border-b border-gray-200 flex items-center justify-between gap-4",
@@ -90,16 +99,25 @@ def _build_risk_event_rows(events: list[dict[str, Any]]) -> list[Any]:
     for event in events:
         rows.append(
             Tr(
-                Td(_risk_severity_chip(str(event.get("severity") or "info")), cls="px-4 py-3 align-top"),
+                Td(
+                    _risk_severity_chip(str(event.get("severity") or "info")),
+                    cls="px-4 py-3 align-top",
+                ),
                 Td(
                     Div(
-                        Div(str(event.get("title") or "风险事件"), cls="text-sm font-medium text-gray-900"),
+                        Div(
+                            str(event.get("title") or "风险事件"),
+                            cls="text-sm font-medium text-gray-900",
+                        ),
                         Div(str(event.get("message") or ""), cls="text-sm text-gray-600 mt-1"),
                     ),
                     cls="px-4 py-3",
                 ),
                 Td(str(event.get("scope") or "-"), cls="px-4 py-3 text-xs text-gray-500 uppercase"),
-                Td(str(event.get("created_at") or "-"), cls="px-4 py-3 text-xs text-gray-500 whitespace-nowrap"),
+                Td(
+                    str(event.get("created_at") or "-"),
+                    cls="px-4 py-3 text-xs text-gray-500 whitespace-nowrap",
+                ),
                 cls="border-b border-gray-100",
             )
         )
@@ -160,7 +178,9 @@ def _build_runtime_rows(action_base_path: str, target_selector: str) -> list[Any
     for item in strategy_runtime_manager.list_runtime_rows():
         action_items = _build_runtime_actions(item, action_base_path, target_selector)
         actions = Td(
-            Div(*action_items, cls="flex items-center gap-2") if action_items else Span("-", cls="text-xs text-gray-400"),
+            Div(*action_items, cls="flex items-center gap-2")
+            if action_items
+            else Span("-", cls="text-xs text-gray-400"),
             cls="whitespace-nowrap px-4 py-2",
         )
         rows.append(
@@ -170,7 +190,10 @@ def _build_runtime_rows(action_base_path: str, target_selector: str) -> list[Any
                 Td(item["strategy_name"] or "-", cls="whitespace-nowrap px-4 py-2"),
                 Td(item["strategy_id"] or "-", cls="whitespace-nowrap px-4 py-2 font-mono text-xs"),
                 Td(_runtime_status_chip(item["status"]), cls="whitespace-nowrap px-4 py-2"),
-                Td(item.get("alert_text") or "-", cls="px-4 py-2 text-sm text-gray-600 min-w-[160px]"),
+                Td(
+                    item.get("alert_text") or "-",
+                    cls="px-4 py-2 text-sm text-gray-600 min-w-[160px]",
+                ),
                 Td(f"{item['total']:,.2f}", cls="whitespace-nowrap px-4 py-2 tabular-nums"),
                 Td(str(item["positions"]), cls="whitespace-nowrap px-4 py-2"),
                 Td(str(item["orders"]), cls="whitespace-nowrap px-4 py-2"),
@@ -184,21 +207,73 @@ def _build_runtime_rows(action_base_path: str, target_selector: str) -> list[Any
     return [Tr(Td("暂无运行时实例", colspan="11", cls="px-4 py-6 text-center text-gray-400"))]
 
 
-def _build_runtime_actions(item: dict[str, Any], action_base_path: str, target_selector: str) -> list[Any]:
+def _build_runtime_actions(
+    item: dict[str, Any], action_base_path: str, target_selector: str
+) -> list[Any]:
     """构建运行时操作按钮。"""
     action_items: list[Any] = []
     if item.get("can_stop"):
-        action_items.append(_runtime_action_button("停止", f"{action_base_path}/stop", {"runtime_id": item["runtime_id"]}, target_selector, "text-red-600"))
+        action_items.append(
+            _runtime_action_button(
+                "停止",
+                f"{action_base_path}/stop",
+                {"runtime_id": item["runtime_id"]},
+                target_selector,
+                "text-red-600",
+            )
+        )
     if item.get("can_start"):
-        action_items.append(_runtime_action_button("启动", f"{action_base_path}/start", {"runtime_id": item["runtime_id"]}, target_selector, "text-green-600"))
+        action_items.append(
+            _runtime_action_button(
+                "启动",
+                f"{action_base_path}/start",
+                {"runtime_id": item["runtime_id"]},
+                target_selector,
+                "text-green-600",
+            )
+        )
     if item.get("can_block_account"):
-        action_items.append(_runtime_action_button("封锁账户", f"{action_base_path}/block", {"target_kind": "account", "target_id": item["runtime_id"]}, target_selector, "text-gray-700"))
+        action_items.append(
+            _runtime_action_button(
+                "封锁账户",
+                f"{action_base_path}/block",
+                {"target_kind": "account", "target_id": item["runtime_id"]},
+                target_selector,
+                "text-gray-700",
+            )
+        )
     if item.get("can_unblock_account"):
-        action_items.append(_runtime_action_button("解除账户封锁", f"{action_base_path}/unblock", {"target_kind": "account", "target_id": item["runtime_id"]}, target_selector, "text-[#e41815]", "确认解除账户风控封锁吗？"))
+        action_items.append(
+            _runtime_action_button(
+                "解除账户封锁",
+                f"{action_base_path}/unblock",
+                {"target_kind": "account", "target_id": item["runtime_id"]},
+                target_selector,
+                "text-[#e41815]",
+                "确认解除账户风控封锁吗？",
+            )
+        )
     if item.get("can_block_strategy"):
-        action_items.append(_runtime_action_button("封锁策略", f"{action_base_path}/block", {"target_kind": "strategy", "target_id": item["runtime_id"]}, target_selector, "text-gray-700"))
+        action_items.append(
+            _runtime_action_button(
+                "封锁策略",
+                f"{action_base_path}/block",
+                {"target_kind": "strategy", "target_id": item["runtime_id"]},
+                target_selector,
+                "text-gray-700",
+            )
+        )
     if item.get("can_unblock_strategy"):
-        action_items.append(_runtime_action_button("解除策略封锁", f"{action_base_path}/unblock", {"target_kind": "strategy", "target_id": item["runtime_id"]}, target_selector, "text-[#e41815]", "确认解除策略风控封锁吗？"))
+        action_items.append(
+            _runtime_action_button(
+                "解除策略封锁",
+                f"{action_base_path}/unblock",
+                {"target_kind": "strategy", "target_id": item["runtime_id"]},
+                target_selector,
+                "text-[#e41815]",
+                "确认解除策略风控封锁吗？",
+            )
+        )
     if item.get("blocked_scope") == "account" and item.get("strategy_id"):
         action_items.append(Span("请在账户行解除封控", cls="text-xs text-gray-700"))
     return action_items
@@ -229,7 +304,9 @@ def _runtime_action_button(
 def build_runtime_table_card(refresh_path: str, action_base_path: str, target_selector: str) -> Div:
     """构建带自动刷新的运行时监控卡片。"""
     return Div(
-        build_runtime_table_content(action_base_path=action_base_path, target_selector=target_selector),
+        build_runtime_table_content(
+            action_base_path=action_base_path, target_selector=target_selector
+        ),
         id=target_selector.lstrip("#"),
         hx_get=refresh_path,
         hx_trigger=POLL_TRIGGER,

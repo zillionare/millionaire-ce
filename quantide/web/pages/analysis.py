@@ -61,11 +61,13 @@ def analysis_page(request: Request):
 
     from quantide.web.theme import AppTheme
 
-    html_content = to_xml((
-        Title("分析"),
-        *AppTheme.headers(),
-        page_content,
-    ))
+    html_content = to_xml(
+        (
+            Title("分析"),
+            *AppTheme.headers(),
+            page_content,
+        )
+    )
     return HTMLResponse(html_content)
 
 

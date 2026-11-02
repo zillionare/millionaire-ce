@@ -6,8 +6,12 @@ repo_name: zillionare/millionaire-ce
 nav:
   - Home: index.md
   - Installation: installation.md
+  - Native installers: native-installation.md
+  - Quote extensions: quote-extensions.md
+  - Simulated counter: simulated-counter.md
   - CE scope: scope.md
   - Developer acceptance: developer-acceptance.md
+  - Quality and release gates: quality.md
   - Design:
       - Edition boundaries: design/edition_features.md
       - Risk program boundary: design/risk_program_selection.md

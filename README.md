@@ -14,6 +14,9 @@ programs, private risk-program implementations, or production/live trading.
 The default risk-program registry is empty; hosts may register custom adapters
 through the public extension API.
 
+Tencent real-time quotes are disabled by default. The wizard can enable one fixed 30-day
+demonstration; after expiry, use a [user quote extension](docs/quote-extensions.md).
+
 Current status:
 
 - the project is not using FastAPI + Vue as its target stack
@@ -22,8 +25,11 @@ Current status:
 
 Release documentation lives under `docs/`.
 
+Production quality budgets, pinned tools, pre-commit setup, cross-platform CI,
+and release gates are documented in [Quality and release gates](docs/quality.md).
+
 For local setup, optional dependencies, first-run browser opening, and
-service-manager hooks, see `docs/installation.md`. For minimum developer-side
+service-manager hooks, see [native installation](docs/native-installation.md). For minimum developer-side
 acceptance, see `docs/developer-acceptance.md`.
 
 ## Local Setup

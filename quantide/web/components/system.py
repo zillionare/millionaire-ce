@@ -128,10 +128,7 @@ def select_(
         children.append(Label(label, cls="q-label", **{"for": name}))
     children.append(
         Select(
-            *[
-                Option(text, value=str(v), selected=v == value or None)
-                for text, v in options
-            ],
+            *[Option(text, value=str(v), selected=v == value or None) for text, v in options],
             name=name,
             cls="q-input",
             **attrs,
@@ -226,9 +223,7 @@ def tabs(
                     "hx_vals": f'{{"tab": "{key}"}}',
                 }
             )
-        children.append(
-            A(title, **attrs) if not hx_get else A(title, href="#", **attrs)
-        )
+        children.append(A(title, **attrs) if not hx_get else A(title, href="#", **attrs))
     return Div(*children, cls="q-tabs")
 
 

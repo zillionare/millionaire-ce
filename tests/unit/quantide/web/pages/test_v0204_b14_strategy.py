@@ -13,6 +13,12 @@ Target lines:
 
 from __future__ import annotations
 
+from quantide.web.pages import strategy_report_views
+from quantide.web.pages import strategy_log_views
+from quantide.web.pages import strategy_metrics
+from quantide.web.pages import strategy_scanning
+
+
 import datetime as dt
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -128,7 +134,7 @@ async def test_save_scan_config_success_returns_saved_modal(monkeypatch):
     )
     # Stub _normalize_scan_directory to skip filesystem existence check.
     monkeypatch.setattr(
-        strategy_mod,
+        strategy_scanning,
         "_normalize_scan_directory",
         lambda d: (d, MagicMock()),
     )
@@ -146,10 +152,10 @@ async def test_save_scan_config_success_returns_saved_modal(monkeypatch):
 def test_load_saved_backtest_log_panel_success(monkeypatch):
     """load_saved_backtest_log_panel with rows -> _build_log_panel called."""
     monkeypatch.setattr(
-        strategy_mod, "_resolve_backtest_status", lambda pid: ("finished", "")
+        strategy_log_views, "_resolve_backtest_status", lambda pid: ("finished", "")
     )
     monkeypatch.setattr(
-        strategy_mod,
+        strategy_log_views,
         "load_saved_backtest_logs",
         lambda pid, limit=200: [
             {
@@ -162,7 +168,7 @@ def test_load_saved_backtest_log_panel_success(monkeypatch):
         ],
     )
     monkeypatch.setattr(
-        strategy_mod,
+        strategy_log_views,
         "_build_log_meta",
         lambda pid: {"save_requested": True, "saved": True, "saved_path": "/tmp/x.jsonl"},
     )
@@ -190,16 +196,16 @@ def _monkeypatch_backtest_helpers(monkeypatch, *, metrics=None,
                                    log_rows=None):
     """Apply common monkeypatches for backtest_result testing."""
     monkeypatch.setattr(
-        strategy_mod, "_resolve_backtest_status", lambda pid: ("finished", "")
+        strategy_report_views, "_resolve_backtest_status", lambda pid: ("finished", "")
     )
     monkeypatch.setattr(
-        strategy_mod, "_build_metrics_payload", lambda pid: metrics or {}
+        strategy_report_views, "_build_metrics_payload", lambda pid: metrics or {}
     )
     monkeypatch.setattr(
-        strategy_mod, "_build_date_axis", lambda pid: ["2024-01-02"]
+        strategy_report_views, "_build_date_axis", lambda pid: ["2024-01-02"]
     )
     monkeypatch.setattr(
-        strategy_mod,
+        strategy_report_views,
         "_build_series_payload",
         lambda pid, da: {
             "date_axis": da,
@@ -210,16 +216,16 @@ def _monkeypatch_backtest_helpers(monkeypatch, *, metrics=None,
         },
     )
     monkeypatch.setattr(
-        strategy_mod, "_build_trade_rows", lambda pid, limit=200: trade_rows or []
+        strategy_metrics, "_build_trade_rows", lambda pid, limit=200: trade_rows or []
     )
     monkeypatch.setattr(
-        strategy_mod, "_build_daily_positions", lambda pid: positions_rows or []
+        strategy_report_views, "_build_daily_positions", lambda pid: positions_rows or []
     )
     monkeypatch.setattr(
-        strategy_mod, "_build_log_rows", lambda pid, limit=200: log_rows or []
+        strategy_report_views, "_build_log_rows", lambda pid, limit=200: log_rows or []
     )
     monkeypatch.setattr(
-        strategy_mod,
+        strategy_log_views,
         "_build_log_meta",
         lambda pid: {"save_requested": False, "saved": False, "saved_path": "/tmp/x.jsonl"},
     )

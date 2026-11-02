@@ -86,11 +86,7 @@ class AuthManager:
     def _prioritize_prefixed_routes(self, app, prefix: str) -> None:
         """Move auth routes ahead of catch-all mounts like `/`."""
         routes = list(getattr(app.router, "routes", []))
-        prefixed = [
-            route
-            for route in routes
-            if str(getattr(route, "path", "")).startswith(prefix)
-        ]
+        prefixed = [route for route in routes if str(getattr(route, "path", "")).startswith(prefix)]
         if not prefixed:
             return
         others = [route for route in routes if route not in prefixed]
@@ -112,9 +108,7 @@ class AuthManager:
             return None
         return self.user_repo.get_by_username(username)
 
-    def register_routes(
-        self, app, prefix="/auth", include_admin=False, allow_custom_login=False
-    ):
+    def register_routes(self, app, prefix="/auth", include_admin=False, allow_custom_login=False):
         """
         Register authentication routes with optional admin interface
 

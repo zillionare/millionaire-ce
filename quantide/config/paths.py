@@ -14,7 +14,11 @@ def normalize_data_home(home: str | Path | None = None) -> str:
     Blank values fall back to the default per-user data directory and any
     leading `~` is expanded for persistence.
     """
-    text = str(home or "").strip() or DEFAULT_DATA_HOME
+    text = (
+        str(home or "").strip()
+        or os.environ.get("QUANTIDE_DATA_HOME", "").strip()
+        or DEFAULT_DATA_HOME
+    )
     return str(Path(text).expanduser())
 
 
@@ -44,6 +48,10 @@ def get_app_config_dir() -> Path:
     if _APP_CONFIG_DIR_OVERRIDE is not None:
         return _APP_CONFIG_DIR_OVERRIDE
 
+    configured = os.environ.get("QUANTIDE_CONFIG_HOME", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA")
         if base:
@@ -59,7 +67,7 @@ def get_app_config_dir() -> Path:
 def ensure_app_config_dir() -> Path:
     """Create the Quantide configuration directory if needed."""
     path = get_app_config_dir()
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
     return path
 
 
@@ -81,14 +89,14 @@ def get_strategy_runtime_state_path() -> Path:
 def get_model_store_dir() -> Path:
     """Return the directory used to persist the latest strategy model."""
     path = ensure_app_config_dir() / "models"
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
     return path
 
 
 def get_backtest_log_dir() -> Path:
     """Return the directory used to store saved backtest log files."""
     path = ensure_app_config_dir() / "backtest_logs"
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
     return path
 
 

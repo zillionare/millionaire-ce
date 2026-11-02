@@ -1,0 +1,44 @@
+"""Rebuild weighted position costs from committed trades, including purchase fees."""
+
+from quantide.core.enums import OrderSide
+
+
+def _side(value):
+    if isinstance(value, OrderSide):
+        return value
+    try:
+        return OrderSide(int(value))
+    except Exception:
+        return {
+            "BUY": OrderSide.BUY,
+            "1": OrderSide.BUY,
+            "SELL": OrderSide.SELL,
+            "-1": OrderSide.SELL,
+        }.get(str(value).strip().upper(), OrderSide.UNKNOWN)
+
+
+def _apply_cost(previous, row):
+    shares, average = previous
+    quantity = float(row.get("shares") or 0)
+    if quantity <= 0:
+        return previous
+    side = _side(row.get("side"))
+    if side == OrderSide.BUY:
+        total = shares * average + float(row.get("amount") or 0) + float(row.get("fee") or 0)
+        shares += quantity
+        average = total / shares if shares > 0 else 0.0
+    elif side == OrderSide.SELL:
+        shares -= quantity
+        if shares <= 0:
+            shares, average = 0.0, 0.0
+    return shares, average
+
+
+def position_costs(rows):
+    """Calculate only from facts; callers decide whether history agrees with their snapshot."""
+    state = {}
+    for row in rows:
+        asset = str(row.get("asset") or "")
+        if asset:
+            state[asset] = _apply_cost(state.get(asset, (0.0, 0.0)), row)
+    return state

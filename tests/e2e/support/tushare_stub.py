@@ -23,6 +23,7 @@ DEFAULT_STOCK_LIST_PATH = REPO_ROOT / "data" / "stock_list.parquet"
 class TushareStubConfig:
     """Behavior switches for the fixture-backed Tushare stub."""
 
+    assets: tuple[str, ...] | None = None
     empty_endpoints: set[str] = field(default_factory=set)
     rate_limited_endpoints: set[str] = field(default_factory=set)
     auth_failed_endpoints: set[str] = field(default_factory=set)
@@ -78,6 +79,11 @@ class FixtureBackedTushareFetcher(DataFetcherPort):
         self._limit = pd.read_parquet(ASSETS_ROOT / "2024_limit_price.parquet")
         self._st = pd.read_parquet(ASSETS_ROOT / "2024_st_info.parquet")
         self._stock_list = self._load_stock_list()
+        if self._config.assets is not None:
+            for name in ("_bars", "_adjust", "_limit", "_st", "_stock_list"):
+                frame = getattr(self, name)
+                setattr(self, name, frame.loc[frame["asset"].isin(self._config.assets)].copy())
+
 
     def _load_stock_list(self) -> pd.DataFrame:
         """Load a realistic stock list for dev-stub search flows.
@@ -157,6 +163,33 @@ class FixtureBackedTushareFetcher(DataFetcherPort):
     ) -> tuple[pd.DataFrame, list[list]]:
         self._maybe_raise("stock_st")
         return _filter_frame_by_dates(self._st, dates, "stock_st", self._config), []
+
+    def fetch_daily_basic(self, dates):
+        self._maybe_raise("daily_basic")
+        frame = _filter_frame_by_dates(self._bars, dates, "daily_basic", self._config)
+        frame = frame[["date", "asset", "close"]].copy()
+        frame["total_mv"] = frame["close"] * 1_000_000
+        frame["circ_mv"] = frame["total_mv"] * 0.7
+        return frame.drop(columns="close"), []
+
+    def fetch_index_bars(self, index_codes, start_date, end_date):
+        self._maybe_raise("index_daily")
+        dates = pd.date_range(start_date, end_date)
+        frame = _filter_frame_by_dates(self._bars, dates, "index_daily", self._config)
+        frame = frame.drop_duplicates("date").drop(columns="asset")
+        codes = [index_codes] if isinstance(index_codes, str) else list(index_codes)
+        return pd.concat([frame.assign(index_code=code) for code in codes], ignore_index=True), []
+
+    def fetch_index_weights(self, index_codes, snapshot_dates):
+        self._maybe_raise("index_weight")
+        codes = [index_codes] if isinstance(index_codes, str) else list(index_codes)
+        dates = list(snapshot_dates)
+        assets = self._stock_list["asset"].to_list()
+        return pd.DataFrame([
+            {"date": pd.Timestamp(date), "index_code": code, "con_code": asset,
+             "weight": 100.0 / len(assets)}
+            for code in codes for date in dates for asset in assets
+        ]), []
 
     def fetch_bars_ext(
         self,

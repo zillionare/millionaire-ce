@@ -207,21 +207,17 @@ def test_init_wizard_dev_stub_step_five_imports_samples_without_download_dialog(
 @pytest.mark.e2e
 @pytest.mark.release_gate
 def test_init_wizard_download_success_reports_completed_progress():
+    stages = []
     with init_wizard_e2e_session() as session, patch(
         "quantide.data.init_data", lambda home, init_db=True: None
     ), patch(
-        "quantide.web.pages.init_wizard.stock_list.update", lambda *a, **kw: None
+        "quantide.web.pages.wizard_sync.calendar.update", lambda: None
     ), patch(
-        "quantide.web.pages.init_wizard.daily_bars.fetch_with_daily_progress", lambda *a, **kw: 0
-    ), patch(
-        "quantide.web.pages.init_wizard.calendar.update", lambda: None
-    ), patch(
-        "quantide.web.pages.init_wizard.calendar.last_trade_date",
+        "quantide.web.pages.wizard_sync.calendar.last_trade_date",
         lambda: datetime.date(2024, 12, 31),
     ), patch(
-        "quantide.web.pages.init_wizard.msg_hub.subscribe", lambda *args, **kwargs: None
-    ), patch(
-        "quantide.web.pages.init_wizard.msg_hub.unsubscribe", lambda *args, **kwargs: None
+        "quantide.service.data_sync.data_sync_service._run_stage",
+        side_effect=lambda stage, params: stages.append(stage),
     ):
         _advance_to_runtime_step(session.client, session.market_home)
 
@@ -240,7 +236,9 @@ def test_init_wizard_download_success_reports_completed_progress():
         )
         assert response.status_code == 200
         assert "sync-progress-bar" in response.text
-        assert "/init-wizard/sync-progress" in response.text
+        progress_script = session.client.get("/static/init-wizard-progress.js")
+        assert progress_script.status_code == 200
+        assert "/init-wizard/sync-progress" in progress_script.text
 
         progress_response = session.client.get("/init-wizard/sync-progress?force=true")
         assert progress_response.status_code == 200
@@ -248,6 +246,9 @@ def test_init_wizard_download_success_reports_completed_progress():
         assert payload["completed"] is True
         assert payload["error"] is None
         assert payload["stage"] == "初始化数据下载完成"
+        from quantide.data.models.sync_task import SYNC_STAGES
+        assert stages == list(SYNC_STAGES)
+
 
         state = init_wizard.get_state(force_refresh=True)
         assert state.init_completed is True

@@ -8,7 +8,6 @@ import itertools
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import arrow
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -19,9 +18,11 @@ from loguru import logger
 from numpy import ndarray
 
 from quantide.config.settings import get_epoch, get_timezone
+from quantide.core.atomic_files import atomic_path
 from quantide.core.enums import FrameType
 from quantide.core.singleton import singleton
 from quantide.data.fetchers.registry import get_data_fetcher
+from quantide.data.models.calendar_frames import CalendarFrameOperations
 
 #: 日历至少从该日期开始拉取，保证 ``day_shift`` 在配置 epoch 附近可用。
 _CALENDAR_FETCH_START = datetime.date(2005, 1, 1)
@@ -30,11 +31,30 @@ _CALENDAR_FETCH_START = datetime.date(2005, 1, 1)
 def _calendar_fetch_start() -> datetime.date:
     return min(get_epoch(), _CALENDAR_FETCH_START)
 
+
 Frame = datetime.datetime | datetime.date
 
 
+def _calendar_frames_by_count(self, end, n, frame_type):
+    """Slice completed daily, weekly or monthly frames."""
+    end_date = end if isinstance(end, datetime.date) else end.date()
+    if frame_type == FrameType.DAY:
+        arr = self.day_frames
+    elif frame_type == FrameType.WEEK:
+        arr = self.week_frames
+    else:
+        arr = self.month_frames
+
+    le = pc.less_equal(arr, end_date)
+    pos = int(pc.sum(pc.cast(le, pa.int32())).as_py())
+    start = max(0, pos - n)
+    sliced = arr.slice(start, pos - start).to_pylist()
+
+    return sliced
+
+
 @singleton
-class Calendar:
+class Calendar(CalendarFrameOperations):
     """交易日历
 
     提供交易日历以及相关计算，比如计算[start, end]之间有多少个交易周期，偏移等。
@@ -58,22 +78,14 @@ class Calendar:
         ]
 
         self.ticks = {
-            FrameType.MIN1: [
-                i for i in itertools.chain(range(571, 691), range(781, 901))
-            ],
-            FrameType.MIN5: [
-                i for i in itertools.chain(range(575, 695, 5), range(785, 905, 5))
-            ],
-            FrameType.MIN15: [
-                i for i in itertools.chain(range(585, 705, 15), range(795, 915, 15))
-            ],
+            FrameType.MIN1: [i for i in itertools.chain(range(571, 691), range(781, 901))],
+            FrameType.MIN5: [i for i in itertools.chain(range(575, 695, 5), range(785, 905, 5))],
+            FrameType.MIN15: [i for i in itertools.chain(range(585, 705, 15), range(795, 915, 15))],
             FrameType.MIN30: [
                 int(s / 100) * 60 + int(s % 100)
                 for s in [1000, 1030, 1100, 1130, 1330, 1400, 1430, 1500]
             ],
-            FrameType.MIN60: [
-                int(s / 100) * 60 + int(s % 100) for s in [1030, 1130, 1400, 1500]
-            ],
+            FrameType.MIN60: [int(s / 100) * 60 + int(s % 100) for s in [1030, 1130, 1400, 1500]],
         }
 
         self.day_frames = None
@@ -127,7 +139,8 @@ class Calendar:
         Args:
             calendar_data: 索引为 date, 字段 is_open, prev
         """
-        calendar_data.to_parquet(self.path)
+        with atomic_path(self.path) as temporary:
+            calendar_data.to_parquet(temporary)
 
     def load(self, path: str | Path) -> "Calendar":
         """加载日历数据，并构建日/周/月帧。
@@ -151,9 +164,7 @@ class Calendar:
             self.save(df)
 
         # 中文：基于 is_open==1 构建交易日、周、月帧（整数 YYYYMMDD）
-        self.day_frames, self.week_frames, self.month_frames = self._build_frames_arrow(
-            self._data
-        )
+        self.day_frames, self.week_frames, self.month_frames = self._build_frames_arrow(self._data)
         return self
 
     def update(self) -> None:
@@ -165,9 +176,7 @@ class Calendar:
         df = get_data_fetcher().fetch_calendar(_calendar_fetch_start())
         self._data = pa.Table.from_pandas(df)
         self.save(df)
-        self.day_frames, self.week_frames, self.month_frames = self._build_frames_arrow(
-            self._data
-        )
+        self.day_frames, self.week_frames, self.month_frames = self._build_frames_arrow(self._data)
 
     def _build_frames_arrow(self, table: pa.Table):
         """构建交易日、周、月帧"""
@@ -183,10 +192,7 @@ class Calendar:
         iso = idx.isocalendar()  # 返回 DataFrame，含 year/week/day
         week_key = iso.year * 100 + iso.week
         week_last = (
-            pd.Series(1, index=idx)
-            .groupby(week_key)
-            .apply(lambda x: x.index.max())
-            .sort_values()
+            pd.Series(1, index=idx).groupby(week_key).apply(lambda x: x.index.max()).sort_values()
         )
         week_frames = pa.array([d.date() for d in week_last.tolist()], type=pa.date32())
 
@@ -197,9 +203,7 @@ class Calendar:
             .apply(lambda x: x.index.max())
             .sort_values()
         )
-        month_frames = pa.array(
-            [d.date() for d in month_last.tolist()], type=pa.date32()
-        )
+        month_frames = pa.array([d.date() for d in month_last.tolist()], type=pa.date32())
 
         return day_frames, week_frames, month_frames
 
@@ -462,9 +466,7 @@ class Calendar:
         cnt = int(pc.sum(pc.cast(le, pa.int32())).as_py())
         return max(0, min(len(arr) - 1, cnt - 1))
 
-    def count_day_frames(
-        self, start: datetime.date | Arrow, end: datetime.date | Arrow
-    ) -> int:
+    def count_day_frames(self, start: datetime.date | Arrow, end: datetime.date | Arrow) -> int:
         """Calc trade days between start and end in close-to-close way.
 
         if start == end, this will returns 1. Both start/end will be aligned to open
@@ -508,7 +510,7 @@ class Calendar:
         end will be aligned to open trade day before calculation. After that, if start
          == end, this will returns 1
 
-        for examples, please refer to [count_day_frames][omicron.core.timeframe.TimeFrame.count_day_frames]
+        See `count_day_frames` for examples.
         args:
             start:
             end:
@@ -522,7 +524,7 @@ class Calendar:
         Both start and end will be aligned to open trade day before calculation. After
         that, if start == end, this will returns 1.
 
-        For examples, please refer to [count_day_frames][omicron.core.timeframe.TimeFrame.count_day_frames]
+        See `count_day_frames` for examples.
 
         Args:
             start:
@@ -661,254 +663,6 @@ class Calendar:
         minutes = tm.hour * 60 + tm.minute
         return 15 * 60 - 3 <= minutes < 15 * 60
 
-    def minute_frames_floor(self, ticks, moment):
-        """
-        对于分钟级的frame,返回它们与frame刻度向下对齐后的frame及日期进位。如果需要对齐到上一个交易
-        日，则进位为-1，否则为0.
-
-        Examples:
-            >>> ticks = [600, 630, 660, 690, 810, 840, 870, 900]
-            >>> minute_frames_floor(ticks, 545)
-            (900, -1)
-            >>> minute_frames_floor(ticks, 600)
-            (600, 0)
-            >>> minute_frames_floor(ticks, 605)
-            (600, 0)
-            >>> minute_frames_floor(ticks, 899)
-            (870, 0)
-            >>> minute_frames_floor(ticks, 900)
-            (900, 0)
-            >>> minute_frames_floor(ticks, 905)
-            (900, 0)
-
-        Args:
-            ticks (np.array or list): frames刻度
-            moment (int): 整数表示的分钟数，比如900表示15：00
-
-        Returns:
-            tuple, the first is the new moment, the second is carry-on
-        """
-        if moment < ticks[0]:
-            return ticks[-1], -1
-        # ’right' 相当于 ticks <= m
-        index = np.searchsorted(ticks, moment, side="right")
-        return ticks[index - 1], 0
-
-    def floor(self, moment: Frame, frame_type: FrameType) -> Frame:
-        """求`moment`在指定的`frame_type`中的下界
-
-        比如，如果`moment`为10:37，则当`frame_type`为30分钟时，对应的上界为10:00
-
-        Examples:
-            >>> # 如果moment为日期，则当成已收盘处理
-            >>> tf.floor(datetime.date(2005, 1, 7), FrameType.DAY)
-            datetime.date(2005, 1, 7)
-
-            >>> # moment指定的时间还未收盘，floor到上一个交易日
-            >>> tf.floor(datetime.datetime(2005, 1, 7, 14, 59), FrameType.DAY)
-            datetime.date(2005, 1, 6)
-
-            >>> tf.floor(datetime.date(2005, 1, 13), FrameType.WEEK)
-            datetime.date(2005, 1, 7)
-
-            >>> tf.floor(datetime.date(2005,2, 27), FrameType.MONTH)
-            datetime.date(2005, 1, 31)
-
-            >>> tf.floor(datetime.datetime(2005,1,5,14,59), FrameType.MIN30)
-            datetime.datetime(2005, 1, 5, 14, 30)
-
-            >>> tf.floor(datetime.datetime(2005, 1, 5, 14, 59), FrameType.MIN1)
-            datetime.datetime(2005, 1, 5, 14, 59)
-
-            >>> tf.floor(arrow.get('2005-1-5 14:59', tzinfo='Asia/Shanghai').datetime, FrameType.MIN1)
-            datetime.datetime(2005, 1, 5, 14, 59, tzinfo=tzfile('/usr/share/zoneinfo/Asia/Shanghai'))
-
-        Args:
-            moment:
-            frame_type:
-
-        Returns:
-
-        """
-        if frame_type in self.minute_level_frames:
-            tm, day_offset = self.minute_frames_floor(
-                self.ticks[frame_type], moment.hour * 60 + moment.minute
-            )
-            h, m = tm // 60, tm % 60
-            if self.day_shift(moment, 0) < moment.date() or day_offset == -1:
-                h = 15
-                m = 0
-                new_day = self.day_shift(moment, day_offset)
-            else:
-                new_day = moment.date()
-            return datetime.datetime(
-                new_day.year, new_day.month, new_day.day, h, m, tzinfo=moment.tzinfo
-            )
-
-        if type(moment) is datetime.date:
-            if moment == datetime.date.today():
-                moment = datetime.datetime.now(tz=get_timezone())
-            else:
-                moment = self.replace_time(moment, 15, 0)
-
-        # 如果是交易日，但还未收盘，对回测也适用
-        if self.is_trade_day(moment) and moment.hour * 60 + moment.minute < 900:
-            moment = self.day_shift(moment, -1)
-
-        if frame_type == FrameType.DAY:
-            arr = self.day_frames
-        elif frame_type == FrameType.WEEK:
-            arr = self.week_frames
-        elif frame_type == FrameType.MONTH:
-            arr = self.month_frames
-        else:  # pragma: no cover
-            raise ValueError(f"frame type {frame_type} not supported.")
-
-        result = arr.filter(pc.less_equal(arr, moment))
-        if len(result) == 0:
-            return arr[0].as_py()
-
-        return result[-1].as_py()
-
-    def last_min_frame(
-        self, day: str | datetime.date, frame_type: FrameType
-    ) -> Frame:
-        """获取`day`日周期为`frame_type`的结束frame。
-
-        Example:
-            >>> tf.last_min_frame(arrow.get('2020-1-5').date(), FrameType.MIN30)
-            datetime.datetime(2020, 1, 3, 15, 0, tzinfo=tzfile('/usr/share/zoneinfo/Asia/Shanghai'))
-
-        Args:
-            day:
-            frame_type:
-
-        Returns:
-
-        """
-        if isinstance(day, str):
-            day = arrow.get(day).date()
-        elif isinstance(day, datetime.datetime):
-            day = day.date()
-        elif isinstance(day, datetime.date):
-            day = day
-        else:
-            raise TypeError(f"{type(day)} is not supported.")
-
-        if not self.is_trade_day(day):
-            day = self.floor(day, FrameType.DAY)
-
-        if frame_type in self.minute_level_frames:
-            return datetime.datetime(
-                day.year,
-                day.month,
-                day.day,
-                hour=15,
-                minute=0,
-                tzinfo=get_timezone(),
-            )
-        else:  # pragma: no cover
-            raise ValueError(f"{frame_type} not supported")
-
-    def frame_len(self, frame_type: FrameType):
-        """返回以分钟为单位的frame长度。
-
-        对日线以上级别没有意义，但会返回240
-
-        Examples:
-            >>> tf.frame_len(FrameType.MIN5)
-            5
-
-        Args:
-            frame_type:
-
-        Returns:
-
-        """
-        if frame_type == FrameType.MIN1:
-            return 1
-        elif frame_type == FrameType.MIN5:
-            return 5
-        elif frame_type == FrameType.MIN15:
-            return 15
-        elif frame_type == FrameType.MIN30:
-            return 30
-        elif frame_type == FrameType.MIN60:
-            return 60
-        else:
-            return 240
-
-    def first_min_frame(
-        self, day: str | datetime.date, frame_type: FrameType
-    ) -> Frame:
-        """获取指定日期下，类型为 `frame_type` 的第一个frame。
-
-        每天的第一个分钟线、5分钟线、15分钟线都是不同的。比如，分钟线始于9:31, 5分钟线始于9:35。
-        Examples:
-            >>> tf.first_min_frame('2019-12-31', FrameType.MIN1)
-            datetime.datetime(2019, 12, 31, 9, 31, tzinfo=tzfile('/usr/share/zoneinfo/Asia/Shanghai'))
-
-        Args:
-            day: 日期
-            frame_type: 周期类型
-
-        Returns:
-
-        """
-        if isinstance(day, str):
-            day = arrow.get(day).datetime
-
-        if not self.is_trade_day(day):
-            floor_day = self.floor(day, FrameType.DAY)
-        else:
-            floor_day = day
-        if frame_type == FrameType.MIN1:
-            return datetime.datetime(
-                floor_day.year,
-                floor_day.month,
-                floor_day.day,
-                hour=9,
-                minute=31,
-                tzinfo=get_timezone(),
-            )
-        elif frame_type == FrameType.MIN5:
-            return datetime.datetime(
-                floor_day.year,
-                floor_day.month,
-                floor_day.day,
-                hour=9,
-                minute=35,
-                tzinfo=get_timezone(),
-            )
-        elif frame_type == FrameType.MIN15:
-            return datetime.datetime(
-                floor_day.year,
-                floor_day.month,
-                floor_day.day,
-                hour=9,
-                minute=45,
-                tzinfo=get_timezone(),
-            )
-        elif frame_type == FrameType.MIN30:
-            return datetime.datetime(
-                floor_day.year,
-                floor_day.month,
-                floor_day.day,
-                hour=10,
-                tzinfo=get_timezone(),
-            )
-        elif frame_type == FrameType.MIN60:
-            return datetime.datetime(
-                floor_day.year,
-                floor_day.month,
-                floor_day.day,
-                hour=10,
-                minute=30,
-                tzinfo=get_timezone(),
-            )
-        else:  # pragma: no cover
-            raise ValueError(f"{frame_type} not supported")
-
     def get_frames(
         self, start: Frame, end: Frame, frame_type: FrameType
     ) -> list[datetime.date | datetime.datetime]:
@@ -919,8 +673,8 @@ class Calendar:
         Example:
             >>> start = datetime.datetime(2020, 1, 13, 10, 0, tzinfo=get_timezone())
             >>> end = datetime.datetime(2020, 1, 13, 13, 30, tzinfo=get_timezone())
-            >>> tf.get_frames(start, end, FrameType.MIN30)
-            [datetime.datetime(2020,1,13,10,0), datetime.datetime(2020,1,13,10,30), datetime.datetime(2020,1,13,11,0), datetime.datetime(2020,1,13,11,30), datetime.datetime(2020,1,13,13,30)]
+            >>> len(tf.get_frames(start, end, FrameType.MIN30))
+            5
 
         Args:
             start:
@@ -955,20 +709,7 @@ class Calendar:
             List[datetime.date|datetime.datetime]: 以end为结束点,周期为frame_type的n个frame
         """
         if frame_type in (FrameType.DAY, FrameType.WEEK, FrameType.MONTH):
-            end_date = end if isinstance(end, datetime.date) else end.date()
-            if frame_type == FrameType.DAY:
-                arr = self.day_frames
-            elif frame_type == FrameType.WEEK:
-                arr = self.week_frames
-            else:
-                arr = self.month_frames
-
-            le = pc.less_equal(arr, end_date)
-            pos = int(pc.sum(pc.cast(le, pa.int32())).as_py())
-            start = max(0, pos - n)
-            sliced = arr.slice(start, pos - start).to_pylist()
-
-            return sliced
+            return _calendar_frames_by_count(self, end, n, frame_type)
         elif frame_type in {
             FrameType.MIN1,
             FrameType.MIN5,
@@ -984,9 +725,7 @@ class Calendar:
                 n_days,
                 FrameType.DAY,
             )
-            days = np.array(
-                np.repeat(days, len(self.ticks[frame_type])), dtype="datetime64[ms]"
-            )
+            days = np.array(np.repeat(days, len(self.ticks[frame_type])), dtype="datetime64[ms]")
 
             np_timedeltas = [np.timedelta64(t, "m") for t in ticks]
 
@@ -1000,56 +739,9 @@ class Calendar:
                 return result.tolist()
 
             # 回补时区信息
-            return [
-                x.astype(datetime.datetime).replace(tzinfo=end.tzinfo) for x in result
-            ]
+            return [x.astype(datetime.datetime).replace(tzinfo=end.tzinfo) for x in result]
         else:  # pragma: no cover
             raise ValueError(f"{frame_type} not support yet")
-
-    def ceiling(self, moment: Frame, frame_type: FrameType) -> Frame:
-        """求`moment`所在类型为`frame_type`周期的上界
-
-        比如`moment`为14:59分，如果`frame_type`为30分钟，则它的上界应该为15:00
-
-        Example:
-            >>> tf.ceiling(datetime.date(2005, 1, 7), FrameType.DAY)
-            datetime.date(2005, 1, 7)
-
-            >>> tf.ceiling(datetime.date(2005, 1, 4), FrameType.WEEK)
-            datetime.date(2005, 1, 7)
-
-            >>> tf.ceiling(datetime.date(2005,1,7), FrameType.WEEK)
-            datetime.date(2005, 1, 7)
-
-            >>> tf.ceiling(datetime.date(2005,1 ,1), FrameType.MONTH)
-            datetime.date(2005, 1, 31)
-
-            >>> tf.ceiling(datetime.datetime(2005,1,5,14,59), FrameType.MIN30)
-            datetime.datetime(2005, 1, 5, 15, 0)
-
-            >>> tf.ceiling(datetime.datetime(2005, 1, 5, 14, 59), FrameType.MIN1)
-            datetime.datetime(2005, 1, 5, 14, 59)
-
-            >>> tf.ceiling(arrow.get('2005-1-5 14:59', tzinfo='Asia/Shanghai').datetime, FrameType.MIN1)
-            datetime.datetime(2005, 1, 5, 14, 59, tzinfo=tzfile('/usr/share/zoneinfo/Asia/Shanghai'))
-
-        Args:
-            moment (datetime.datetime): [description]
-            frame_type (FrameType): [description]
-
-        Returns:
-            [type]: [description]
-        """
-        if frame_type in self.day_level_frames and type(moment) is datetime.datetime:
-            moment = moment.date()
-
-        floor = self.floor(moment, frame_type)
-        if floor == moment:
-            return moment
-        elif floor > moment:
-            return floor
-        else:
-            return self.shift(floor, 1, frame_type)
 
     def replace_time(
         self,
@@ -1088,9 +780,7 @@ class Calendar:
             tzinfo=tz,
         )
 
-    def replace_date(
-        self, dtm: datetime.datetime, dt: datetime.date
-    ) -> datetime.datetime:
+    def replace_date(self, dtm: datetime.datetime, dt: datetime.date) -> datetime.datetime:
         """将`dtm`变量的日期更换为`dt`指定的日期
 
         Example:
@@ -1109,9 +799,7 @@ class Calendar:
             dt.year, dt.month, dt.day, dtm.hour, dtm.minute, dtm.second, dtm.microsecond
         )
 
-    def get_trade_dates(
-        self, start: datetime.date, end: datetime.date
-    ) -> list[datetime.date]:
+    def get_trade_dates(self, start: datetime.date, end: datetime.date) -> list[datetime.date]:
         """获取指定日期范围内所有的交易日
 
         Args:
@@ -1141,9 +829,7 @@ class Calendar:
         filtered_dates = filtered_table.column("date")
         return [date.as_py() for date in filtered_dates]
 
-    def count_trading_days(
-        self, start: datetime.date, end: datetime.date
-    ) -> int:
+    def count_trading_days(self, start: datetime.date, end: datetime.date) -> int:
         """[start, end] 区间内的交易日数(含起止)。
 
         spec FR-014 命名;等价于 count_day_frames。

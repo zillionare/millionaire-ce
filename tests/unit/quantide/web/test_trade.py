@@ -1,3 +1,5 @@
+from quantide.web.services import trade_quote_view as trade_quotes
+from tests.web_assets import script_sources
 """测试交易模块页面"""
 import datetime
 import re
@@ -1072,6 +1074,7 @@ class TestLoginRoutes:
         """验证限价输入框使用 placeholder，并提供涨跌幅提示区域。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert 'id="price-input"' in text
@@ -1566,6 +1569,7 @@ class TestLoginRoutes:
         """验证下单面板包含交互式 JavaScript."""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
         assert response.status_code == 200
         # 检查 JS 函数存在
         assert "updatePriceMode" in text
@@ -1578,6 +1582,7 @@ class TestLoginRoutes:
         """验证未激活方向按钮先切状态，再由当前激活按钮提交。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert "function handleTradeSubmitIntent(nextSide)" in text
@@ -1631,6 +1636,7 @@ class TestLoginRoutes:
         """双击持仓行：填写名称/价格，可售时切到卖出并带入数量。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert "const canSell = !isNaN(availLots) && availLots > 0;" in text
@@ -1642,6 +1648,7 @@ class TestLoginRoutes:
         """验证股票代码输入框带有搜索下拉功能 (issue #9)."""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
         assert response.status_code == 200
         # 显示输入框
         assert 'id="asset-display"' in text
@@ -1696,6 +1703,7 @@ class TestLoginRoutes:
         """验证 speed dial 按钮使用正方形布局。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert "reference-price-btn" in text
@@ -1719,6 +1727,7 @@ class TestLoginRoutes:
         """验证点击涨停和跌停按钮会自动切换到市价委托。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert "function getQuickPriceBase()" in text
@@ -1733,6 +1742,7 @@ class TestLoginRoutes:
         """市价单也应用现价/昨收估算数量，而不是固定按 1 元计算。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert "function getEstimatePrice()" in text
@@ -1745,6 +1755,7 @@ class TestLoginRoutes:
         """验证现价轮询与 speed dial 可点击状态由选股控制。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert "function refreshLiveQuote(asset)" in text
@@ -1767,6 +1778,7 @@ class TestLoginRoutes:
         """验证昨收/MA/现价按钮可回填限价输入框。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert "document.querySelectorAll('.reference-price-btn').forEach(function(btn)" in text
@@ -1781,10 +1793,10 @@ class TestLoginRoutes:
 
         from quantide.web.pages import trade_main as trade_page
 
-        monkeypatch.setattr(trade_page, "_maybe_start_live_quote", lambda: None)
-        monkeypatch.setattr(trade_page.market_data_hub, "get_quote", lambda asset: None)
+        monkeypatch.setattr(trade_quotes, "_maybe_start_live_quote", lambda: None)
+        monkeypatch.setattr(trade_quotes.market_data_hub, "get_quote", lambda asset: None)
         monkeypatch.setattr(
-            trade_page.market_data_hub,
+            trade_quotes.market_data_hub,
             "snapshot",
             lambda symbols: {
                 symbols[0]: SimpleNamespace(price=13.45),
@@ -1796,9 +1808,9 @@ class TestLoginRoutes:
         """验证 trade live quote 接口优先返回 live quote 当前价。"""
         from quantide.web.pages import trade_main as trade_page
 
-        monkeypatch.setattr(trade_page, "_maybe_start_live_quote", lambda: None)
+        monkeypatch.setattr(trade_quotes, "_maybe_start_live_quote", lambda: None)
         monkeypatch.setattr(
-            trade_page.market_data_hub,
+            trade_quotes.market_data_hub,
             "get_quote",
             lambda asset: {"price": 12.41} if asset == "000001.SZ" else None,
         )
@@ -1817,9 +1829,9 @@ class TestLoginRoutes:
         """MarketDataHub 无快照时不把昨收伪装成现价。"""
         from quantide.web.pages import trade_main as trade_page
 
-        monkeypatch.setattr(trade_page, "_maybe_start_live_quote", lambda: None)
-        monkeypatch.setattr(trade_page.market_data_hub, "get_quote", lambda asset: None)
-        monkeypatch.setattr(trade_page, "_resolve_trade_reference_close", lambda asset: 11.23)
+        monkeypatch.setattr(trade_quotes, "_maybe_start_live_quote", lambda: None)
+        monkeypatch.setattr(trade_quotes.market_data_hub, "get_quote", lambda asset: None)
+        monkeypatch.setattr(trade_quotes, "_resolve_trade_reference_close", lambda asset: 11.23)
 
         response = test_client.get("/trade/live-quote?asset=000001.SZ")
         payload = response.json()
@@ -1832,6 +1844,7 @@ class TestLoginRoutes:
         """验证股票搜索支持回车确认首个结果。"""
         response = test_client.get("/trade")
         text = response.text
+        text += script_sources(text)
 
         assert response.status_code == 200
         assert "assetDisplay.addEventListener('keydown'" in text
@@ -1865,7 +1878,7 @@ class TestLoginRoutes:
 
         monkeypatch.setattr(trade_page.stock_list, "fuzzy_search", lambda *args, **kwargs: result_df)
         monkeypatch.setattr(
-            trade_page.daily_bars,
+            trade_quotes.daily_bars,
             "get_price",
             lambda *args, **kwargs: (10.0, 11.0, 9.0),
         )
@@ -1898,8 +1911,8 @@ class TestLoginRoutes:
             }
         )
 
-        monkeypatch.setattr(trade_page.daily_bars, "get_bars", lambda *args, **kwargs: bars)
-        monkeypatch.setattr(trade_page, "_resolve_live_current_price", lambda asset: 0.0)
+        monkeypatch.setattr(trade_quotes.daily_bars, "get_bars", lambda *args, **kwargs: bars)
+        monkeypatch.setattr(trade_quotes, "_resolve_live_current_price", lambda asset: 0.0)
 
         response = test_client.get("/trade/asset-stats?asset=000001.SZ")
         payload = response.json()
@@ -1921,12 +1934,12 @@ class TestLoginRoutes:
         from quantide.web.pages import trade_main as trade_page
 
         monkeypatch.setattr(
-            trade_page.daily_bars,
+            trade_quotes.daily_bars,
             "get_bars",
             lambda *args, **kwargs: pl.DataFrame(),
         )
         monkeypatch.setattr(
-            trade_page.calendar,
+            trade_quotes.calendar,
             "get_trade_dates",
             lambda start, end: [datetime.date(2026, 5, 19), datetime.date(2026, 5, 20)],
         )
@@ -1944,8 +1957,8 @@ class TestLoginRoutes:
                 )
                 return frame, []
 
-        monkeypatch.setattr(trade_page, "get_data_fetcher", lambda: _Fetcher())
-        monkeypatch.setattr(trade_page, "_resolve_live_current_price", lambda asset: 0.0)
+        monkeypatch.setattr(trade_quotes, "get_data_fetcher", lambda: _Fetcher())
+        monkeypatch.setattr(trade_quotes, "_resolve_live_current_price", lambda asset: 0.0)
 
         response = test_client.get("/trade/asset-stats?asset=000001.SZ")
         payload = response.json()
@@ -1977,8 +1990,8 @@ class TestLoginRoutes:
         def _boom(*args, **kwargs):
             raise AssertionError("search must not fetch prices")
 
-        monkeypatch.setattr(trade_page.daily_bars, "get_price", _boom)
-        monkeypatch.setattr(trade_page, "_load_trade_reference_bars", _boom)
+        monkeypatch.setattr(trade_quotes.daily_bars, "get_price", _boom)
+        monkeypatch.setattr(trade_quotes, "_load_trade_reference_bars", _boom)
 
         response = test_client.get("/trade/search?q=000")
 

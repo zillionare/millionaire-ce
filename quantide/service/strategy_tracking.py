@@ -339,9 +339,7 @@ class TrackingStore:
             result.append(data)
         return result
 
-    def latest_daily(
-        self, runtime_id: str, source: str
-    ) -> dict[str, Any] | None:
+    def latest_daily(self, runtime_id: str, source: str) -> dict[str, Any] | None:
         rows = self.list_daily(runtime_id=runtime_id, source=source, limit=1)
         return rows[-1] if rows else None
 
@@ -361,10 +359,6 @@ class TrackingStore:
         target_bar: datetime.datetime | None = None,
     ) -> dict[str, Any]:
         """Insert an intent once and return the durable row on every retry."""
-        intent_id = uuid.uuid5(
-            uuid.NAMESPACE_URL, f"{runtime_id}:next_open:{intent_key}"
-        ).hex
-        created = datetime.datetime.now().isoformat(timespec="seconds")
         with self._connect() as connection:
             connection.execute(
                 """
@@ -376,7 +370,7 @@ class TrackingStore:
                  ON CONFLICT(runtime_id, intent_key) DO NOTHING
                 """,
                 (
-                    intent_id,
+                    uuid.uuid5(uuid.NAMESPACE_URL, f"{runtime_id}:next_open:{intent_key}").hex,
                     intent_key,
                     runtime_id,
                     portfolio_id,
@@ -388,12 +382,11 @@ class TrackingStore:
                     method,
                     _json(list(args)),
                     _json(kwargs),
-                    created,
+                    datetime.datetime.now().isoformat(timespec="seconds"),
                 ),
             )
             row = connection.execute(
-                "SELECT * FROM strategy_next_open_intents "
-                "WHERE runtime_id=? AND intent_key=?",
+                "SELECT * FROM strategy_next_open_intents WHERE runtime_id=? AND intent_key=?",
                 (runtime_id, intent_key),
             ).fetchone()
         if row is None:  # pragma: no cover - protected by the transaction
@@ -428,9 +421,7 @@ class TrackingStore:
             ).fetchall()
         return [self._intent_row(row) for row in rows]
 
-    def mark_next_open_intent(
-        self, intent_id: str, *, status: str, error: str = ""
-    ) -> None:
+    def mark_next_open_intent(self, intent_id: str, *, status: str, error: str = "") -> None:
         processed_at = datetime.datetime.now().isoformat(timespec="seconds")
         with self._connect() as connection:
             connection.execute(

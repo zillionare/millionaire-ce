@@ -14,6 +14,10 @@ Targets uncovered lines in `quantide/web/pages/init_wizard.py`:
 - `handle_download` dev-stub exception + non-dev-stub save exception (lines 1847-1882)
 """
 
+from quantide.web.pages import wizard_components
+from quantide.web.pages import wizard_step_views
+
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -68,7 +72,7 @@ def test_form_hint_renders_paragraph():
 
 def test_get_step_meta_dev_stub_step4_returns_stub_dict():
     """[AC-NFR1101-01] When dev_stubs_enabled and step==4, returns stub-specific dict."""
-    with patch.object(iw_mod, "dev_stubs_enabled", return_value=True):
+    with patch.object(wizard_components, "dev_stubs_enabled", return_value=True):
         meta = _get_step_meta(4)
     assert meta["title"] == "开发 Stub 交易网关"
     assert "stub" in meta["description"] or "Stub" in meta["description"]
@@ -76,7 +80,7 @@ def test_get_step_meta_dev_stub_step4_returns_stub_dict():
 
 def test_get_step_meta_dev_stub_step5_returns_stub_dict():
     """[AC-NFR1101-01] When dev_stubs_enabled and step==5, returns stub-specific dict."""
-    with patch.object(iw_mod, "dev_stubs_enabled", return_value=True):
+    with patch.object(wizard_components, "dev_stubs_enabled", return_value=True):
         meta = _get_step_meta(5)
     assert "样本数据" in meta["title"]
 
@@ -88,7 +92,7 @@ def test_get_step_meta_dev_stub_step5_returns_stub_dict():
 
 def test_step1_welcome_dev_stub_text_branch():
     """[AC-NFR1101-01] When dev_stubs_enabled, Step1_Welcome uses stub-specific text."""
-    with patch.object(iw_mod, "dev_stubs_enabled", return_value=True):
+    with patch.object(wizard_step_views, "dev_stubs_enabled", return_value=True):
         out = Step1_Welcome()
     s = str(out)
     assert "开发 Stub" in s
@@ -102,7 +106,7 @@ def test_step1_welcome_dev_stub_text_branch():
 
 def test_step5_data_setup_invalid_years_falls_back_to_one():
     """[AC-NFR1101-01] Non-numeric history_years triggers ValueError -> years=1 fallback."""
-    with patch.object(iw_mod, "dev_stubs_enabled", return_value=False):
+    with patch.object(wizard_step_views, "dev_stubs_enabled", return_value=False):
         # Provide history_years as non-numeric to hit the except branch at 938-939.
         state = {"history_years": "garbage"}
         out = Step5_DataSetup(state)

@@ -162,10 +162,7 @@ def list_backtest_logs(portfolio_id: str, limit: int = 200) -> list[dict[str, st
         return []
 
     logs_df = logs_df.sort(["dt", "event_id"]).tail(limit)
-    return [
-        _entry_to_row(BacktestLogEntry(**row))
-        for row in logs_df.iter_rows(named=True)
-    ]
+    return [_entry_to_row(BacktestLogEntry(**row)) for row in logs_df.iter_rows(named=True)]
 
 
 def load_saved_backtest_logs(

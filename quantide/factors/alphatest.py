@@ -42,6 +42,20 @@ DEFAULT_HOLDING_DAYS = (1, 2, 3, 5, 10, 20)
 MIN_CROSS_SECTION = 100
 
 
+def _append_decile_summaries(buckets, totals, result):
+    """Append decile summaries."""
+    for bucket in range(1, buckets + 1):
+        values = totals[bucket]
+        mean = float(np.mean(values)) if values else float("nan")
+        result.append(
+            DecileBucket(
+                bucket=bucket,
+                n_samples=len(values),
+                mean_forward=mean,
+            )
+        )
+
+
 @dataclass(frozen=True)
 class RankIcSummary:
     """截面 RankIC 汇总。"""
@@ -269,16 +283,7 @@ def decile_profile(
             if picked.size:
                 totals[bucket].extend(picked.tolist())
     result: list[DecileBucket] = []
-    for bucket in range(1, buckets + 1):
-        values = totals[bucket]
-        mean = float(np.mean(values)) if values else float("nan")
-        result.append(
-            DecileBucket(
-                bucket=bucket,
-                n_samples=len(values),
-                mean_forward=mean,
-            )
-        )
+    _append_decile_summaries(buckets, totals, result)
     return result
 
 
@@ -310,7 +315,11 @@ def _batch_stats(
     df: pl.DataFrame,
     factors: list[str],
     buckets: int = 10,
-) -> tuple[dict[str, list[float]], dict[int, dict[str, list[float]]], dict[str, list[tuple[int, int, float]]]]:
+) -> tuple[
+    dict[str, list[float]],
+    dict[int, dict[str, list[float]]],
+    dict[str, list[tuple[int, int, float]]],
+]:
     """一次遍历算出多因子的逐日 RankIC、分年 RankIC 与十分位收益。
 
     Args:
@@ -321,47 +330,10 @@ def _batch_stats(
     Returns:
         tuple: (逐日 IC, 分年 IC, 十分位累计（因子 → [(分组, 样本数, 收益和)])。
     """
-    ics: dict[str, list[float]] = {f: [] for f in factors}
-    year_ics: dict[int, dict[str, list[float]]] = {}
-    deciles: dict[str, list[tuple[int, int, float]]] = {f: [] for f in factors}
-    sums: dict[str, np.ndarray] = {f: np.zeros(buckets + 1) for f in factors}
-    counts: dict[str, np.ndarray] = {f: np.zeros(buckets + 1) for f in factors}
-
+    batch = _FactorBatch(factors, buckets)
     for _, group in df.group_by("date"):
-        if group.height < MIN_CROSS_SECTION:
-            continue
-        x = group.select(factors).to_numpy().astype(float)
-        y = group["forward"].to_numpy().astype(float)
-        mask = ~np.isnan(x).any(axis=1) & ~np.isnan(y)
-        if int(mask.sum()) < MIN_CROSS_SECTION:
-            continue
-        x = x[mask]
-        y = y[mask]
-        ranks = np.argsort(np.argsort(x, axis=0), axis=0).astype(float)
-        # Spearman：因子秩与收益秩的相关
-        y_ranks = np.argsort(np.argsort(y)).astype(float)
-        year = group["date"][0].year if hasattr(group["date"][0], "year") else None
-        for col_index, factor in enumerate(factors):
-            r = ranks[:, col_index]
-            if r.std() < 1e-9 or y_ranks.std() < 1e-9:
-                continue
-            value = float(np.corrcoef(r, y_ranks)[0, 1])
-            ics[factor].append(value)
-            if year is not None:
-                year_ics.setdefault(int(year), {}).setdefault(factor, []).append(value)
-            labels = np.floor(r / len(r) * buckets).astype(int) + 1
-            for bucket in range(1, buckets + 1):
-                picked = y[labels == bucket]
-                if picked.size:
-                    sums[factor][bucket] += float(picked.sum())
-                    counts[factor][bucket] += int(picked.size)
-    for factor in factors:
-        deciles[factor] = [
-            (bucket, int(counts[factor][bucket]), float(sums[factor][bucket]))
-            for bucket in range(1, buckets + 1)
-            if counts[factor][bucket]
-        ]
-    return ics, year_ics, deciles
+        batch.add(group)
+    return batch.result()
 
 
 def study_factors(
@@ -465,9 +437,7 @@ def load_factor_panel(
     from quantide.data.models.daily_bars import daily_bars
     from quantide.factors.alpha import compute_alpha_features
 
-    raw = daily_bars.get_bars_in_range(
-        start, end, assets=assets, adjust=None, eager_mode=True
-    )
+    raw = daily_bars.get_bars_in_range(start, end, assets=assets, adjust=None, eager_mode=True)
     if isinstance(raw, pl.LazyFrame):
         raw = raw.collect()
     if raw is None or raw.is_empty():
@@ -530,9 +500,7 @@ def main(argv: list[str] | None = None) -> int:
     for factor in args.factors:
         for holding in args.holdings:
             try:
-                results.append(
-                    study_single_factor(panel, factor, holding, price=args.price)
-                )
+                results.append(study_single_factor(panel, factor, holding, price=args.price))
             except KeyError as exc:
                 print(f"跳过 {factor}: {exc}")
     if args.json:
@@ -540,6 +508,60 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(format_report(results))
     return 0
+
+
+class _FactorBatch:
+    """Accumulate per-day IC, yearly IC and bucket returns in a single traversal."""
+
+    def __init__(self, factors, buckets):
+        self.factors, self.buckets = factors, buckets
+        self.ics = {factor: [] for factor in factors}
+        self.year_ics = {}
+        self.sums = {factor: np.zeros(buckets + 1) for factor in factors}
+        self.counts = {factor: np.zeros(buckets + 1) for factor in factors}
+
+    def add(self, group):
+        if group.height < MIN_CROSS_SECTION:
+            return
+        x = group.select(self.factors).to_numpy().astype(float)
+        y = group["forward"].to_numpy().astype(float)
+        mask = ~np.isnan(x).any(axis=1) & ~np.isnan(y)
+        if int(mask.sum()) < MIN_CROSS_SECTION:
+            return
+        x = x[mask]
+        y = y[mask]
+        ranks = np.argsort(np.argsort(x, axis=0), axis=0).astype(float)
+        # Spearman：因子秩与收益秩的相关
+        y_ranks = np.argsort(np.argsort(y)).astype(float)
+        year = group["date"][0].year if hasattr(group["date"][0], "year") else None
+        for col_index, factor in enumerate(self.factors):
+            r = ranks[:, col_index]
+            if r.std() < 1e-9 or y_ranks.std() < 1e-9:
+                continue
+            value = float(np.corrcoef(r, y_ranks)[0, 1])
+            self.ics[factor].append(value)
+            if year is not None:
+                self.year_ics.setdefault(int(year), {}).setdefault(factor, []).append(value)
+            labels = np.floor(r / len(r) * self.buckets).astype(int) + 1
+            self._add_buckets(factor, labels, y)
+
+    def _add_buckets(self, factor, labels, y):
+        for bucket in range(1, self.buckets + 1):
+            picked = y[labels == bucket]
+            if picked.size:
+                self.sums[factor][bucket] += float(picked.sum())
+                self.counts[factor][bucket] += int(picked.size)
+
+    def result(self):
+        deciles = {
+            factor: [
+                (bucket, int(self.counts[factor][bucket]), float(self.sums[factor][bucket]))
+                for bucket in range(1, self.buckets + 1)
+                if self.counts[factor][bucket]
+            ]
+            for factor in self.factors
+        }
+        return self.ics, self.year_ics, deciles
 
 
 if __name__ == "__main__":  # pragma: no cover

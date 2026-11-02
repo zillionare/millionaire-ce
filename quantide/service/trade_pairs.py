@@ -95,53 +95,7 @@ def build_trade_pairs(portfolio_id: str) -> list[TradePair]:
     segments: list[dict[str, Any]] = []
 
     for row in trades_df.iter_rows(named=True):
-        asset = str(row.get("asset") or "")
-        side = int(row.get("side") or 0)
-        shares = float(row.get("shares") or 0)
-        price = float(row.get("price") or 0)
-        fee = float(row.get("fee") or 0)
-        tm = _trade_dt(row.get("tm"))
-        if tm is None or shares <= 0:
-            continue
-        if side == int(OrderSide.BUY):
-            lots.setdefault(asset, []).append(
-                {
-                    "tid": str(row.get("tid") or ""),
-                    "tm": tm,
-                    "shares": shares,
-                    "price": price,
-                    "fee": fee,
-                }
-            )
-            continue
-        if side != int(OrderSide.SELL):
-            continue
-
-        remaining = shares
-        queue = lots.setdefault(asset, [])
-        while remaining > 1e-9 and queue:
-            lot = queue[0]
-            take = min(remaining, lot["shares"])
-            buy_fee_share = lot["fee"] * (take / lot["shares"])
-            segments.append(
-                {
-                    "asset": asset,
-                    "buy_tid": lot["tid"],
-                    "sell_tid": str(row.get("tid") or ""),
-                    "buy_tm": lot["tm"],
-                    "sell_tm": tm,
-                    "shares": take,
-                    "buy_price": lot["price"],
-                    "sell_price": price,
-                    "buy_fee": buy_fee_share,
-                    "sell_fee": fee * (take / shares),
-                }
-            )
-            lot["shares"] -= take
-            lot["fee"] -= buy_fee_share
-            remaining -= take
-            if lot["shares"] <= 1e-9:
-                queue.pop(0)
+        _accumulate_trade(row, lots, segments)
 
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for segment in segments:
@@ -156,6 +110,77 @@ def build_trade_pairs(portfolio_id: str) -> list[TradePair]:
 
     unrealized = _unrealized_pnl_map(portfolio_id)
     pairs: list[TradePair] = []
+    _append_trade_pairs(grouped, pairs, lots, unrealized)
+
+    pairs.sort(key=lambda pair: pair.buy_tm)
+    return pairs
+
+
+def _holding_days(buy_tm: datetime.datetime, sell_tm: datetime.datetime | None) -> int | None:
+    """计算买入到卖出的自然日间隔。"""
+    if sell_tm is None:
+        return None
+    return (sell_tm.date() - buy_tm.date()).days
+
+
+def _match_sale(asset, shares, price, fee, tm, row, lots, segments):
+    """Consume buy lots in FIFO order and allocate both sides of fees."""
+    remaining = shares
+    queue = lots.setdefault(asset, [])
+    while remaining > 1e-9 and queue:
+        lot = queue[0]
+        take = min(remaining, lot["shares"])
+        buy_fee_share = lot["fee"] * (take / lot["shares"])
+        segments.append(
+            {
+                "asset": asset,
+                "buy_tid": lot["tid"],
+                "sell_tid": str(row.get("tid") or ""),
+                "buy_tm": lot["tm"],
+                "sell_tm": tm,
+                "shares": take,
+                "buy_price": lot["price"],
+                "sell_price": price,
+                "buy_fee": buy_fee_share,
+                "sell_fee": fee * (take / shares),
+            }
+        )
+        lot["shares"] -= take
+        lot["fee"] -= buy_fee_share
+        remaining -= take
+        if lot["shares"] <= 1e-9:
+            queue.pop(0)
+
+
+def _accumulate_trade(row, lots, segments):
+    """Normalize and add one valid trade to FIFO accounting."""
+    asset = str(row.get("asset") or "")
+    side = int(row.get("side") or 0)
+    shares = float(row.get("shares") or 0)
+    price = float(row.get("price") or 0)
+    fee = float(row.get("fee") or 0)
+    tm = _trade_dt(row.get("tm"))
+    if tm is None or shares <= 0:
+        return
+    if side == int(OrderSide.BUY):
+        lots.setdefault(asset, []).append(
+            {
+                "tid": str(row.get("tid") or ""),
+                "tm": tm,
+                "shares": shares,
+                "price": price,
+                "fee": fee,
+            }
+        )
+        return
+    if side != int(OrderSide.SELL):
+        return
+
+    _match_sale(asset, shares, price, fee, tm, row, lots, segments)
+
+
+def _append_trade_pairs(grouped, pairs, lots, unrealized):
+    """Render matched sales and remaining open lots as report records."""
     for item in grouped.values():
         buy_amount = item["shares"] * item["buy_price"]
         sell_amount = item["shares"] * item["sell_price"]
@@ -207,15 +232,3 @@ def build_trade_pairs(portfolio_id: str) -> list[TradePair]:
                     unrealized_pnl=unrealized.get(asset),
                 )
             )
-
-    pairs.sort(key=lambda pair: pair.buy_tm)
-    return pairs
-
-
-def _holding_days(
-    buy_tm: datetime.datetime, sell_tm: datetime.datetime | None
-) -> int | None:
-    """计算买入到卖出的自然日间隔。"""
-    if sell_tm is None:
-        return None
-    return (sell_tm.date() - buy_tm.date()).days

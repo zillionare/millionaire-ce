@@ -23,7 +23,9 @@ def build_wizard_steps(current_step: int) -> list[dict[str, int | str | bool]]:
     """Build the shared step progress structure for the init wizard."""
     steps: list[dict[str, int | str | bool]] = []
     for step_id, name in WIZARD_STEP_DEFINITIONS:
-        completed = current_step >= step_id if step_id == WIZARD_FINAL_STEP else current_step > step_id
+        completed = (
+            current_step >= step_id if step_id == WIZARD_FINAL_STEP else current_step > step_id
+        )
         steps.append({"id": step_id, "name": name, "completed": completed})
     return steps
 

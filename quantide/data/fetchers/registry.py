@@ -70,9 +70,7 @@ def get_data_fetcher(name: str | None = None) -> DataFetcherPort:
     from quantide.config.settings import get_data_source
 
     registry = register_builtin_fetchers()
-    resolved_name = str(
-        name or get_data_source() or registry.default_name or ""
-    ).strip().lower()
+    resolved_name = str(name or get_data_source() or registry.default_name or "").strip().lower()
     return registry.get(resolved_name)
 
 

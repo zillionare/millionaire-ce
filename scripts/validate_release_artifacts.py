@@ -68,9 +68,7 @@ def _validate_artifact(path: Path) -> list[str]:
             continue
         match = PRIVATE_RISK_MARKER_RE.search(text)
         if match:
-            errors.append(
-                f"{path.name}: private risk ID marker {match.group(0)!r} in {name}"
-            )
+            errors.append(f"{path.name}: private risk ID marker {match.group(0)!r} in {name}")
     return errors
 
 
@@ -83,8 +81,7 @@ def main() -> int:
     artifacts = sorted(
         path
         for path in args.dist_dir.glob("*")
-        if path.suffix == ".whl"
-        or path.name.endswith((".tar.gz", ".tar.bz2", ".tar.xz"))
+        if path.suffix == ".whl" or path.name.endswith((".tar.gz", ".tar.bz2", ".tar.xz"))
     )
     if not artifacts:
         parser.error(f"no wheel or sdist found in {args.dist_dir}")

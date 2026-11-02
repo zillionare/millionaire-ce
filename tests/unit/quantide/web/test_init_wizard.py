@@ -1,3 +1,9 @@
+
+from quantide.web.pages import wizard_layout
+from quantide.web.pages import wizard_state
+from quantide.web.pages import wizard_step_views
+from quantide.web.pages import wizard_sync
+
 import datetime
 from types import SimpleNamespace
 
@@ -11,7 +17,7 @@ from quantide.web.pages import init_wizard as init_wizard_page
 @pytest.fixture(autouse=True)
 def private_edition_wizard_cases(monkeypatch):
     """Keep legacy gateway-form cases exercising the shared private path."""
-    monkeypatch.setattr(init_wizard_page, "supports_live_trading", lambda: True)
+    monkeypatch.setattr('quantide.config.features.get_runtime_edition', lambda: 'millionaire')
 
 
 class FakeRequest:
@@ -152,7 +158,7 @@ class FakeInitWizard:
 
 @pytest.fixture(autouse=True)
 def reset_init_wizard_page_state():
-    init_wizard_page._sync_status = {
+    wizard_state._sync_status = {
         "is_running": False,
         "current_task": "",
         "progress": 0,
@@ -164,7 +170,7 @@ def reset_init_wizard_page_state():
     init_wizard_page._set_download_error(None)
     init_wizard_page._set_reconfigure_mode(False)
     yield
-    init_wizard_page._sync_status = {
+    wizard_state._sync_status = {
         "is_running": False,
         "current_task": "",
         "progress": 0,
@@ -362,9 +368,9 @@ async def test_handle_step_gateway_config_uses_persisted_prefix_alias_when_omitt
 
 @pytest.mark.asyncio
 async def test_step4_gateway_shows_dev_stub_runtime_notice(monkeypatch):
-    monkeypatch.setattr(init_wizard_page, "dev_stubs_enabled", lambda: True)
+    monkeypatch.setattr(wizard_step_views, "dev_stubs_enabled", lambda: True)
     monkeypatch.setattr(
-        init_wizard_page,
+        wizard_step_views,
         "ensure_dev_stubs_started",
         lambda: SimpleNamespace(
             gateway_base_url="http://127.0.0.1:19001/qmt",
@@ -505,7 +511,7 @@ async def test_handle_step_data_setup_requires_tushare_token(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_step5_data_setup_shows_dev_stub_sample_import_notice(monkeypatch):
-    monkeypatch.setattr(init_wizard_page, "dev_stubs_enabled", lambda: True)
+    monkeypatch.setattr(wizard_step_views, "dev_stubs_enabled", lambda: True)
 
     html = str(init_wizard_page.Step5_DataSetup({"app_home": "/tmp/dev-stub-home"}))
 
@@ -517,7 +523,7 @@ async def test_step5_data_setup_shows_dev_stub_sample_import_notice(monkeypatch)
 
 
 def test_wizard_buttons_step_five_uses_direct_next_in_dev_stub(monkeypatch):
-    monkeypatch.setattr(init_wizard_page, "dev_stubs_enabled", lambda: True)
+    monkeypatch.setattr(wizard_layout, "dev_stubs_enabled", lambda: True)
 
     html = str(init_wizard_page.WizardButtons(5))
 
@@ -599,78 +605,29 @@ async def test_handle_download_skips_progress_dialog_in_dev_stub(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_data_sync_failure_persists_error_to_step_five_header(monkeypatch):
-    fake_wizard = FakeInitWizard()
-    fake_wizard.state.app_home = "/tmp/market-data"
-    fake_wizard.state.data_source = "tushare"
-    fake_wizard.state.tushare_token = "ts-token"
-    fake_wizard.state.epoch = datetime.date(2024, 1, 1)
-    fake_wizard.state.history_start_date = datetime.date(2023, 1, 1)
-    monkeypatch.setattr(init_wizard_page, "init_wizard", fake_wizard)
-    monkeypatch.setattr(init_wizard_page.calendar, "update", lambda: None)
-    monkeypatch.setattr(
-        init_wizard_page.calendar,
-        "last_trade_date",
-        lambda: datetime.date(2024, 12, 31),
-    )
-    monkeypatch.setattr(init_wizard_page.stock_list, "update", lambda *a, **kw: None)
-    def _failing_fetch(*a, **kw):
-        raise RuntimeError("network broken")
-    monkeypatch.setattr(init_wizard_page.daily_bars, "fetch_with_daily_progress", _failing_fetch)
-    monkeypatch.setattr("quantide.data.init_data", lambda home, init_db=True: None)
-    monkeypatch.setattr(init_wizard_page.msg_hub, "subscribe", lambda *args, **kwargs: None)
-    monkeypatch.setattr(init_wizard_page.msg_hub, "unsubscribe", lambda *args, **kwargs: None)
-
-    await init_wizard_page._run_data_sync(fake_wizard.state.history_start_date)
-
-    html = str(
-        init_wizard_page._render_wizard_main_content(
-            5,
-            fake_wizard.state.to_dict(),
-            step_content=init_wizard_page.Step5_DataSetup(fake_wizard.state.to_dict()),
-            current_step_value=5,
-        )
-    )
-
-    assert init_wizard_page._sync_status["error"] == "network broken"
+    fake_wizard, pipeline = _mock_wizard_pipeline(monkeypatch, error="network broken")
+    await wizard_sync._run_data_sync(fake_wizard.state.history_start_date)
+    html = str(init_wizard_page._render_wizard_main_content(
+        5, fake_wizard.state.to_dict(),
+        step_content=init_wizard_page.Step5_DataSetup(fake_wizard.state.to_dict()),
+        current_step_value=5,
+    ))
+    assert wizard_state._sync_status["error"] == "network broken"
     assert "下载失败：network broken" in html
+    assert fake_wizard.complete_calls == 0
+    pipeline.run.assert_called_once_with("wizard-test")
 
 
 @pytest.mark.asyncio
 async def test_run_data_sync_clamps_future_start_to_calendar_end(monkeypatch):
-    fake_wizard = FakeInitWizard()
-    fake_wizard.state.app_home = "/tmp/market-data"
-    fake_wizard.state.data_source = "tushare"
-    fake_wizard.state.tushare_token = "ts-token"
-    fake_wizard.state.epoch = datetime.date(2005, 1, 1)
-    fake_wizard.state.history_start_date = datetime.date(2025, 5, 15)
-    monkeypatch.setattr(init_wizard_page, "init_wizard", fake_wizard)
-    monkeypatch.setattr(init_wizard_page.calendar, "update", lambda: None)
-    monkeypatch.setattr(
-        init_wizard_page.calendar,
-        "last_trade_date",
-        lambda: datetime.date(2024, 12, 31),
-    )
-    monkeypatch.setattr(init_wizard_page.stock_list, "update", lambda *a, **kw: None)
-    observed: dict[str, datetime.date] = {}
-
-    def _recording_fetch(start, end, progress_callback=None, force=False):
-        observed["start"] = start
-        observed["end"] = end
-        return 1
-    monkeypatch.setattr(init_wizard_page.daily_bars, "fetch_with_daily_progress", _recording_fetch)
-    monkeypatch.setattr("quantide.data.init_data", lambda home, init_db=True: None)
-    monkeypatch.setattr(init_wizard_page.msg_hub, "subscribe", lambda *args, **kwargs: None)
-    monkeypatch.setattr(init_wizard_page.msg_hub, "unsubscribe", lambda *args, **kwargs: None)
-
-    await init_wizard_page._run_data_sync(fake_wizard.state.history_start_date)
-
-    assert observed == {
-        "start": datetime.date(2024, 12, 31),
-        "end": datetime.date(2024, 12, 31),
-    }
+    fake_wizard, pipeline = _mock_wizard_pipeline(monkeypatch)
+    fake_wizard.state.history_start_date = datetime.date(2030, 1, 1)
+    await wizard_sync._run_data_sync(fake_wizard.state.history_start_date)
+    params = pipeline.create_task.call_args.args[0]
+    assert params.start_date == params.end_date == datetime.date(2024, 12, 31)
     assert fake_wizard.complete_calls == 1
-    assert init_wizard_page._sync_status["completed"] is True
-    assert init_wizard_page._sync_status["error"] is None
+    assert wizard_state._sync_status["completed"] is True
+    assert wizard_state._sync_status["error"] is None
 
 
 @pytest.mark.asyncio
@@ -750,79 +707,42 @@ async def test_handle_complete_redirects_to_root(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_data_sync_updates_daily_basic(monkeypatch):
-    fake_wizard = FakeInitWizard()
-    fake_wizard.state.app_home = "/tmp/market-data"
-    fake_wizard.state.data_source = "tushare"
-    fake_wizard.state.tushare_token = "ts-token"
-    fake_wizard.state.epoch = datetime.date(2005, 1, 1)
-    fake_wizard.state.history_start_date = datetime.date(2025, 5, 15)
-    monkeypatch.setattr(init_wizard_page, "init_wizard", fake_wizard)
-    monkeypatch.setattr(init_wizard_page.calendar, "update", lambda: None)
-    monkeypatch.setattr(
-        init_wizard_page.calendar,
-        "last_trade_date",
-        lambda: datetime.date(2024, 12, 31),
-    )
-    monkeypatch.setattr(init_wizard_page.stock_list, "update", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        init_wizard_page.daily_bars,
-        "fetch_with_daily_progress",
-        lambda *a, **kw: 1,
-    )
-    observed: dict[str, datetime.date] = {}
-
-    def _record_daily_basic(start, end):
-        observed["start"] = start
-        observed["end"] = end
-
-    monkeypatch.setattr(init_wizard_page.daily_basic, "update", _record_daily_basic)
-    monkeypatch.setattr("quantide.data.init_data", lambda home, init_db=True: None)
-    monkeypatch.setattr(init_wizard_page.msg_hub, "subscribe", lambda *a, **kw: None)
-    monkeypatch.setattr(init_wizard_page.msg_hub, "unsubscribe", lambda *a, **kw: None)
-
-    await init_wizard_page._run_data_sync(fake_wizard.state.history_start_date)
-
-    assert observed == {
-        "start": datetime.date(2024, 12, 31),
-        "end": datetime.date(2024, 12, 31),
-    }
+async def test_run_data_sync_uses_complete_durable_pipeline(monkeypatch):
+    fake_wizard, pipeline = _mock_wizard_pipeline(monkeypatch)
+    await wizard_sync._run_data_sync(fake_wizard.state.history_start_date)
+    params = pipeline.create_task.call_args.args[0]
+    assert params.start_date == fake_wizard.state.history_start_date
+    assert params.end_date == datetime.date(2024, 12, 31)
+    assert params.include_minute is True
+    assert params.index_codes == wizard_sync.MAJOR_INDICES
+    pipeline.run.assert_called_once_with("wizard-test")
+    assert wizard_state._sync_status["current_task"] == "wizard-test"
     assert fake_wizard.complete_calls == 1
-    assert init_wizard_page._sync_status["completed"] is True
+    assert wizard_state._sync_status["completed"] is True
 
 
 @pytest.mark.asyncio
-async def test_run_data_sync_continues_when_daily_basic_fails(monkeypatch):
+async def test_run_data_sync_fails_when_daily_basic_fails(monkeypatch):
+    fake_wizard, pipeline = _mock_wizard_pipeline(monkeypatch, error="daily_basic: mv failed")
+    await wizard_sync._run_data_sync(fake_wizard.state.history_start_date)
+    assert fake_wizard.complete_calls == 0
+    assert wizard_state._sync_status["completed"] is False
+    assert wizard_state._sync_status["error"] == "daily_basic: mv failed"
+    assert wizard_state._sync_status["is_running"] is False
+
+
+def _mock_wizard_pipeline(monkeypatch, error=""):
+    from unittest.mock import MagicMock
+
     fake_wizard = FakeInitWizard()
-    fake_wizard.state.app_home = "/tmp/market-data"
-    fake_wizard.state.data_source = "tushare"
-    fake_wizard.state.tushare_token = "ts-token"
-    fake_wizard.state.epoch = datetime.date(2005, 1, 1)
-    fake_wizard.state.history_start_date = datetime.date(2025, 5, 15)
-    monkeypatch.setattr(init_wizard_page, "init_wizard", fake_wizard)
-    monkeypatch.setattr(init_wizard_page.calendar, "update", lambda: None)
-    monkeypatch.setattr(
-        init_wizard_page.calendar,
-        "last_trade_date",
-        lambda: datetime.date(2024, 12, 31),
-    )
-    monkeypatch.setattr(init_wizard_page.stock_list, "update", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        init_wizard_page.daily_bars,
-        "fetch_with_daily_progress",
-        lambda *a, **kw: 1,
-    )
-
-    def _fail_daily_basic(*a, **kw):
-        raise RuntimeError("mv failed")
-
-    monkeypatch.setattr(init_wizard_page.daily_basic, "update", _fail_daily_basic)
+    fake_wizard.state.history_start_date = datetime.date(2024, 1, 1)
+    monkeypatch.setattr(wizard_sync, "init_wizard", fake_wizard)
+    monkeypatch.setattr(wizard_sync.calendar, "update", lambda: None)
+    monkeypatch.setattr(wizard_sync.calendar, "last_trade_date", lambda: datetime.date(2024, 12, 31))
     monkeypatch.setattr("quantide.data.init_data", lambda home, init_db=True: None)
-    monkeypatch.setattr(init_wizard_page.msg_hub, "subscribe", lambda *a, **kw: None)
-    monkeypatch.setattr(init_wizard_page.msg_hub, "unsubscribe", lambda *a, **kw: None)
-
-    await init_wizard_page._run_data_sync(fake_wizard.state.history_start_date)
-
-    assert fake_wizard.complete_calls == 1
-    assert init_wizard_page._sync_status["completed"] is True
-    assert init_wizard_page._sync_status["error"] is None
+    pipeline = MagicMock()
+    pipeline.create_task.return_value = SimpleNamespace(task_id="wizard-test")
+    pipeline.run.return_value = not error
+    pipeline.get_task.return_value = SimpleNamespace(error=error, message="完成", progress=100, status="failed" if error else "done")
+    monkeypatch.setattr(wizard_sync, "data_sync_service", pipeline)
+    return fake_wizard, pipeline

@@ -1,4 +1,3 @@
-
 from .models import User
 
 
@@ -54,10 +53,8 @@ class UserRepository:
             print(f"Error in get_by_id: {e}")
             return None
 
-    def create(
-        self, username: str, email: str, password: str, role: str = "user"
-    ) -> User:
-        """Create new user.  Note that the dates will be updated by the class -_post_init__ method"""
+    def create(self, username: str, email: str, password: str, role: str = "user") -> User:
+        """Create a user with timestamps initialized by the model."""
         user = User(
             username=username,
             email=email,
@@ -92,9 +89,7 @@ class UserRepository:
             # Hash password if being updated                    # <- NEW
             if "password" in kwargs and kwargs["password"]:  # <- NEW
                 if not User.is_hashed(kwargs["password"]):  # <- NEW
-                    kwargs["password"] = User.get_hashed_password(
-                        kwargs["password"]
-                    )  # <- NEW
+                    kwargs["password"] = User.get_hashed_password(kwargs["password"])  # <- NEW
 
             # Include the primary key in the update kwargs
             self.users.update(id=user_id, **kwargs)
@@ -163,9 +158,7 @@ class UserRepository:
             print(f"Error counting users by role: {e}")
             return {"user": 0, "manager": 0, "admin": 0}
 
-    def search_users(
-        self, query: str, role: str | None = None, active: bool | None = None
-    ) -> list:
+    def search_users(self, query: str, role: str | None = None, active: bool | None = None) -> list:
         """Search users with optional filters"""
         try:
             users = self.list_all()
@@ -176,8 +169,7 @@ class UserRepository:
                 users = [
                     u
                     for u in users
-                    if query_lower in u.username.lower()
-                    or query_lower in u.email.lower()
+                    if query_lower in u.username.lower() or query_lower in u.email.lower()
                 ]
 
             # Apply role filter

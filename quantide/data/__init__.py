@@ -3,6 +3,7 @@ from pathlib import Path
 from quantide.config.paths import get_app_db_path
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
+from quantide.data.models.daily_basic import daily_basic
 from quantide.data.models.minute_bars import minute_bars
 from quantide.data.models.stocks import stock_list
 from quantide.data.sqlite import db
@@ -80,6 +81,7 @@ def init_data(
 
     calendar.load(calendar_path)
     stock_list.load(stocklist_path)
+    daily_basic.connect(home_dir / "data/daily_basic.parquet").load()
 
     daily_bars.connect(str(daily_bars_path), str(calendar_path))
     _index_bars_store = IndexBarsStore(str(index_bars_path), calendar)

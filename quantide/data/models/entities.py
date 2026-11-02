@@ -28,9 +28,7 @@ class Order(Entity):
 
     foid: str | None = None  # 代理(比如QMT)指定的 id，透传，一般用以查错
     cid: str | None = None  # 券商柜台合约 id
-    status: OrderStatus = (
-        OrderStatus.UNREPORTED
-    )  # 委托状态，比如未报、待报、已报、部成等
+    status: OrderStatus = OrderStatus.UNREPORTED  # 委托状态，比如未报、待报、已报、部成等
     status_msg: str = ""  # 委托状态描述，比如废单原因
 
     # 本委托 ID, pk
@@ -117,6 +115,19 @@ class Asset(Entity):
     frozen_cash: float
     market_value: float
     total: float
+
+    @classmethod
+    def initial(cls, portfolio_id, day, principal):
+        """Create the initial all-cash account snapshot."""
+        return cls(
+            portfolio_id=portfolio_id,
+            dt=day,
+            principal=principal,
+            cash=principal,
+            frozen_cash=0,
+            market_value=0,
+            total=principal,
+        )
 
     def __post_init__(self):
         if isinstance(self.dt, str):

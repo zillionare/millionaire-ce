@@ -103,7 +103,8 @@ def test_nfr_050_paper_broker_uses_logger():
     """AC-NFR-050: PaperBroker 使用 logger (可观测性)."""
     from quantide.service import sim_broker
 
-    src = Path(sim_broker.__file__).read_text()
+    import inspect
+    src = inspect.getsource(sim_broker.PaperBroker._on_quote_update)
     assert "self.logger" in src or "logger" in src, "PaperBroker 应使用 logger 记录"
 
 
@@ -138,5 +139,6 @@ def test_nfr_050_paper_broker_logs_trade():
     """AC-NFR-050: PaperBroker 成交时记录日志 (loguru)."""
     from quantide.service import sim_broker
 
-    src = Path(sim_broker.__file__).read_text()
+    import inspect
+    src = inspect.getsource(sim_broker.PaperBroker._on_quote_update)
     assert "trade" in src.lower() and ("log" in src.lower() or "logger" in src.lower())

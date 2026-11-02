@@ -52,6 +52,10 @@ class BaostockMinuteAdapter:
     def __init__(self, fetcher: Any) -> None:
         self._fetcher = fetcher
 
+    def fetch_trading_status(self, asset, start, end):
+        """Expose daily suspension evidence without inventing bars for missing sessions."""
+        return self._fetcher.fetch_trading_status(asset, start, end)
+
     def fetch_minute_bars(
         self,
         asset: str,
@@ -70,6 +74,10 @@ class BaostockMinuteAdapter:
                 asset, start_date, end_date, frequency=str(period)
             )
         except Exception as exc:
+            from quantide.data.fetchers.baostock_minute import BaostockThrottledError
+
+            if isinstance(exc, (BaostockThrottledError, ImportError)):
+                raise
             return (
                 pd.DataFrame(columns=STANDARD_MINUTE_BAR_COLUMNS),
                 [["fetch_minute_bars", asset, str(exc)]],
@@ -94,14 +102,35 @@ class BaostockMinuteAdapter:
             if col not in frame.columns:
                 frame[col] = 0.0
         # 单位统一为 Tushare/腾讯口径：成交量「手」、成交额「千元」。
-        frame["volume"] = (
-            pd.to_numeric(frame["volume"], errors="coerce").fillna(0.0) / 100.0
-        )
-        frame["amount"] = (
-            pd.to_numeric(frame["amount"], errors="coerce").fillna(0.0) / 1000.0
-        )
+        frame["volume"] = pd.to_numeric(frame["volume"], errors="coerce").fillna(0.0) / 100.0
+        frame["amount"] = pd.to_numeric(frame["amount"], errors="coerce").fillna(0.0) / 1000.0
         frame = frame.tail(int(count))
         return frame[STANDARD_MINUTE_BAR_COLUMNS].reset_index(drop=True), []
+
+
+def _append_source_errors(result, errors):
+    if isinstance(result, tuple) and len(result) > 1 and errors:
+        return result[0], [*errors, *(result[1] or [])]
+    return result
+
+
+def _empty_source_result(empty, errors):
+    if isinstance(empty, tuple):
+        return empty[0], [*errors, *(empty[1] or [])]
+    return empty if empty is not None else pd.DataFrame()
+
+
+def _minute_source_call(function, asset, start, end, period, count):
+    try:
+        return function(asset, start_date=start, end_date=end, period=str(period), count=int(count))
+    except TypeError:
+        return function(asset, start, end, frequency=str(period))
+
+
+def _normalized_minute_result(result):
+    if isinstance(result, pd.DataFrame):
+        return result, []
+    return result[0], result[1] if len(result) > 1 else []
 
 
 class MultiSourceDataFetcher:
@@ -181,16 +210,10 @@ class MultiSourceDataFetcher:
                 errors.append([name, method, str(exc)])
                 continue
             if self._has_data(result):
-                if isinstance(result, tuple) and len(result) > 1 and errors:
-                    frame = result[0]
-                    return frame, [*errors, *(result[1] or [])]
-                return result
+                return _append_source_errors(result, errors)
             if isinstance(result, tuple) and len(result) > 1 and result[1]:
                 errors.extend(result[1])
-        if isinstance(empty, tuple):
-            frame, base_errors = empty
-            return frame, [*errors, *(base_errors or [])]
-        return empty if empty is not None else pd.DataFrame()
+        return _empty_source_result(empty, errors)
 
     # ------------------------------------------------------------------
     # 日线与辅助字段
@@ -236,9 +259,7 @@ class MultiSourceDataFetcher:
         dates: Iterable[datetime.date] | datetime.date,
         phase_callback: Any = None,
     ) -> tuple[pd.DataFrame, ErrorRecord]:
-        return self._call(
-            "daily_bars", "fetch_bars_ext", dates, phase_callback=phase_callback
-        )
+        return self._call("daily_bars", "fetch_bars_ext", dates, phase_callback=phase_callback)
 
     def fetch_daily_basic(
         self, dates: Iterable[datetime.date] | datetime.date
@@ -254,18 +275,14 @@ class MultiSourceDataFetcher:
         start_date: datetime.date,
         end_date: datetime.date,
     ) -> tuple[pd.DataFrame, ErrorRecord]:
-        return self._call(
-            "index_bars", "fetch_index_bars", index_codes, start_date, end_date
-        )
+        return self._call("index_bars", "fetch_index_bars", index_codes, start_date, end_date)
 
     def fetch_index_weights(
         self,
         index_codes: Iterable[str] | str,
         snapshot_dates: Iterable[datetime.date],
     ) -> tuple[pd.DataFrame, ErrorRecord]:
-        return self._call(
-            "index_weights", "fetch_index_weights", index_codes, snapshot_dates
-        )
+        return self._call("index_weights", "fetch_index_weights", index_codes, snapshot_dates)
 
     # ------------------------------------------------------------------
     # 分钟线 / 实时
@@ -284,29 +301,11 @@ class MultiSourceDataFetcher:
             if func is None:
                 continue
             try:
-                result = func(
-                    asset,
-                    start_date=start_date,
-                    end_date=end_date,
-                    period=str(period),
-                    count=int(count),
-                )
-            except TypeError:
-                try:
-                    result = func(
-                        asset, start_date, end_date, frequency=str(period)
-                    )
-                except Exception as exc:
-                    errors.append([name, "fetch_minute_bars", str(exc)])
-                    continue
+                result = _minute_source_call(func, asset, start_date, end_date, period, count)
             except Exception as exc:
                 errors.append([name, "fetch_minute_bars", str(exc)])
                 continue
-            if isinstance(result, pd.DataFrame):
-                frame, item_errors = result, []
-            else:
-                frame = result[0]
-                item_errors = result[1] if len(result) > 1 else []
+            frame, item_errors = _normalized_minute_result(result)
             if frame is not None and not frame.empty:
                 frame = frame.copy()
                 if "date" not in frame.columns and "dt" in frame.columns:
@@ -315,9 +314,7 @@ class MultiSourceDataFetcher:
             errors.extend(item_errors or [])
         return pd.DataFrame(columns=STANDARD_MINUTE_BAR_COLUMNS), errors
 
-    def fetch_quote_snapshot(
-        self, symbols: Iterable[str] | str
-    ) -> dict[str, dict]:
+    def fetch_quote_snapshot(self, symbols: Iterable[str] | str) -> dict[str, dict]:
         for _name, fetcher in self._fetchers_for("quote_snapshot"):
             func = getattr(fetcher, "fetch_quote_snapshot", None)
             if func is None:

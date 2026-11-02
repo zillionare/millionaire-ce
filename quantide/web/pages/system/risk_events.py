@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from fasthtml.common import A, Div, Nav, Span, fast_app
+from fasthtml.common import Div
 
+from quantide.web.application import fast_app
+from quantide.web.components.navigation import SystemBreadcrumb
 from quantide.web.layouts.main import MainLayout
 from quantide.web.pages.system.runtime_support import (
     build_risk_event_center_card,
@@ -15,18 +17,7 @@ system_risk_events_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
 def _breadcrumb() -> Div:
-    """构建页面面包屑。"""
-    return Div(
-        Nav(
-            A("首页", href="/", cls="hover:text-[#e41815]"),
-            Span(">", cls="text-gray-400"),
-            A("系统维护", href="/system/", cls="hover:text-[#e41815]"),
-            Span(">", cls="text-gray-400"),
-            Span("风险事件中心", cls="text-gray-900 font-medium"),
-            cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",
-        ),
-        cls="mb-4",
-    )
+    return SystemBreadcrumb("风险事件中心")
 
 
 @rt("/")

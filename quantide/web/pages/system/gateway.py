@@ -23,6 +23,7 @@ from quantide.config.settings import get_settings
 from quantide.data.models.app_state import AppState
 from quantide.data.sqlite import db
 from quantide.service.init_wizard import init_wizard
+from quantide.web.application import fast_app
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -62,6 +63,7 @@ def _compose_gateway_base_url(config: dict[str, Any]) -> str:
 
 
 # ========== 数据获取 ==========
+
 
 def _load_gateway_config() -> dict[str, Any]:
     """从数据库加载网关配置"""
@@ -177,7 +179,10 @@ def _coerce_gateway_form(data: Mapping[str, Any]) -> dict[str, Any]:
 
 # ========== UI 组件 ==========
 
-def _build_connection_status(config: dict[str, Any], test_result: dict[str, Any] | None = None) -> Div:
+
+def _build_connection_status(
+    config: dict[str, Any], test_result: dict[str, Any] | None = None
+) -> Div:
     """构建连接状态卡片"""
     if not config["enabled"]:
         return Div(
@@ -271,7 +276,10 @@ def _build_dev_stub_notice(config: dict[str, Any]) -> Div | None:
             cls="mb-3 flex items-center",
         ),
         P(
-            "当前进程已启用开发 stub 模式。交易链路读取的是 effective settings，而不是仅依赖下面表单中的持久化配置。",
+            (
+                "当前进程已启用开发 stub 模式。交易链路读取的是 effective "
+                "settings，而不是仅依赖下面表单中的持久化配置。"
+            ),
             cls="text-sm text-gray-700",
         ),
         P(f"当前运行地址：{effective_url}。", cls="mt-2 text-sm text-gray-700"),
@@ -454,6 +462,7 @@ def _render_page(
 
 
 # ========== 路由 ==========
+
 
 @rt("/")
 async def index(req):

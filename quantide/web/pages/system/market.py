@@ -12,6 +12,8 @@ from monsterui.all import *
 
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.stocks import stock_list
+from quantide.web.application import fast_app
+from quantide.web.components.data_tables import DatasetPagination, DatasetTable
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -47,7 +49,9 @@ def _get_market_data(
             return data[start_idx:end_idx], total
 
         if not start_date:
-            start_date = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+            start_date = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            )
         if not end_date:
             end_date = datetime.datetime.now().strftime("%Y-%m-%d")
 
@@ -96,132 +100,149 @@ def _load_asset_names() -> dict[str, str]:
         return {}
 
 
-def _build_market_table(data: list, page: int = 1, per_page: int = 20, total: int = 0,
-                        code: str = "", start_date: str = "", end_date: str = "", adjust: str = "none"):
+def _market_row(row, show_identity, asset_names):
+    """Render one row with its display values and available actions."""
+    trade_date = str(row.get("date", "")).split(" ")[0] if row.get("date") else "-"
+    is_st = "是" if row.get("is_st") else "否"
+
+    pre_close = row.get("pre_close", row.get("open", 0))
+    cur_close = row.get("close", 0)
+    if pre_close and cur_close and pre_close != 0:
+        change = cur_close - pre_close
+        change_pct = (change / pre_close) * 100
+        change_cls = (
+            "text-red-500" if change > 0 else ("text-green-500" if change < 0 else "text-gray-500")
+        )
+        change_str = f"{change_pct:+.2f}%"
+    else:
+        change_cls = "text-gray-500"
+        change_str = "-"
+
+    cells = []
+    if show_identity:
+        asset = str(row.get("asset") or "-")
+        cells.extend(
+            [
+                Td(asset, cls="px-4 py-2 text-sm font-medium text-gray-900"),
+                Td(asset_names.get(asset, "-"), cls="px-4 py-2 text-sm text-gray-900"),
+            ]
+        )
+    cells.extend(
+        [
+            Td(trade_date, cls="px-4 py-2 text-sm text-gray-900"),
+            Td(_market_number(row, "open", ".2f"), cls="px-4 py-2 text-sm text-gray-900"),
+            Td(_market_number(row, "high", ".2f"), cls="px-4 py-2 text-sm text-gray-900"),
+            Td(_market_number(row, "low", ".2f"), cls="px-4 py-2 text-sm text-gray-900"),
+            Td(_market_number(row, "close", ".2f"), cls="px-4 py-2 text-sm text-gray-900"),
+            Td(Span(change_str, cls=change_cls), cls="px-4 py-2 text-sm"),
+            Td(_market_number(row, "volume", ",.0f"), cls="px-4 py-2 text-sm text-gray-500"),
+            Td(_market_number(row, "amount", ",.2f"), cls="px-4 py-2 text-sm text-gray-500"),
+            Td(_market_number(row, "up_limit", ".2f"), cls="px-4 py-2 text-sm text-gray-500"),
+            Td(_market_number(row, "down_limit", ".2f"), cls="px-4 py-2 text-sm text-gray-500"),
+            Td(_market_number(row, "adjust", ".4f"), cls="px-4 py-2 text-sm text-gray-500"),
+            Td(is_st, cls="px-4 py-2 text-sm text-gray-500"),
+        ]
+    )
+    return Tr(*cells, cls="hover:bg-gray-50")
+
+
+def _build_market_table(
+    data: list,
+    page: int = 1,
+    per_page: int = 20,
+    total: int = 0,
+    code: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    adjust: str = "none",
+):
     """构建行情数据表格"""
     show_identity = not str(code or "").strip()
     asset_names = _load_asset_names() if show_identity else {}
 
     rows = []
     if data:
-        for row in data:
-            trade_date = str(row.get("date", "")).split(" ")[0] if row.get("date") else "-"
-            open_price = f"{row.get('open', 0):.2f}" if row.get('open') is not None else "-"
-            high_price = f"{row.get('high', 0):.2f}" if row.get('high') is not None else "-"
-            low_price = f"{row.get('low', 0):.2f}" if row.get('low') is not None else "-"
-            close_price = f"{row.get('close', 0):.2f}" if row.get('close') is not None else "-"
-            volume = f"{row.get('volume', 0):,.0f}" if row.get('volume') is not None else "-"
-            amount = f"{row.get('amount', 0):,.2f}" if row.get('amount') is not None else "-"
-            up_limit = f"{row.get('up_limit', 0):.2f}" if row.get('up_limit') is not None else "-"
-            down_limit = f"{row.get('down_limit', 0):.2f}" if row.get('down_limit') is not None else "-"
-            adjust_val = f"{row.get('adjust', 1.0):.4f}" if row.get('adjust') is not None else "-"
-            is_st = "是" if row.get('is_st') else "否"
-
-            pre_close = row.get('pre_close', row.get('open', 0))
-            cur_close = row.get('close', 0)
-            if pre_close and cur_close and pre_close != 0:
-                change = cur_close - pre_close
-                change_pct = (change / pre_close) * 100
-                change_cls = "text-red-500" if change > 0 else ("text-green-500" if change < 0 else "text-gray-500")
-                change_str = f"{change_pct:+.2f}%"
-            else:
-                change_cls = "text-gray-500"
-                change_str = "-"
-
-            cells = []
-            if show_identity:
-                asset = str(row.get("asset") or "-")
-                cells.extend([
-                    Td(asset, cls="px-4 py-2 text-sm font-medium text-gray-900"),
-                    Td(asset_names.get(asset, "-"), cls="px-4 py-2 text-sm text-gray-900"),
-                ])
-            cells.extend([
-                Td(trade_date, cls="px-4 py-2 text-sm text-gray-900"),
-                Td(open_price, cls="px-4 py-2 text-sm text-gray-900"),
-                Td(high_price, cls="px-4 py-2 text-sm text-gray-900"),
-                Td(low_price, cls="px-4 py-2 text-sm text-gray-900"),
-                Td(close_price, cls="px-4 py-2 text-sm text-gray-900"),
-                Td(Span(change_str, cls=change_cls), cls="px-4 py-2 text-sm"),
-                Td(volume, cls="px-4 py-2 text-sm text-gray-500"),
-                Td(amount, cls="px-4 py-2 text-sm text-gray-500"),
-                Td(up_limit, cls="px-4 py-2 text-sm text-gray-500"),
-                Td(down_limit, cls="px-4 py-2 text-sm text-gray-500"),
-                Td(adjust_val, cls="px-4 py-2 text-sm text-gray-500"),
-                Td(is_st, cls="px-4 py-2 text-sm text-gray-500"),
-            ])
-
-            rows.append(Tr(*cells, cls="hover:bg-gray-50"))
+        rows.extend(_market_row(row, show_identity, asset_names) for row in data)
     else:
         rows.append(
             Tr(
-                Td("暂无数据", colspan="14" if show_identity else "12",
-                   cls="px-4 py-8 text-center text-gray-500")
+                Td(
+                    "暂无数据",
+                    colspan="14" if show_identity else "12",
+                    cls="px-4 py-8 text-center text-gray-500",
+                )
             )
         )
 
     total_pages = max(1, (total + per_page - 1) // per_page) if total > 0 else 1
-    pagination_info = f"显示第 {(page - 1) * per_page + 1} 到 {min(page * per_page, total)} 条，共 {total} 条" if total > 0 else "暂无数据"
+    pagination_info = (
+        f"显示第 {(page - 1) * per_page + 1} 到 {min(page * per_page, total)} 条，共 {total} 条"
+        if total > 0
+        else "暂无数据"
+    )
 
     def page_url(p):
-        return f"/system/market/?code={code}&start_date={start_date}&end_date={end_date}&adjust={adjust}&page={p}&per_page={per_page}"
+        return (
+            "/system/market/?code="
+            f"{code}"
+            "&start_date="
+            f"{start_date}"
+            "&end_date="
+            f"{end_date}"
+            "&adjust="
+            f"{adjust}"
+            "&page="
+            f"{p}"
+            "&per_page="
+            f"{per_page}"
+        )
 
     return Div(
-        Div(
-            Table(
-                Thead(
-                    Tr(
-                        *([
-                            Th("证券代码", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                            Th("证券名称", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        ] if show_identity else []),
-                        Th("日期", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("开盘", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("最高", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("最低", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("收盘", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("涨跌", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("成交量", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("成交额", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("涨停价", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("跌停价", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("复权因子", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("ST", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                    )
-                ),
-                Tbody(*rows),
-                cls="min-w-full divide-y divide-gray-200"
-            ),
-            cls="overflow-x-auto"
+        DatasetTable(
+            (["证券代码", "证券名称"] if show_identity else [])
+            + [
+                "日期",
+                "开盘",
+                "最高",
+                "最低",
+                "收盘",
+                "涨跌",
+                "成交量",
+                "成交额",
+                "涨停价",
+                "跌停价",
+                "复权因子",
+                "ST",
+            ],
+            rows,
         ),
-        Div(
-            Div(pagination_info, cls="text-sm text-gray-700"),
-            Div(
-                Span("每页: ", cls="text-sm text-gray-600 mr-1"),
-                A("20", href=page_url(1).replace(f"per_page={per_page}", "per_page=20"),
-                  cls=f"q-btn q-btn--sm mx-0.5{' border-gray-900 bg-gray-900 text-white' if per_page == 20 else ''}"),
-                A("50", href=page_url(1).replace(f"per_page={per_page}", "per_page=50"),
-                  cls=f"q-btn q-btn--sm mx-0.5{' border-gray-900 bg-gray-900 text-white' if per_page == 50 else ''}"),
-                A("100", href=page_url(1).replace(f"per_page={per_page}", "per_page=100"),
-                  cls=f"q-btn q-btn--sm mx-0.5{' border-gray-900 bg-gray-900 text-white' if per_page == 100 else ''}"),
-                cls="flex items-center ml-4"
+        DatasetPagination(
+            pagination_info,
+            page,
+            per_page,
+            total_pages,
+            lambda number, size: page_url(number).replace(
+                f"per_page={per_page}", f"per_page={size}"
             ),
-            Div(
-                *[
-                    A(str(p), href=page_url(p),
-                      cls=f"q-btn q-btn--sm mx-0.5{' border-gray-900 bg-gray-900 text-white' if p == page else ''}")
-                    for p in range(max(1, page - 2), min(total_pages + 1, page + 3))
-                ],
-                cls="flex items-center ml-4"
+            lambda active: (
+                "q-btn q-btn--sm mx-0.5"
+                + (" border-gray-900 bg-gray-900 text-white" if active else "")
             ),
-            cls="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between"
         ),
-        cls="bg-white rounded-lg shadow overflow-hidden"
+        cls="bg-white rounded-lg shadow overflow-hidden",
     )
 
 
 @rt("/")
-async def index(req, code: str = "", start_date: str = "", end_date: str = "",
-                adjust: str = "none", page: int = 1, per_page: int = 20):
+async def index(
+    req,
+    code: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    adjust: str = "none",
+    page: int = 1,
+    per_page: int = 20,
+):
     """行情数据页面"""
     code = code or req.query_params.get("code", "")
     start_date = start_date or req.query_params.get("start_date", "")
@@ -230,7 +251,9 @@ async def index(req, code: str = "", start_date: str = "", end_date: str = "",
     page = int(req.query_params.get("page", page))
     per_page = int(req.query_params.get("per_page", per_page))
 
-    logger.info(f"market_page called with code='{code}', start_date='{start_date}', end_date='{end_date}'")
+    logger.info(
+        f"market_page called with code='{code}', start_date='{start_date}', end_date='{end_date}'"
+    )
 
     data, total = _get_market_data(code, start_date, end_date, adjust, page, per_page)
 
@@ -238,12 +261,19 @@ async def index(req, code: str = "", start_date: str = "", end_date: str = "",
     layout.set_sidebar_active("/system/market")
 
     def adjust_btn(label: str, value: str) -> A:
-        url = f"/system/market/?code={code}&start_date={start_date}&end_date={end_date}&adjust={value}&page=1&per_page={per_page}"
-        active_cls = (
-            " border-gray-900 bg-gray-900 text-white"
-            if adjust == value
-            else ""
+        url = (
+            "/system/market/?code="
+            f"{code}"
+            "&start_date="
+            f"{start_date}"
+            "&end_date="
+            f"{end_date}"
+            "&adjust="
+            f"{value}"
+            "&page=1&per_page="
+            f"{per_page}"
         )
+        active_cls = " border-gray-900 bg-gray-900 text-white" if adjust == value else ""
         return A(label, href=url, cls=f"q-btn q-btn--sm whitespace-nowrap{active_cls}")
 
     page_content = Div(
@@ -251,41 +281,48 @@ async def index(req, code: str = "", start_date: str = "", end_date: str = "",
             Div(
                 UkIcon("bar-chart-2", size=32, cls="mr-3", style=f"color: {PRIMARY_COLOR};"),
                 H2("行情数据", cls="text-2xl font-bold"),
-                cls="flex items-center"
+                cls="flex items-center",
             ),
-            cls="mb-6"
+            cls="mb-6",
         ),
         Div(
             Form(
                 Div(
                     Div(
                         _Label("证券代码", cls="q-label"),
-                        Input(type="text", name="code", value=code, placeholder="输入股票代码",
-                              cls="q-input w-full"),
-                        cls="min-w-0"
+                        Input(
+                            type="text",
+                            name="code",
+                            value=code,
+                            placeholder="输入股票代码",
+                            cls="q-input w-full",
+                        ),
+                        cls="min-w-0",
                     ),
                     Div(
                         _Label("起始日期", cls="q-label"),
-                        Input(type="date", name="start_date", value=start_date,
-                              cls="q-input w-full"),
-                        cls="min-w-0"
+                        Input(
+                            type="date", name="start_date", value=start_date, cls="q-input w-full"
+                        ),
+                        cls="min-w-0",
                     ),
                     Div(
                         _Label("结束日期", cls="q-label"),
-                        Input(type="date", name="end_date", value=end_date,
-                              cls="q-input w-full"),
-                        cls="min-w-0"
+                        Input(type="date", name="end_date", value=end_date, cls="q-input w-full"),
+                        cls="min-w-0",
                     ),
                     Div(
-                        Button("查询", type="submit",
-                               cls="q-btn min-w-[72px] whitespace-nowrap"),
-                        cls="flex items-end"
+                        Button("查询", type="submit", cls="q-btn min-w-[72px] whitespace-nowrap"),
+                        cls="flex items-end",
                     ),
-                    cls="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                    cls=(
+                        "grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1f"
+                        "r)_minmax(0,1fr)_auto]"
+                    ),
                 ),
-                cls="card p-4 mb-3"
+                cls="card p-4 mb-3",
             ),
-            cls="mb-4"
+            cls="mb-4",
         ),
         P(
             "未提供筛选条件时，默认展示最近一个交易日的首页数据。",
@@ -308,13 +345,13 @@ async def index(req, code: str = "", start_date: str = "", end_date: str = "",
                 hx_swap="innerHTML",
                 cls="q-btn q-btn--sm shrink-0 whitespace-nowrap",
             ),
-            cls="card mb-4 flex flex-wrap items-center justify-between gap-3 p-3"
+            cls="card mb-4 flex flex-wrap items-center justify-between gap-3 p-3",
         ),
         Div(
             _build_market_table(data, page, per_page, total, code, start_date, end_date, adjust),
-            id="market-content"
+            id="market-content",
         ),
-        cls="p-8"
+        cls="p-8",
     )
 
     layout.main_block = page_content
@@ -349,5 +386,10 @@ async def sync_market(req):
         return Div(
             UkIcon("alert-circle", cls="text-red-500 mr-2"),
             f"同步失败: {str(e)}",
-            cls="flex items-center p-4 bg-red-50 text-red-700 rounded-lg"
+            cls="flex items-center p-4 bg-red-50 text-red-700 rounded-lg",
         )
+
+
+def _market_number(row, key, spec):
+    value = row.get(key)
+    return format(value, spec) if value is not None else "-"

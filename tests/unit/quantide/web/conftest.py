@@ -14,7 +14,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def init_app_state_for_web_tests(monkeypatch):
+def init_app_state_for_web_tests(monkeypatch, tmp_path):
     """Make web tests pass initialization middleware and seed app state.
 
     Also seeds the app_state DB row to fully-initialized to make the
@@ -76,7 +76,9 @@ def init_app_state_for_web_tests(monkeypatch):
 
         stock_path = Path(__file__).resolve().parents[4] / "data" / "stock_list.parquet"
         if stock_path.exists():
-            stock_list.load(stock_path)
+            import polars as pl
+            stock_list._data = pl.read_parquet(stock_path)
+            stock_list._path = tmp_path / "stock_list.parquet"
     except Exception:
         pass
 

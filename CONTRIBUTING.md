@@ -117,6 +117,13 @@ Ready to contribute? Here's how to set up `millionaire` for local development.
    The release-gate evidence suite and the minimum pre-commit checks are
    documented in `docs/developer-acceptance.md`.
 
+   Install the pinned quality tools with `pip install --group quality`, activate
+   the project environment, and run `python -m pre_commit install` once.
+   `python scripts/check_quality.py` is the same strict production gate used in
+   CI. See [Quality and release gates](docs/quality.md) for the complexity, size,
+   duplication, offline-test and release requirements. Existing violations
+   are not grandfathered in.
+
 7. Commit your changes and push your branch to GitHub:
 
    ```bash

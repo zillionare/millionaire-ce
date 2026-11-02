@@ -75,9 +75,7 @@ class RuntimeBootstrap:
         """
         requested_mode = mode or self._resolve_mode()
         self._mode = (
-            "paper"
-            if requested_mode == "live" and not supports_live_trading()
-            else requested_mode
+            "paper" if requested_mode == "live" and not supports_live_trading() else requested_mode
         )
         self._clock = clock if clock is not None else SystemClockAdapter()
 
@@ -143,29 +141,32 @@ class RuntimeBootstrap:
         ``QUANTIDE_QUOTE_INTERVAL`` 控制间隔（秒）。
         """
         global _quote_publisher
-        name = os.environ.get("QUANTIDE_QUOTE_PUBLISHER", "").strip().lower()
-        if name not in {"tencent", "tencent_publisher"}:
+        from quantide.config.tencent_trial import trial_status
+        from quantide.providers.extensions import load_quote_provider, quote_provider_enabled
+
+        use_extension = quote_provider_enabled()
+        if not use_extension and not trial_status().enabled:
             return
         with _quote_publisher_lock:
-            if _quote_publisher is not None:
-                publisher = _quote_publisher
-            else:
-                from quantide.providers.tencent_publisher import TencentPublisher
+            if _quote_publisher is None:
+                _quote_publisher = (
+                    load_quote_provider() if use_extension else self._create_tencent_publisher()
+                )
+            publisher = _quote_publisher
+            publisher.start()
+        adapters.register("quote_publisher", "user" if use_extension else "tencent", publisher)
 
-                raw_symbols = os.environ.get("QUANTIDE_QUOTE_SYMBOLS", "")
-                symbols = [
-                    part.strip() for part in raw_symbols.split(",") if part.strip()
-                ] or None
-                try:
-                    interval = float(
-                        os.environ.get("QUANTIDE_QUOTE_INTERVAL", "3") or 3
-                    )
-                except ValueError:
-                    interval = 3.0
-                publisher = TencentPublisher(symbols, interval=interval)
-                publisher.start()
-                _quote_publisher = publisher
-        adapters.register("quote_publisher", "tencent", publisher)
+    @staticmethod
+    def _create_tencent_publisher():
+        from quantide.providers.tencent_publisher import TencentPublisher
+
+        raw_symbols = os.environ.get("QUANTIDE_QUOTE_SYMBOLS", "")
+        symbols = [part.strip() for part in raw_symbols.split(",") if part.strip()] or None
+        try:
+            interval = float(os.environ.get("QUANTIDE_QUOTE_INTERVAL", "5") or 5)
+        except ValueError:
+            interval = 5.0
+        return TencentPublisher(symbols, interval=interval)
 
     def _register_broker_adapters(
         self, registry: BrokerRegistry, adapters: AdapterRegistry
@@ -209,6 +210,7 @@ class RuntimeBootstrap:
                 broker = PaperBroker.load(
                     portfolio.portfolio_id,
                     market_data=market_data,
+                    clock=self._clock,
                 )
                 registry.register(BrokerKind.SIMULATION, portfolio.portfolio_id, broker)
             except Exception:
@@ -226,8 +228,10 @@ class RuntimeBootstrap:
         broker_name = runtime.runtime_broker_adapter
         mode_name = "gateway"
         gateway_url = str(getattr(runtime, "gateway_base_url", "") or "").strip()
-        use_gateway = runtime.gateway_enabled and bool(gateway_url) and (
-            broker_name == "gateway" or mode_name == "gateway"
+        use_gateway = (
+            runtime.gateway_enabled
+            and bool(gateway_url)
+            and (broker_name == "gateway" or mode_name == "gateway")
         )
         if not use_gateway:
             return

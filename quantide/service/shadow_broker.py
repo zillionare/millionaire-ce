@@ -45,6 +45,7 @@ class ShadowBroker:
         self._open_cache: dict[str, float] = {}
         self._limit_cache: dict[str, tuple[float, float]] = {}
         self._bar_view = HistBarView(daily_bars)
+
         def _cfg_float(key: str, default: float) -> float:
             value = config.get(key)
             if value is None or value == "":

@@ -5,14 +5,11 @@
 
 from __future__ import annotations
 
-import atexit
-import datetime
 import os
-import sys
 from pathlib import Path
 
 from fasthtml import core as _fasthtml_core
-from fasthtml.common import Mount, Route, fast_app
+from fasthtml.common import Mount, Route
 from loguru import logger
 
 # fasthtml 默认注入 htmx@2.0.7；AppTheme.headers() 又显式注入了 htmx@1.9.12。
@@ -20,11 +17,10 @@ from loguru import logger
 # ``htmx:afterRequest``/``htmx:sendAbort`` 互相打断死循环（用户报告：点击
 # “实盘”进入 /trade 后整页 frozen）。把 fasthtml 的默认 htmx URL 改到 1.9.12，
 # 两份就是同源，浏览器会自动去重，冲突消失。
-_fasthtml_core.htmxsrc = _fasthtml_core.Script(
-    src="https://unpkg.com/htmx.org@1.9.12"
-)
+_fasthtml_core.htmxsrc = _fasthtml_core.Script(src="https://unpkg.com/htmx.org@1.9.12")
 from starlette.middleware import Middleware
-from starlette.responses import RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import JSONResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from quantide.config.branding import get_branding
@@ -40,10 +36,12 @@ from quantide.core.errors import BaseTradeError
 from quantide.core.runtime import RuntimeBootstrap
 from quantide.data import init_data
 from quantide.data.sqlite import db
+from quantide.service.lifecycle import application_lifespan, recover_interrupted_tasks
 from quantide.service.registry import BrokerRegistry
 from quantide.service.strategy_runtime import strategy_runtime_manager
 from quantide.web.apis.analysis import kline_router, search_router
 from quantide.web.apis.broker import app as broker_api_app
+from quantide.web.application import fast_app
 from quantide.web.auth.manager import AuthManager
 from quantide.web.middleware import BrokerRegistryMiddleware, exception_handler
 from quantide.web.middleware_feature import FeatureCheckMiddleware
@@ -103,71 +101,46 @@ from quantide.web.theme import AppTheme
 
 
 def _check_single_instance() -> None:
-    """检查是否已有实例在运行，防止多实例启动。"""
-    pid_file = get_pid_file_path()
-    product_name = get_branding().product_name
+    """Use an OS lock so stale/reused PIDs cannot block recovery after shutdown."""
+    from quantide.core.instance_guard import acquire_instance_guard
 
-    if pid_file.exists():
-        try:
-            with open(pid_file) as file_obj:
-                pid = int(file_obj.read().strip())
-
-            if sys.platform == "win32":
-                import ctypes
-
-                kernel32 = ctypes.windll.kernel32
-                handle = kernel32.OpenProcess(1, False, pid)
-                if handle != 0:
-                    kernel32.CloseHandle(handle)
-                    raise RuntimeError(
-                        f"{product_name} 已经在运行 (PID: {pid})。"
-                        f"请先停止现有实例，或删除 {pid_file} 后重试。"
-                    )
-            else:
-                os.kill(pid, 0)
-                raise RuntimeError(
-                    f"{product_name} 已经在运行 (PID: {pid})。"
-                    f"请先停止现有实例，或删除 {pid_file} 后重试。"
-                )
-        except (ValueError, OSError, ProcessLookupError):
-            pid_file.unlink()
-
-    pid_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(pid_file, "w") as file_obj:
-        file_obj.write(str(os.getpid()))
-
-    def cleanup_pid() -> None:
-        if pid_file.exists():
-            pid_file.unlink()
-
-    atexit.register(cleanup_pid)
+    acquire_instance_guard(get_pid_file_path(), get_branding().product_name)
 
 
 def _initialize_app_database() -> Path:
     """Initialize the fixed sqlite database in the config directory."""
     db_path = get_app_db_path()
 
-    try:
-        db.init(db_path)
-        return db_path
-    except Exception as exc:
-        if not db_path.exists():
-            raise
+    # Lock contention, failed migrations and disk/permission errors must never
+    # turn a healthy account database into a new empty database. Corruption
+    # requires explicit diagnosis and recovery, including its WAL sidecars.
+    db.init(db_path)
+    return db_path
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        backup_path = db_path.with_name(
-            f"{db_path.stem}.corrupt.{timestamp}{db_path.suffix}"
-        )
-        logger.warning(f"配置数据库无法读取，已备份到 {backup_path}: {exc}")
-        try:
-            db_path.rename(backup_path)
-        except Exception:
-            logger.exception("备份损坏配置数据库失败")
-            raise
 
-        db._initialized = False
-        db.init(db_path)
-        return db_path
+def _health_response(request):
+    failed = bool(getattr(request.app.state, "startup_error", ""))
+    return JSONResponse(
+        {"status": "degraded" if failed else "ok", "pid": os.getpid(), "edition": "millionaire-ce"},
+        status_code=503 if failed else 200,
+    )
+
+
+def _bind_session_key(app, secret, visited=None):
+    """Use the root profile's session key across its mounted page applications."""
+    visited = set() if visited is None else visited
+    if id(app) in visited:
+        return
+    visited.add(id(app))
+    for middleware in getattr(app, "user_middleware", []):
+        if middleware.cls is SessionMiddleware:
+            middleware.kwargs["secret_key"] = secret
+    if hasattr(app, "middleware_stack"):
+        app.middleware_stack = None
+    for route in getattr(app, "routes", []):
+        if isinstance(route, Mount):
+            _bind_session_key(route.app, secret, visited)
+
 
 def _attach_runtime_to_app_states(runtime) -> None:
     """Attach the effective runtime to all mounted app states."""
@@ -250,6 +223,7 @@ def create_app(
     tracking_store.rebind(get_app_db_path())
     model_store.rebind(get_app_config_dir() / "models")
     db_path = _initialize_app_database()
+    recover_interrupted_tasks()
     # InitWizardService is also a singleton and caches AppState.  A new app
     # config directory must read its own state before the first worker-thread
     # request, rather than inheriting the previous app's cached object.
@@ -260,6 +234,7 @@ def create_app(
         _check_single_instance()
 
     runtime = None
+    startup_error = ""
     reg = BrokerRegistry()
     try:
         if init_wizard.is_initialized():
@@ -275,13 +250,14 @@ def create_app(
             except Exception as exc:
                 logger.warning(f"定时任务注册失败: {exc}")
     except Exception as exc:
+        startup_error = str(exc)
         logger.warning(f"应用运行时初始化失败，将进入初始化向导模式: {exc}")
 
     auth = AuthManager(
         db_path=str(db_path),
         config={
             "login_path": "/auth/login",
-            "public_paths": ["/init-wizard", r"/init-wizard/.*"],
+            "public_paths": ["/init-wizard", r"/init-wizard/.*", "/api/health"],
         },
     )
     # AuthManager is a process singleton, while the factory supports isolated
@@ -293,6 +269,7 @@ def create_app(
         auth.rebind_database(str(db_path))
 
     app, rt = fast_app(
+        lifespan=application_lifespan,
         hdrs=AppTheme.headers(),
         before=auth.create_beforeware(),
         middleware=[
@@ -305,21 +282,16 @@ def create_app(
             BaseTradeError: exception_handler,
         },
         routes=[
+            Route("/api/health", _health_response, methods=["GET"]),
             Mount(
                 "/static",
-                StaticFiles(
-                    directory=str(
-                        Path(__file__).resolve().parent / "web" / "static"
-                    )
-                ),
+                StaticFiles(directory=str(Path(__file__).resolve().parent / "web" / "static")),
                 name="static",
             ),
             Route(
                 "/init-wizard",
                 lambda req: RedirectResponse(
-                    f"/init-wizard/?{req.url.query}"
-                    if req.url.query
-                    else "/init-wizard/"
+                    f"/init-wizard/?{req.url.query}" if req.url.query else "/init-wizard/"
                 ),
             ),
             Mount("/init-wizard", init_wizard_app),
@@ -544,7 +516,9 @@ def create_app(
     )
 
     auth.initialize(app, prefix="/auth")
+    _bind_session_key(app, app.secret_key)
     app.state.runtime = runtime
+    app.state.startup_error = startup_error
     app.state.strategy_runtime_manager = strategy_runtime_manager
     app.state.app_config_dir = get_app_config_dir()
     _attach_root_app_to_app_states(app)

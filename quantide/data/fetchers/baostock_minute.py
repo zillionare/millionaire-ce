@@ -23,9 +23,16 @@ import datetime
 import threading
 import time
 from collections.abc import Iterable
+from contextlib import contextmanager
 from typing import Any
 
 import pandas as pd
+from filelock import FileLock
+
+from quantide.config.paths import get_app_config_dir
+from quantide.data.fetchers.baostock_budget import BaostockBudget
+from quantide.data.fetchers.baostock_budget import BaostockThrottledError as BaostockThrottledError
+from quantide.data.fetchers.capabilities import require_source_asset
 
 #: 单次请求的默认重试次数（网络抖动）
 DEFAULT_RETRIES = 2
@@ -35,8 +42,7 @@ DEFAULT_DAILY_BUDGET = 45000
 BLOCKED_KEYWORDS = ("黑名单", "限制", "频率超限", "冻结")
 
 
-class BaostockThrottledError(RuntimeError):
-    """达到请求预算或被限频（黑名单）时抛出。"""
+_SESSION_LOCK = threading.RLock()
 
 
 class BaostockMinuteFetcher:
@@ -58,11 +64,9 @@ class BaostockMinuteFetcher:
         """
         self._daily_budget = int(daily_budget)
         self._min_history_date = min_history_date
-        self._lock = threading.Lock()
+        self._lock = _SESSION_LOCK
         self._logged_in = False
-        self._requests_today = 0
-        self._budget_date: datetime.date = datetime.date.today()
-        self._blacklisted_until: datetime.datetime | None = None
+        self._budget = BaostockBudget(get_app_config_dir() / "baostock-budget.json", daily_budget)
 
     # ------------------------------------------------------------------
     # 会话管理
@@ -92,7 +96,6 @@ class BaostockMinuteFetcher:
             self._logged_in = False
 
     def __enter__(self) -> BaostockMinuteFetcher:
-        self._ensure_login()
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -101,51 +104,43 @@ class BaostockMinuteFetcher:
     # ------------------------------------------------------------------
     # 预算与黑名单
     # ------------------------------------------------------------------
-    def _roll_budget(self) -> None:
-        """跨日重置请求计数。"""
-        today = datetime.date.today()
-        if today != self._budget_date:
-            self._budget_date = today
-            self._requests_today = 0
-
     @property
     def requests_today(self) -> int:
-        """今日已用请求数。"""
-        return self._requests_today
+        """Read the shared count, including requests reserved by previous processes."""
+        return int(self._budget.status().get("used", 0))
 
     @property
     def budget_remaining(self) -> int:
-        """今日剩余请求数。"""
-        return max(0, self._daily_budget - self._requests_today)
+        return max(0, self._budget.limit - self.requests_today)
 
     def _check_budget(self) -> None:
-        """检查黑名单状态与每日预算。"""
-        now = datetime.datetime.now()
-        if self._blacklisted_until and now < self._blacklisted_until:
-            remaining = self._blacklisted_until - now
-            raise BaostockThrottledError(
-                f"BaoStock 处于黑名单冻结期，剩余 {remaining}（解除后还需等待约 5 分钟）"
-            )
-        self._roll_budget()
-        if self._requests_today >= self._daily_budget:
-            raise BaostockThrottledError(
-                f"BaoStock 今日请求预算已用尽（{self._requests_today}/{self._daily_budget}），"
-                "请明日继续或调高预算"
-            )
+        self._budget.check()
 
     def _consume(self) -> None:
-        self._requests_today += 1
+        self._budget.consume()
 
     def _handle_error(self, message: str) -> None:
-        """处理抓取错误；限频/黑名单会标记 6 小时冻结期。"""
         if self._is_blocking(message):
-            self._blacklisted_until = datetime.datetime.now() + datetime.timedelta(
-                hours=6
-            )
-            raise BaostockThrottledError(
-                f"BaoStock 触发黑名单/访问限制，暂停 6 小时: {message}"
-            )
+            until = self._budget.freeze()
+            raise BaostockThrottledError(f"BaoStock 黑名单冻结/冷却期至 {until}: {message}")
         raise BaostockThrottledError(f"BaoStock 请求失败: {message}")
+
+    def _retry_error(self, message, attempt):
+        if self._is_blocking(message) or attempt >= DEFAULT_RETRIES:
+            self._handle_error(message)
+        time.sleep(attempt + 1)
+
+    @contextmanager
+    def _session(self):
+        # BaoStock uses a module-global socket. Lock login, query iteration and logout
+        # together across all fetchers, and serialize other local processes as well.
+        with self._lock, FileLock(str(self._budget.path) + ".session.lock", timeout=60):
+            self._check_budget()
+            try:
+                self._ensure_login()
+                yield
+            finally:
+                self.close()
 
     # ------------------------------------------------------------------
     # 抓取
@@ -155,6 +150,7 @@ class BaostockMinuteFetcher:
         """把统一代码转成 BaoStock 格式（sh.600000 / sz.000001）。"""
         code = asset.strip().upper()
         if "." in code:
+            require_source_asset("baostock", code)
             number, market = code.split(".", 1)
             return f"{market.lower()}.{number}"
         if code.startswith(("5", "6", "9", "688", "11")):
@@ -186,11 +182,11 @@ class BaostockMinuteFetcher:
         Returns:
             pd.DataFrame: 字段 date, time, asset, open, high, low, close, volume, amount。
         """
+        self._to_baostock_code(asset)
         if start_date < self._min_history_date:
             start_date = self._min_history_date
-        with self._lock:
-            self._check_budget()
-            self._ensure_login()
+        self._budget.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._session():
             import baostock as bs
 
             last_error = ""
@@ -207,14 +203,12 @@ class BaostockMinuteFetcher:
                     )
                 except Exception as exc:
                     last_error = str(exc)
-                    self._handle_error(last_error)
-                    time.sleep(1.0 * (attempt + 1))
+                    self._retry_error(last_error, attempt)
                     continue
 
                 if rs.error_code != "0":
                     last_error = rs.error_msg
-                    self._handle_error(last_error)
-                    time.sleep(1.0 * (attempt + 1))
+                    self._retry_error(last_error, attempt)
                     continue
 
                 rows: list[list[str]] = []
@@ -226,6 +220,31 @@ class BaostockMinuteFetcher:
                 return self._normalize(frame, asset)
 
             raise BaostockThrottledError(f"BaoStock 抓取失败: {last_error}")
+
+    def fetch_trading_status(self, asset, start, end):
+        """Read explicit suspended-session flags to distinguish absence from source gaps."""
+        code = self._to_baostock_code(asset)
+        self._budget.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._session():
+            import baostock as bs
+
+            self._consume()
+            result = bs.query_history_k_data_plus(
+                code,
+                "date,code,tradestatus",
+                start_date=start.isoformat(),
+                end_date=end.isoformat(),
+                frequency="d",
+                adjustflag="3",
+            )
+            if result.error_code != "0":
+                self._handle_error(result.error_msg)
+            rows = []
+            while result.next():
+                rows.append(result.get_row_data())
+            frame = pd.DataFrame(rows, columns=result.fields)
+            frame["date"] = pd.to_datetime(frame["date"], errors="raise").dt.date
+            return frame
 
     def fetch_many(
         self,

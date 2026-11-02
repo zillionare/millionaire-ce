@@ -46,9 +46,7 @@ def model_config_payload(config: dict[str, Any]) -> dict[str, Any]:
 
 def model_key(strategy_name: str, config: dict[str, Any]) -> str:
     """策略名 + 模型相关配置的稳定键。"""
-    payload = json.dumps(
-        model_config_payload(config), sort_keys=True, default=_json_default
-    )
+    payload = json.dumps(model_config_payload(config), sort_keys=True, default=_json_default)
     digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
     return f"{strategy_name}-{digest}"
 

@@ -113,9 +113,7 @@ class MinuteBarAggregator:
     def is_session(now: datetime.datetime) -> bool:
         """是否处于连续竞价时段（含 11:30/15:00 边界）。"""
         tm = now.time()
-        return (MORNING[0] <= tm <= MORNING[1]) or (
-            AFTERNOON[0] <= tm <= AFTERNOON[1]
-        )
+        return (MORNING[0] <= tm <= MORNING[1]) or (AFTERNOON[0] <= tm <= AFTERNOON[1])
 
     def sample_once(self, now: datetime.datetime | None = None) -> None:
         """采样一次：抓取已订阅标的的最新快照并更新内存 bar。"""
@@ -136,9 +134,7 @@ class MinuteBarAggregator:
             for asset, quote in (quotes or {}).items():
                 self.on_sample(str(asset), quote, now)
 
-    def on_sample(
-        self, asset: str, quote: Any, now: datetime.datetime | None = None
-    ) -> None:
+    def on_sample(self, asset: str, quote: Any, now: datetime.datetime | None = None) -> None:
         """用一条快照更新某标的的当前 30 分钟桶（测试可直接调用）。"""
         now = _naive(now or self._clock())
         if not self.is_session(now) or not self._calendar.is_trade_day(now):
@@ -257,9 +253,7 @@ class MinuteBarAggregator:
             rows = rows[-int(count) :]
         return rows
 
-    def forming(
-        self, asset: str, now: datetime.datetime | None = None
-    ) -> dict[str, Any] | None:
+    def forming(self, asset: str, now: datetime.datetime | None = None) -> dict[str, Any] | None:
         """返回某标的当前未完成桶（已收盘则返回 None）。"""
         now = _naive(now or self._clock())
         with self._lock:
@@ -272,22 +266,35 @@ class MinuteBarAggregator:
     # ------------------------------------------------------------------
     # 清理
     # ------------------------------------------------------------------
-    def clear_between(
-        self, start: datetime.date, end: datetime.date
-    ) -> None:
-        """BaoStock 已入库后丢弃对应日期的内存数据。"""
+    def clear_between(self, start: datetime.date, end: datetime.date, assets=None) -> None:
+        """Discard only the security/session ranges confirmed by durable historical data."""
+        selected = set(assets) if assets is not None else None
         with self._lock:
-            for day in list(self._completed):
-                if start <= day <= end:
-                    self._completed.pop(day, None)
-            for asset, forming in list(self._forming.items()):
-                if start <= forming["date"].date() <= end:
-                    self._forming.pop(asset, None)
-            for asset, last in list(self._last_completed.items()):
-                if start <= last.date() <= end:
-                    self._last_completed.pop(asset, None)
-                    self._last_cum.pop(asset, None)
-                    self._last_cum_day.pop(asset, None)
+            self._clear_completed_days(start, end, selected)
+            self._clear_forming_bars(start, end, selected)
+            self._clear_latest_markers(start, end, selected)
+
+    def _clear_completed_days(self, start, end, selected):
+        for day in list(self._completed):
+            if not start <= day <= end:
+                continue
+            if selected is None:
+                self._completed.pop(day, None)
+            else:
+                for asset in selected:
+                    self._completed[day].pop(asset, None)
+
+    def _clear_forming_bars(self, start, end, selected):
+        for asset, forming in list(self._forming.items()):
+            if (selected is None or asset in selected) and start <= forming["date"].date() <= end:
+                self._forming.pop(asset, None)
+
+    def _clear_latest_markers(self, start, end, selected):
+        for asset, last in list(self._last_completed.items()):
+            if (selected is None or asset in selected) and start <= last.date() <= end:
+                self._last_completed.pop(asset, None)
+                self._last_cum.pop(asset, None)
+                self._last_cum_day.pop(asset, None)
 
 
 #: 全局单例

@@ -7,6 +7,8 @@ from loguru import logger
 from monsterui.all import *
 
 from quantide.data.models.stocks import stock_list
+from quantide.web.application import fast_app
+from quantide.web.components.data_tables import DatasetPagination, DatasetTable
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -14,12 +16,13 @@ from quantide.web.theme import PRIMARY_COLOR, AppTheme
 system_stocks_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _build_stock_table(data: list, page: int = 1, per_page: int = 20, total: int = 0, query: str = ""):
-    """构建股票列表表格"""
-    rows = []
+def _append_security_table_rows(data, rows):
+    """Append security table rows."""
     if data:
         for row in data:
-            list_date_str = str(row.get("list_date", "")).split(" ")[0] if row.get("list_date") else ""
+            list_date_str = (
+                str(row.get("list_date", "")).split(" ")[0] if row.get("list_date") else ""
+            )
             delist_date_str = ""
             if row.get("delist_date") and str(row.get("delist_date")) != "NaT":
                 delist_date_str = str(row.get("delist_date")).split(" ")[0]
@@ -34,65 +37,45 @@ def _build_stock_table(data: list, page: int = 1, per_page: int = 20, total: int
                     Td(
                         Span(row.get("name", "")),
                         delist_info,
-                        cls="px-4 py-2 text-sm text-gray-900"
+                        cls="px-4 py-2 text-sm text-gray-900",
                     ),
                     Td(row.get("pinyin", ""), cls="px-4 py-2 text-sm text-gray-500"),
                     Td(list_date_str, cls="px-4 py-2 text-sm text-gray-500"),
-                    cls="hover:bg-gray-50"
+                    cls="hover:bg-gray-50",
                 )
             )
     else:
-        rows.append(
-            Tr(
-                Td("暂无数据", colspan="4", cls="px-4 py-8 text-center text-gray-500")
-            )
-        )
+        rows.append(Tr(Td("暂无数据", colspan="4", cls="px-4 py-8 text-center text-gray-500")))
+
+
+def _build_stock_table(
+    data: list, page: int = 1, per_page: int = 20, total: int = 0, query: str = ""
+):
+    """构建股票列表表格"""
+    rows = []
+    _append_security_table_rows(data, rows)
 
     total_pages = max(1, (total + per_page - 1) // per_page) if total > 0 else 1
-    pagination_info = f"显示第 {(page - 1) * per_page + 1} 到 {min(page * per_page, total)} 条，共 {total} 条" if total > 0 else "暂无数据"
+    pagination_info = (
+        f"显示第 {(page - 1) * per_page + 1} 到 {min(page * per_page, total)} 条，共 {total} 条"
+        if total > 0
+        else "暂无数据"
+    )
 
     def page_url(p, pp=per_page):
         return f"/system/stocks/?page={p}&per_page={pp}&q={query}"
 
     return Div(
-        Div(
-            Table(
-                Thead(
-                    Tr(
-                        Th("代码", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("名称", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("拼音", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                        Th("上市日期", cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"),
-                    )
-                ),
-                Tbody(*rows),
-                cls="min-w-full divide-y divide-gray-200"
-            ),
-            cls="overflow-x-auto"
+        DatasetTable(["代码", "名称", "拼音", "上市日期"], rows),
+        DatasetPagination(
+            pagination_info,
+            page,
+            per_page,
+            total_pages,
+            page_url,
+            lambda active: f"btn btn-sm {'btn-primary' if active else 'btn-outline'} mx-0.5",
         ),
-        Div(
-            Div(pagination_info, cls="text-sm text-gray-700"),
-            Div(
-                Span("每页: ", cls="text-sm text-gray-600 mr-1"),
-                A("20", href=page_url(1, 20),
-                  cls=f"btn btn-sm {'btn-primary' if per_page == 20 else 'btn-outline'} mx-0.5"),
-                A("50", href=page_url(1, 50),
-                  cls=f"btn btn-sm {'btn-primary' if per_page == 50 else 'btn-outline'} mx-0.5"),
-                A("100", href=page_url(1, 100),
-                  cls=f"btn btn-sm {'btn-primary' if per_page == 100 else 'btn-outline'} mx-0.5"),
-                cls="flex items-center ml-4"
-            ),
-            Div(
-                *[
-                    A(str(p), href=page_url(p),
-                      cls=f"btn btn-sm {'btn-primary' if p == page else 'btn-outline'} mx-0.5")
-                    for p in range(max(1, page - 2), min(total_pages + 1, page + 3))
-                ],
-                cls="flex items-center ml-4"
-            ),
-            cls="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between"
-        ),
-        cls="bg-white rounded-lg shadow overflow-hidden"
+        cls="bg-white rounded-lg shadow overflow-hidden",
     )
 
 
@@ -136,9 +119,9 @@ async def index(req, page: int = 1, per_page: int = 20, q: str = ""):
             Div(
                 UkIcon("list", size=32, cls="mr-3", style=f"color: {PRIMARY_COLOR};"),
                 H2("股票列表", cls="text-2xl font-bold"),
-                cls="flex items-center"
+                cls="flex items-center",
             ),
-            cls="mb-6"
+            cls="mb-6",
         ),
         Div(
             Div(
@@ -156,22 +139,19 @@ async def index(req, page: int = 1, per_page: int = 20, q: str = ""):
                     hx_vals='{"page": "1"}',
                 ),
                 Input(type="hidden", name="per_page", value=str(per_page)),
-                cls="flex-1"
+                cls="flex-1",
             ),
             Button(
                 "立即更新",
                 hx_post="/system/stocks/sync",
                 hx_target="#stocks-content",
                 hx_swap="innerHTML",
-                cls="btn btn-sm btn-secondary"
+                cls="btn btn-sm btn-secondary",
             ),
-            cls="flex justify-between items-center mb-4"
+            cls="flex justify-between items-center mb-4",
         ),
-        Div(
-            _build_stock_table(data, page, per_page, total, query),
-            id="stocks-content"
-        ),
-        cls="p-8"
+        Div(_build_stock_table(data, page, per_page, total, query), id="stocks-content"),
+        cls="p-8",
     )
 
     layout.main_block = page_content
@@ -199,7 +179,7 @@ async def sync_stocks():
         return Div(
             UkIcon("alert-circle", cls="text-red-500 mr-2"),
             f"同步失败: {str(e)}",
-            cls="flex items-center p-4 bg-red-50 text-red-700 rounded-lg"
+            cls="flex items-center p-4 bg-red-50 text-red-700 rounded-lg",
         )
 
 

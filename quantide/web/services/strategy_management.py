@@ -198,7 +198,8 @@ def filter_strategies(
     if query:
         q = query.lower()
         result = [
-            s for s in result
+            s
+            for s in result
             if q in s.name.lower() or q in s.description.lower() or q in s.strategy_id.lower()
         ]
     return result
@@ -229,7 +230,9 @@ def scan_strategies(*, new_count: int, updated_count: int, failed: bool = False)
         ScanResult 实例.
     """
     if failed:
-        return ScanResult(new_count=0, updated_count=0, failed=True, message="扫描失败, 列表保留扫描前状态")
+        return ScanResult(
+            new_count=0, updated_count=0, failed=True, message="扫描失败, 列表保留扫描前状态"
+        )
     return ScanResult(
         new_count=new_count,
         updated_count=updated_count,

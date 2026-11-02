@@ -55,15 +55,11 @@ class CalendarSDK:
         """向前/向后移位 N 个交易日; offset=0 返回最近已结束交易日 (FR-014)."""
         return self._calendar.day_shift(date, offset)
 
-    def count_trading_days(
-        self, start: datetime.date, end: datetime.date
-    ) -> int:
+    def count_trading_days(self, start: datetime.date, end: datetime.date) -> int:
         """[start, end] 间的交易日数 (含起止) (FR-014)."""
         return self._calendar.count_trading_days(start, end)
 
-    def get_trade_dates(
-        self, start: datetime.date, end: datetime.date
-    ) -> list[datetime.date]:
+    def get_trade_dates(self, start: datetime.date, end: datetime.date) -> list[datetime.date]:
         """[start, end] 间所有交易日 (FR-014)."""
         return self._calendar.get_trade_dates(start, end)
 
@@ -129,9 +125,7 @@ class SecurityListSDK:
         """按名字/代码/拼音模糊查询 (兼容旧接口)."""
         q = query.lower()
         return [
-            s
-            for s in self._securities.values()
-            if q in s.symbol.lower() or q in s.name.lower()
+            s for s in self._securities.values() if q in s.symbol.lower() or q in s.name.lower()
         ]
 
     def get_info(self, symbol: str) -> Security | None:

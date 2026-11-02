@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
 
+from quantide.core.strategy_metadata import metadata_annotations
 from quantide.data.models.base import Entity, new_uuid_id
 
 
@@ -33,16 +33,9 @@ SKIP_BUILTIN_OVERRIDDEN = "BuiltinOverridden"
 
 @dataclass
 class StrategyMetadata:
-    """v0.2: 单个策略的元数据 (from spec FR-020)"""
+    """Mutable legacy DTO, with required fields and its additional diagnostics list."""
 
-    strategy_id: str
-    name: str
-    description: str
-    strategy_type: Literal["independent", "risk"]
-    module: str
-    is_builtin: bool
-    default_config: dict  # dict[str, ParamSpec]
-    skipped_reasons: list  # list[SkippedEntry], 此策略的 skip 原因
+    __annotations__ = {**metadata_annotations(), "skipped_reasons": list}
 
 
 @dataclass

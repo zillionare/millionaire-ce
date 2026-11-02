@@ -11,6 +11,7 @@ import tushare as ts
 from loguru import logger
 
 from quantide.config.settings import get_tushare_token
+from quantide.core.bar_schema import STANDARD_INDEX_BAR_COLUMNS
 from quantide.core.message import msg_hub
 
 
@@ -106,9 +107,8 @@ def _fetch_by_dates(
     errors = []
 
     for date in dates:
-        str_date = date.strftime("%Y%m%d")
         try:
-            df = func(trade_date=str_date, fields=fields, **kwargs)
+            df = func(trade_date=date.strftime("%Y%m%d"), fields=fields, **kwargs)
         except Exception as e:
             logger.error("调用 {} 时出错, {}", func_name, e)
             errors.append([func_name, date, f"调用{func_name}时出现异常"])
@@ -133,9 +133,7 @@ def _fetch_by_dates(
     if len(_rename_as) != 0:
         result = result.rename(columns=_rename_as)
 
-    result["date"] = pd.to_datetime(result["date"], format="%Y%m%d").astype(
-        "datetime64[ms]"
-    )
+    result["date"] = pd.to_datetime(result["date"], format="%Y%m%d").astype("datetime64[ms]")
     result = result.sort_values(by="date")
 
     return result, errors
@@ -272,9 +270,8 @@ def fetch_daily_basic(
     frames: list[pd.DataFrame] = []
     errors: list[list] = []
     for index, date in enumerate(dates, start=1):
-        str_date = date.strftime("%Y%m%d")
         try:
-            df = pro.daily_basic(trade_date=str_date, fields=fields)
+            df = pro.daily_basic(trade_date=date.strftime("%Y%m%d"), fields=fields)
         except Exception as exc:
             logger.error("调用 daily_basic 时出错, {}", exc)
             errors.append(["daily_basic", date, f"调用daily_basic时出现异常: {exc}"])
@@ -329,9 +326,7 @@ def fetch_stock_list() -> pd.DataFrame | None:
     cols = ["asset", "name", "pinyin", "list_date", "delist_date"]
 
     logger.info(f"获取股票列表成功，共 {len(df)} 条记录")
-    df = df.rename(
-        columns={"ts_code": "asset", "cnspell": "pinyin", "list_date": "list_date"}
-    )
+    df = df.rename(columns={"ts_code": "asset", "cnspell": "pinyin", "list_date": "list_date"})
 
     df["pinyin"] = df["pinyin"].str.upper()
     df["list_date"] = pd.to_datetime(df["list_date"]).dt.date
@@ -457,10 +452,9 @@ def fetch_st_info(
     errors = []
 
     for date in valid_dates:
-        str_date = date.strftime("%Y%m%d")
         try:
             df = pro.stock_st(
-                trade_date=str_date,
+                trade_date=date.strftime("%Y%m%d"),
                 fields="trade_date,ts_code,name,type,type_name",
             )
         except Exception as e:
@@ -486,9 +480,7 @@ def fetch_st_info(
     if len(df) == 0:
         df = _empty_st_info_frame()
     else:
-        df["date"] = pd.to_datetime(df["date"], format="%Y%m%d").astype(
-            "datetime64[ms]"
-        )
+        df["date"] = pd.to_datetime(df["date"], format="%Y%m%d").astype("datetime64[ms]")
         df = df.sort_values(by=["date", "asset"]).reset_index(drop=True)
         # 接口仅返回当天为 ST 的资产，将这些行标记为 True
         df["is_st"] = pd.Series([True] * len(df), dtype="boolean")
@@ -523,16 +515,12 @@ def fetch_bars_ext(
 
     if phase_callback:
         phase_callback("limit")
-    msg_hub.publish(
-        "fetch_data_progress", {"msg": "正在获取每日涨跌停限价信息..."}
-    )
+    msg_hub.publish("fetch_data_progress", {"msg": "正在获取每日涨跌停限价信息..."})
     limit, errors3 = fetch_limit_price(dates)
 
     if phase_callback:
         phase_callback("st")
-    msg_hub.publish(
-        "fetch_data_progress", {"msg": "正在获取 ST（特别处理） 信息..."}
-    )
+    msg_hub.publish("fetch_data_progress", {"msg": "正在获取 ST（特别处理） 信息..."})
     st, errors4 = fetch_st_info(dates)
 
     errors = []
@@ -650,16 +638,7 @@ def fetch_index_bars(
     if not frames:
         return pd.DataFrame(), errors
     out = pd.concat(frames, ignore_index=True)
-    keep = [
-        "date",
-        "index_code",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "amount",
-    ]
+    keep = STANDARD_INDEX_BAR_COLUMNS
     for col in keep:
         if col not in out.columns:
             out[col] = pd.NA
@@ -695,9 +674,7 @@ def fetch_index_weights(
     for code in index_codes:
         for snapshot in snapshot_dates:
             try:
-                df = pro.index_weight(
-                    index_code=code, trade_date=snapshot.strftime("%Y%m%d")
-                )
+                df = pro.index_weight(index_code=code, trade_date=snapshot.strftime("%Y%m%d"))
             except Exception as exc:
                 logger.warning("获取指数成分失败 {} {}: {}", code, snapshot, exc)
                 errors.append(["index_weight", code, str(exc)])

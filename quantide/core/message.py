@@ -1,14 +1,15 @@
-"""
-MessageHub 模块：进程内异步消息中心
+"""MessageHub 模块：进程内异步消息中心
 
 本模块提供了一个高性能、线程安全的单例消息总线 `msg_hub`，用于系统内部各组件之间的解耦通信。
 
 主要特性：
-1. **异步分发**：`publish` 调用立即返回，消息由内部后台线程异步分发，不会卡住发布者（如行情推送线程）。
+1. **异步分发**：`publish` 调用立即返回，消息由内部后台线程异步分发，
+不会卡住发布者（如行情推送线程）。
 2. **线程安全**：支持多线程环境下的安全订阅、取消订阅和消息发布。
 3. **混合模式**：
    - **推送 (Push)**：通过 `subscribe` 注册回调函数，消息到达时自动调用。
-   - **拉取 (Pull)**：如果没有订阅者，消息会自动进入内部队列，可通过 `get` 或 `get_no_wait` 获取。
+   - **拉取 (Pull)**：如果没有订阅者，消息会自动进入内部队列，可通过 `get` 或 `get_no_wait`
+   获取。
 4. **异常隔离**：单个订阅者回调函数的崩溃不会影响其他订阅者或系统运行。
 
 使用说明：
@@ -49,7 +50,6 @@ MessageHub 模块：进程内异步消息中心
 
 5. **停止服务**：
    - 系统退出时可调用 `msg_hub.stop()` 安全停止分发后台线程。
-
 """
 
 import datetime
@@ -196,6 +196,17 @@ class MessageHub:
             queue = self._queues[topic]
 
         return queue.get(timeout=timeout)
+
+    def start(self):
+        """Restart delivery when a new application lifespan owns this process."""
+        with self._lock:
+            if self._worker.is_alive():
+                return
+            self._stop_event.clear()
+            self._worker = threading.Thread(
+                target=self._dispatch_loop, name="MessageHubWorker", daemon=True
+            )
+            self._worker.start()
 
     def stop(self):
         """停止分发线程"""
