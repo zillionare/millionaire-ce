@@ -109,7 +109,8 @@ GitHub Actions secrets：
 | `PYPI_API_TOKEN` | 可选；配置后发布 PyPI |
 
 密钥从环境变量读取，不写入仓库或 SDK token 文件，不进入质量报告。
-本机环境变量不会自动上传为 GitHub secret，需要由仓库维护者配置。
+本机环境变量不会自动上传为 GitHub secret。本仓库的 TUSHARE_TOKEN 已配置在
+GitHub 的 `CI` environment；真实源 job 显式绑定该环境，也允许手工执行严格验证。
 
 ```bash
 # 本机显式执行真实源检查；要求已设置 TUSHARE_TOKEN

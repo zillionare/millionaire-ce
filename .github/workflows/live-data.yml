@@ -1,6 +1,12 @@
 name: Live data source validation
 
 on:
+  workflow_dispatch:
+    inputs:
+      required:
+        description: Require actual passing source probes
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       required:
@@ -16,6 +22,7 @@ permissions:
 jobs:
   live-data:
     runs-on: ubuntu-latest
+    environment: CI
     timeout-minutes: 5
     env:
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
