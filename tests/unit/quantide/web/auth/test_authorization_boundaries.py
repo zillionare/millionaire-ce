@@ -48,3 +48,20 @@ async def test_admin_writes_reject_unprivileged_callers_before_reading_form_or_w
     assert result.status_code == 403
     request.form.assert_not_awaited()
     assert repository.mock_calls == []
+
+
+def test_auth_storage_releases_file_and_can_reopen_after_shutdown(tmp_path, monkeypatch):
+    from quantide.web.auth.manager import AuthManager
+
+    monkeypatch.setattr(AuthManager, "_instance", None)
+    database = tmp_path / "auth.db"
+    auth = AuthManager(database)
+    auth.initialize()
+    auth.close()
+    retired = tmp_path / "auth-retired.db"
+    database.replace(retired)
+    retired.replace(database)
+    auth.reopen()
+    assert auth.user_repo.get_by_username("unknown") is None
+    auth.close()
+    database.unlink()
