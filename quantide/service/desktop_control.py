@@ -43,28 +43,32 @@ def create_controller():
     window.title("Millionaire CE")
     window.geometry("440x240")
     status = tk.StringVar(value="Millionaire CE 后台服务")
+    action_lock = threading.Lock()
     tk.Label(window, textvariable=status, wraplength=410).pack(pady=18)
 
     def action(command):
         def work():
-            try:
-                if sys.platform == "win32" and not ctypes.windll.shell32.IsUserAnAdmin():
-                    arguments = f"-m quantide.cli service {command}"
-                    result = ctypes.windll.shell32.ShellExecuteW(
-                        None, "runas", sys.executable, arguments, None, 1
-                    )
-                    message = "已请求管理员操作" if result > 32 else "管理员操作未执行"
-                else:
-                    result = subprocess.run(
-                        [sys.executable, "-m", "quantide.cli", "service", command],
-                        capture_output=True,
-                        text=True,
-                        timeout=40,
-                    )
-                    message = (result.stdout or result.stderr or f"exit={result.returncode}")[-500:]
-                window.after(0, status.set, message)
-            except Exception as exc:
-                window.after(0, status.set, str(exc))
+            with action_lock:
+                try:
+                    if sys.platform == "win32" and not ctypes.windll.shell32.IsUserAnAdmin():
+                        arguments = f"-m quantide.cli service {command}"
+                        result = ctypes.windll.shell32.ShellExecuteW(
+                            None, "runas", sys.executable, arguments, None, 1
+                        )
+                        message = "已请求管理员操作" if result > 32 else "管理员操作未执行"
+                    else:
+                        result = subprocess.run(
+                            [sys.executable, "-m", "quantide.cli", "service", command],
+                            capture_output=True,
+                            text=True,
+                            timeout=40,
+                        )
+                        message = (result.stdout or result.stderr or f"exit={result.returncode}")[
+                            -500:
+                        ]
+                    window.after(0, status.set, message)
+                except Exception as exc:
+                    window.after(0, status.set, str(exc))
 
         threading.Thread(target=work, daemon=True).start()
 

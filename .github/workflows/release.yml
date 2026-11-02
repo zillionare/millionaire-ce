@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags: ['v*']
 
@@ -20,6 +21,7 @@ jobs:
 
   publish:
     name: publish
+    if: github.event_name == 'push'
     needs: [ci, live-data]
     runs-on: ubuntu-latest
     timeout-minutes: 10
