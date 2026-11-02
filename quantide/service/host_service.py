@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from xml.etree.ElementTree import Element, SubElement, tostring
 
+from quantide.config.output_paths import external_runtime_path
 from quantide.config.paths import get_app_config_dir, normalize_data_home
 from quantide.core.atomic_files import atomic_path
 
@@ -42,8 +43,8 @@ def _launchd_profile(system, user):
     base.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chown(base, owner.pw_uid, owner.pw_gid)
     environment = {
-        "QUANTIDE_CONFIG_HOME": os.getenv("QUANTIDE_CONFIG_HOME", str(base / "config")),
-        "QUANTIDE_DATA_HOME": os.getenv("QUANTIDE_DATA_HOME", str(base / "data")),
+        name: str(external_runtime_path(os.environ.get(name, "").strip() or base / folder))
+        for name, folder in (("QUANTIDE_CONFIG_HOME", "config"), ("QUANTIDE_DATA_HOME", "data"))
     }
     for directory in [
         *map(Path, environment.values()),
@@ -111,12 +112,10 @@ def _install_systemd():
 
 
 def _install_windows():
-    root = install_root()
-    directory = Path(
-        os.environ.get(
-            "MILLIONAIRE_SERVICE_HOME",
-            str(Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "MillionaireCE"),
-        )
+    root = external_runtime_path(install_root())
+    directory = external_runtime_path(
+        os.environ.get("MILLIONAIRE_SERVICE_HOME", "").strip()
+        or Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "MillionaireCE"
     )
     directory.mkdir(parents=True, exist_ok=True)
     service = Element("service")

@@ -11,11 +11,16 @@ import sqlite3
 import threading
 from pathlib import Path
 
+from quantide.config.output_paths import external_runtime_path
+
 
 class SimulatedCounter:
     """A small long-only A-share counter with T+1 and idempotent client IDs."""
 
     def __init__(self, path: str | Path, principal=10000.0, commission=0.0, stamp_tax=0.0):
+        if str(path) != ":memory:":
+            path = external_runtime_path(path)
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._connection = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
         self._connection.execute("PRAGMA journal_mode=WAL")

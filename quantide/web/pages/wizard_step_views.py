@@ -13,7 +13,7 @@ from quantide.config.dev_stubs import (
     ensure_dev_stubs_started,
 )
 from quantide.config.features import supports_live_trading
-from quantide.config.paths import DEFAULT_DATA_HOME
+from quantide.config.paths import normalize_data_home
 from quantide.web.components.tencent_trial import TencentTrialControl
 from quantide.web.pages.wizard_components import (
     FormLabel,
@@ -183,14 +183,14 @@ def Step2_Runtime(state: dict | None = None):
             FormLabel(
                 "数据存储位置",
                 tooltip=(
-                    "行情数据和相关缓存将存放在此处。留空时默认使用 "
-                    "~/.quantide。配置数据库固定保存在系统配置目录。"
+                    "行情数据和相关缓存将存放在此处。留空时读取环境配置，未配置则使用"
+                    "系统临时目录。长期运行请指定持久目录。配置数据库保存在系统配置目录。"
                 ),
             ),
             Input(
                 name=RUNTIME_FORM_FIELDS["home"],
                 value=values[RUNTIME_FORM_FIELDS["home"]],
-                placeholder=DEFAULT_DATA_HOME,
+                placeholder=normalize_data_home(),
                 cls="uk-input mb-4",
             ),
             # 只允许本机访问
@@ -369,9 +369,7 @@ def Step5_DataSetup(state: dict | None = None):
     """步骤5：数据源设置及下载"""
     if dev_stubs_enabled():
         state = state or {}
-        app_home = str(
-            state.get(RUNTIME_FORM_FIELDS["home"], DEFAULT_DATA_HOME) or DEFAULT_DATA_HOME
-        )
+        app_home = normalize_data_home(state.get(RUNTIME_FORM_FIELDS["home"]))
         return Div(
             Div(
                 P(

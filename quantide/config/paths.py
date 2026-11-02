@@ -4,22 +4,24 @@ import os
 import sys
 from pathlib import Path
 
-DEFAULT_DATA_HOME = "~/.quantide"
+from quantide.config.output_paths import external_runtime_path, temporary_runtime_dir
+
+DEFAULT_DATA_HOME = str(temporary_runtime_dir() / "market")
 _APP_CONFIG_DIR_OVERRIDE: Path | None = None
 
 
 def normalize_data_home(home: str | Path | None = None) -> str:
     """Normalize the configured market-data home path.
 
-    Blank values fall back to the default per-user data directory and any
-    leading `~` is expanded for persistence.
+    Blank values use the environment, then a per-user temporary directory.
+    Explicit paths expand `~` and may never point into the source checkout.
     """
     text = (
         str(home or "").strip()
         or os.environ.get("QUANTIDE_DATA_HOME", "").strip()
-        or DEFAULT_DATA_HOME
+        or str(temporary_runtime_dir() / "market")
     )
-    return str(Path(text).expanduser())
+    return str(external_runtime_path(text))
 
 
 def set_app_config_dir_override(path: str | Path | None) -> Path | None:
@@ -33,7 +35,7 @@ def set_app_config_dir_override(path: str | Path | None) -> Path | None:
     if path is None or not str(path).strip():
         _APP_CONFIG_DIR_OVERRIDE = None
     else:
-        _APP_CONFIG_DIR_OVERRIDE = Path(path).expanduser()
+        _APP_CONFIG_DIR_OVERRIDE = external_runtime_path(path)
     return previous
 
 
@@ -50,18 +52,18 @@ def get_app_config_dir() -> Path:
 
     configured = os.environ.get("QUANTIDE_CONFIG_HOME", "").strip()
     if configured:
-        return Path(configured).expanduser()
+        return external_runtime_path(configured)
 
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA")
         if base:
-            return Path(base).expanduser() / "quantide"
-        return Path.home() / "AppData" / "Roaming" / "quantide"
+            return external_runtime_path(Path(base) / "quantide")
+        return external_runtime_path(Path.home() / "AppData" / "Roaming" / "quantide")
 
     base = os.environ.get("XDG_CONFIG_HOME")
     if base:
-        return Path(base).expanduser() / "quantide"
-    return Path.home() / ".config" / "quantide"
+        return external_runtime_path(Path(base) / "quantide")
+    return external_runtime_path(Path.home() / ".config" / "quantide")
 
 
 def ensure_app_config_dir() -> Path:

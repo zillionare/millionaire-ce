@@ -164,7 +164,7 @@ def build_report(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-home", default="~/.quantide")
+    parser.add_argument("--data-home", default=None, help="行情目录；默认读取配置")
     parser.add_argument("--date", default=datetime.date.today().isoformat())
     parser.add_argument("--time", default="14:57")
     parser.add_argument("--runtime-id", default="")

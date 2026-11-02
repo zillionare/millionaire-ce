@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from quantide.core.init_wizard_steps import WIZARD_TOTAL_STEPS
+from quantide.config.paths import normalize_data_home
 from quantide.data.models.app_state import AppState
 from quantide.web.pages import init_wizard as init_wizard_page
 
@@ -186,7 +187,7 @@ def reset_init_wizard_page_state():
 def test_runtime_form_state_uses_canonical_defaults():
     values = init_wizard_page._runtime_form_state({})
 
-    assert values[init_wizard_page.RUNTIME_FORM_FIELDS["home"]] == "~/.quantide"
+    assert values[init_wizard_page.RUNTIME_FORM_FIELDS["home"]] == normalize_data_home()
     assert values[init_wizard_page.RUNTIME_FORM_FIELDS["port"]] == 8130
     assert values[init_wizard_page.RUNTIME_FORM_FIELDS["prefix"]] == "/quantide"
     assert values[init_wizard_page.RUNTIME_FORM_FIELDS["localhost_only"]] is True

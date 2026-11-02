@@ -23,6 +23,15 @@ UNEXPECTED_ROOTS = (
     ".mypy_cache",
     ".ruff_cache",
     ".sesskey",
+    "logs",
+    "models",
+    "htmlcov",
+    "coverage.json",
+    "coverage.xml",
+    "quantide.db",
+    "quantide.db-wal",
+    "quantide.db-shm",
+    "millionaire-service.xml",
 )
 
 

@@ -55,6 +55,7 @@ from typing import (
 import polars as pl
 import sqlite_utils as su
 
+from quantide.config.output_paths import external_runtime_path
 from quantide.core.singleton import singleton
 from quantide.data import portfolio_ledger
 from quantide.data.models.app_state import AppState
@@ -86,11 +87,15 @@ class SQLiteDB:
         self._initialized = False
 
     def is_initialized_for(self, db_path: str | Path) -> bool:
-        next_path = str(Path(db_path).expanduser())
+        next_path = (
+            ":memory:" if str(db_path) == ":memory:" else str(external_runtime_path(db_path))
+        )
         return self._initialized and self.db_path == next_path and next_path != ":memory:"
 
     def init(self, db_path: str | Path):
-        next_path = str(Path(db_path).expanduser())
+        next_path = (
+            ":memory:" if str(db_path) == ":memory:" else str(external_runtime_path(db_path))
+        )
         with self._lock:
             if self.is_initialized_for(next_path):
                 return

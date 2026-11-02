@@ -64,6 +64,13 @@ class ArtifactPathsTest(unittest.TestCase):
             ):
                 self.assertEqual(artifact_paths.main(["--check-layout"]), 1)
 
+    def test_runtime_and_report_output_are_also_layout_violations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("quantide.db", "quantide.db-wal", "coverage.json", "logs", "models"):
+                (root / name).touch()
+            self.assertEqual(len(artifact_paths.layout_errors(root)), 5)
+
     def test_development_or_generated_content_blocks_wheel_and_sdist(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

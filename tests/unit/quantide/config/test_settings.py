@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from quantide.config.branding import DEFAULT_EDITION, get_branding
+from quantide.config.output_paths import temporary_runtime_dir
 import quantide.config.dev_stubs as dev_stubs_module
 import quantide.config.settings as settings_module
 from quantide.config.settings import (
@@ -61,7 +62,7 @@ def test_get_settings_uses_defaults_when_db_is_unavailable(monkeypatch):
     assert settings.edition == DEFAULT_EDITION
     assert settings.product_name == get_branding().product_name
     assert settings.release_package == get_branding().release_package
-    assert settings.app_home == str(Path("~/.quantide").expanduser())
+    assert settings.app_home == str(temporary_runtime_dir() / "market")
     assert settings.app_host == "127.0.0.1"
     assert settings.app_port == 8130
     assert settings.app_prefix == "/quantide"

@@ -6,6 +6,7 @@ from typing import Any
 from fasthtml.common import *
 from monsterui.all import *
 
+from quantide.config.paths import normalize_data_home
 from quantide.web.pages.wizard_state import (
     DATA_INIT_DEFAULTS,
     DATA_INIT_FIELD_ALIASES,
@@ -94,7 +95,8 @@ def _extract_form_updates(
 
 
 def _runtime_form_state(source: dict[str, Any] | None = None) -> dict[str, Any]:
-    values = _normalize_form_values(source, RUNTIME_FIELD_ALIASES, RUNTIME_DEFAULTS)
+    defaults = {**RUNTIME_DEFAULTS, RUNTIME_FORM_FIELDS["home"]: normalize_data_home()}
+    values = _normalize_form_values(source, RUNTIME_FIELD_ALIASES, defaults)
     host = str(
         values[RUNTIME_FORM_FIELDS["host"]] or RUNTIME_DEFAULTS[RUNTIME_FORM_FIELDS["host"]]
     ).strip()

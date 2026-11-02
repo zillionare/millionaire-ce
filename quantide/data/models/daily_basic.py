@@ -15,7 +15,8 @@ import polars as pl
 from filelock import FileLock
 from loguru import logger
 
-from quantide.config.settings import get_tushare_token
+from quantide.config.output_paths import external_runtime_path
+from quantide.config.settings import get_data_home, get_tushare_token
 from quantide.core.atomic_files import write_parquet
 from quantide.core.singleton import singleton
 from quantide.data.coverage import require_date_coverage, trading_sessions
@@ -31,21 +32,21 @@ class DailyBasic:
     """
 
     def __init__(self) -> None:
-        self._path: Path = self._default_path()
+        self._path: Path | None = None
         self._data: pl.DataFrame = pl.DataFrame()
         self._loaded = False
 
     @staticmethod
     def _default_path() -> Path:
-        return Path("~/.quantide/data/daily_basic.parquet").expanduser()
+        return Path(get_data_home()) / "data/daily_basic.parquet"
 
     @property
     def path(self) -> Path:
-        return self._path
+        return self._path if self._path is not None else self._default_path()
 
     @property
     def is_available(self) -> bool:
-        return self._path.exists()
+        return self.path.exists()
 
     @property
     def data(self) -> pl.DataFrame:
@@ -61,11 +62,11 @@ class DailyBasic:
         if path is not None:
             self._path = Path(path).expanduser()
         self._loaded = False
-        if not self._path.exists():
-            logger.warning("daily basic store not found: {}", self._path)
+        if not self.path.exists():
+            logger.warning("daily basic store not found: {}", self.path)
             return self
         try:
-            data = pl.read_parquet(self._path)
+            data = pl.read_parquet(self.path)
         except Exception as exc:  # pragma: no cover - corrupt file is an ops issue
             logger.exception("failed to load daily basic store: {}", exc)
             return self
@@ -91,7 +92,7 @@ class DailyBasic:
             logger.error(
                 "daily basic store missing columns {}: {}",
                 sorted(required - set(data.columns)),
-                self._path,
+                self.path,
             )
             return pl.DataFrame()
         return data.unique(subset=["date", "asset"], keep="last").sort(["date", "asset"])
@@ -180,7 +181,7 @@ class DailyBasic:
         if errors:
             raise RuntimeError(f"daily_basic source failed: {errors}")
         require_date_coverage(frame, dates, "daily_basic")
-        return self._merge_and_save(frame, Path(path or self._path).expanduser())
+        return self._merge_and_save(frame, external_runtime_path(path or self.path))
 
     def _merge_and_save(self, frame, target: Path) -> int:
         """Serialize read/merge/replace and retain the existing file on any failure."""

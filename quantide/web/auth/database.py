@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastlite import database
 
+from quantide.config.output_paths import external_runtime_path
 from quantide.config.paths import get_app_db_path
 
 
@@ -12,6 +13,8 @@ class AuthDatabase:
     def __init__(self, db_path: str | Path | None = None):
         if db_path is None:
             db_path = get_app_db_path()
+        if str(db_path) != ":memory:":
+            db_path = external_runtime_path(db_path)
         # Ensure directory exists
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         # Create database connection

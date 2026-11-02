@@ -50,6 +50,27 @@ PowerShell 中将第一行改为 `$ce_artifacts = python -m scripts.artifact_pat
 根目录 `data`、`dist`、`packaging`、`quality-reports`、`review`、`site` 等目录。
 wheel/sdist 校验还会拒绝开发管理文件和生成物，保留合法的 `quantide/data` Python 模块。
 
+## 运行时路径
+
+`init_data()`、`init_data(None)` 和空白路径使用同一解析流程：显式参数 → 已保存的
+wizard 数据目录 → `QUANTIDE_DATA_HOME` → 系统临时目录中的
+`millionaire-ce/runtime-<用户标识>/market`。默认读取配置数据库后再选择行情目录；
+不再将空字符串当成当前工作目录。Windows 的临时目录取自系统 `%TEMP%`。
+因子分析 CLI、ML 示例和 `daily_basic` 均复用该配置。
+
+`start.sh` 的开发日志读取 `QUANTIDE_LOG_HOME`，未配置时写入同一临时根目录的
+`logs/development.log`。构建/测试报告仍由 `MILLIONAIRE_ARTIFACTS_DIR` 单独管理。
+源码启动的新实验若需要重启后长期保留行情，应在 wizard 中明确选择持久目录。
+
+配置/认证/账户事实属于持久状态，继续使用 `QUANTIDE_CONFIG_HOME`、app factory
+指定目录或系统用户配置目录；原生安装器会显式选择持久服务数据目录。
+已有 wizard 数据目录不自动迁移。源码树内的行情目录、配置目录、数据库及模型
+输出会在写入前拒绝，包括相对路径和符号链接别名。
+
+pytest 在导入应用前将配置与数据目录隔离到临时测试 profile；回归测试覆盖空参数、
+冷启动读取已保存配置、环境变量、临时兜底和错误路径。agent 必须遵守根目录
+`AGENTS.md` 的同一产物规则，不以删除文件或添加 `.gitignore` 替代修正生成入口。
+
 本次整理没有删除旧产物，迁移记录在
 `.louke/project/reviews/2026-11-02/layout-migration.json`。其中的临时备份不作为正式发布源；
 发布必须使用当前 ref 重新构建并验收的产物。

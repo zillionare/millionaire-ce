@@ -4,6 +4,7 @@ import quantide.config.paths as paths_module
 
 
 def test_get_app_config_dir_uses_xdg_home(monkeypatch, tmp_path: Path):
+    monkeypatch.delenv("QUANTIDE_CONFIG_HOME", raising=False)
     monkeypatch.setattr(paths_module.sys, "platform", "linux")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
 
@@ -11,6 +12,7 @@ def test_get_app_config_dir_uses_xdg_home(monkeypatch, tmp_path: Path):
 
 
 def test_get_app_config_dir_uses_appdata_on_windows(monkeypatch, tmp_path: Path):
+    monkeypatch.delenv("QUANTIDE_CONFIG_HOME", raising=False)
     monkeypatch.setattr(paths_module.sys, "platform", "win32")
     monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
 
@@ -28,7 +30,8 @@ def test_get_app_config_dir_prefers_explicit_override(tmp_path: Path):
 
 def test_normalize_data_home_expands_user_and_defaults_blank(monkeypatch):
     monkeypatch.delenv("QUANTIDE_DATA_HOME", raising=False)
-    assert paths_module.normalize_data_home("") == str(Path("~/.quantide").expanduser())
+    from quantide.config.output_paths import temporary_runtime_dir
+    assert paths_module.normalize_data_home("") == str(temporary_runtime_dir() / "market")
     assert paths_module.normalize_data_home("~/market-data") == str(Path("~/market-data").expanduser())
 
 

@@ -9,6 +9,15 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
+from scripts.artifact_paths import artifact_root
+
+# Isolate writes before importing application modules with import-time state.
+_test_work = artifact_root() / "work"
+_test_work.mkdir(parents=True, exist_ok=True)
+_test_profile = Path(tempfile.mkdtemp(prefix="pytest-profile-", dir=_test_work))
+os.environ["QUANTIDE_CONFIG_HOME"] = str(_test_profile / "config")
+os.environ["QUANTIDE_DATA_HOME"] = str(_test_profile / "market")
+
 from quantide.config.paths import normalize_data_home
 from quantide.config.settings import DEFAULT_TIMEZONE
 from quantide.data.sqlite import db as _db

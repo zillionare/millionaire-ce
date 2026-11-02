@@ -338,7 +338,6 @@ def test_prepare_dev_stub_sample_data_clamps_epoch_when_after_sync_end(monkeypat
     fake_state.app_home = "/tmp/data"
     fake_state.epoch = dt.date(2030, 1, 1)  # after sync_end
 
-    monkeypatch.setattr(iw, "DEFAULT_DATA_HOME", "/tmp/data")
     # init_data is imported inside the function; patch it on its module.
     import quantide.data as data_mod
 
@@ -354,6 +353,7 @@ def test_prepare_dev_stub_sample_data_clamps_epoch_when_after_sync_end(monkeypat
 
     monkeypatch.setattr(iw.daily_bars, "fetch_with_daily_progress", _fake_fetch)
     _prepare_dev_stub_sample_data(fake_state)
+    data_mod.init_data.assert_called_once_with("/tmp/data", init_db=True)
     # sync_start clamped to sync_end (2024-06-17).
     assert captured["start"] == dt.date(2024, 6, 17)
 

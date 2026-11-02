@@ -3,7 +3,7 @@
 Universe selection:
 - ``market_cap_trim`` (default): drop the largest and smallest 5% by
   point-in-time ``total_mv``, then drop suspended/ST stocks.  All remaining
-  stocks are eligible.  Market cap comes from ``~/.quantide/data/daily_basic.parquet``.
+  stocks are eligible. Market cap comes from the configured data home's daily_basic store.
 - ``liquidity``: legacy top-N by 20-day mean amount.
 - In backtest, the universe is re-selected every ``universe_rebalance_days``
   (default 20) trading days; this bounds the cost of refetching the feature
@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from quantide.config.settings import get_data_home
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.daily_basic import daily_basic
@@ -329,7 +330,7 @@ def _ensure_data_connected() -> bool:
     """Connect local daily_bars/calendar/stock_list if not yet initialized."""
     if getattr(daily_bars, "_initialized", False):
         return True
-    default_home = Path("~/.quantide").expanduser()
+    default_home = Path(get_data_home())
     cal_path = default_home / "data" / "calendar.parquet"
     bars_path = default_home / "data" / "bars" / "daily"
     stocks_path = default_home / "data" / "stock_list.parquet"

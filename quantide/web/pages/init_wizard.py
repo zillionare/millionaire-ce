@@ -15,7 +15,7 @@ from quantide.config.dev_stubs import (
     ensure_dev_stubs_started,
 )
 from quantide.config.features import supports_live_trading
-from quantide.config.paths import DEFAULT_DATA_HOME
+from quantide.config.paths import normalize_data_home
 from quantide.config.tencent_trial import configure_trial
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
@@ -584,7 +584,7 @@ def _prepare_dev_stub_sample_data(state: Any) -> None:
     """Import local fixture-backed sample data for dev-stub initialization."""
     from quantide.data import init_data
 
-    home = str(getattr(state, "app_home", "") or DEFAULT_DATA_HOME)
+    home = normalize_data_home(getattr(state, "app_home", ""))
     init_data(home, init_db=True)
 
     calendar.update()

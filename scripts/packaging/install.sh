@@ -22,6 +22,8 @@ if [ "$scope" = system ]; then
 else
     install_root=${MILLIONAIRE_INSTALL_ROOT:-"$HOME/.local/share/millionaire-ce"}
     bin_dir=${MILLIONAIRE_BIN_DIR:-"$HOME/.local/bin"}
+    # Native services explicitly choose durable data; source runs default to tmp.
+    export QUANTIDE_DATA_HOME="${QUANTIDE_DATA_HOME:-$HOME/.quantide}"
     set --
 fi
 mkdir -p "$install_root/versions" "$bin_dir"

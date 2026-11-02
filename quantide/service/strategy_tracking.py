@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from quantide.config.output_paths import external_runtime_path
 from quantide.config.paths import get_app_db_path
 
 SCHEMA = """
@@ -88,13 +89,13 @@ class TrackingStore:
     """SQLite 跟踪存储；与主库共用应用数据库文件。"""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        self.path = Path(path) if path else get_app_db_path()
+        self.path = external_runtime_path(path) if path else get_app_db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.ensure_schema()
 
     def rebind(self, path: str | Path) -> None:
         """Move the process-wide store after the app config override is set."""
-        self.path = Path(path)
+        self.path = external_runtime_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.ensure_schema()
 

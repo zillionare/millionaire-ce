@@ -40,6 +40,11 @@ before submitting your pull request, or contact the maintainers directly.
 The maintainers are happy to talk — a short conversation up front usually
 saves time on both sides.
 
+Coding agents must follow [AGENTS.md](AGENTS.md). Generated output belongs outside
+the checkout; use `python -m scripts.artifact_paths --run <command...>` and the
+[path configuration contract](docs/project-layout.md). Run the layout check after
+tests and builds instead of deleting unexpected root artifacts afterward.
+
 ## Types of Contributions
 
 ### Report Bugs
