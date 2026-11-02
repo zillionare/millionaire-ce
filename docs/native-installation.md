@@ -6,9 +6,11 @@
 
 | 平台 | 产物 | 默认服务 |
 | --- | --- | --- |
-| macOS Apple Silicon / Intel | `.tar.gz`，解压后运行 `sh install.sh` | 当前用户的 LaunchAgent，登录后启动 |
+| macOS Apple Silicon（ARM64） | `.tar.gz`，解压后运行 `sh install.sh` | 当前用户的 LaunchAgent，登录后启动 |
 | Ubuntu x86_64 | `.deb`，`sudo apt install ./millionaire-ce-…deb` | systemd 系统服务，开机启动 |
 | Windows x64 | `.exe` 图形安装向导，需要管理员权限 | WinSW Windows 系统服务，开机启动 |
+
+macOS 官方支持范围仅包含 Apple Silicon（M 系列芯片）；不提供 Intel（x86_64）安装包或验收支持。
 
 当前工程验证状态见 `review/2026-11-02/IMPLEMENTATION.md`；尚未通过的目标不能作为
 已发布支持证据。macOS 包目前没有 Developer ID 签名或 Apple 公证；内置动态库使用

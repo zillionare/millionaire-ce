@@ -79,13 +79,16 @@ Red-Green-Refactor 中先提交失败的测试；生产代码提交仍须满足�
 3. `acceptance`：运行 CE release_gate 测试，使用 `--runxfail`，把原先的
    expected failure 当成真实失败；随后解析 JUnit，拒绝没有实际执行的用例、
    失败、错误、skip 和 xfail。
+4. `installers / installer (...)`：分别构建并实际验收 `macos-arm64`、
+   `ubuntu-amd64`、`windows-x64` 安装包。macOS 仅支持 Apple Silicon，不再构建 Intel 包。
 
 日常单元测试与验收使用 pytest-socket 阻止外网，仅允许本地回环地址与 Unix
 socket，供本地 gateway stub/事件循环使用。日常 CI 不读取 Tushare 密钥。
 未 mock 的真实请求应修复测试隔离，不能依靠真实服务恰好可用使单测通过。
 
-建议 GitHub 分支保护把上述五个检查设为 required，并限制直接推送默认分支。
-仓库文件不能替代 GitHub 服务端的分支保护设置；本次没有修改远端规则。
+默认分支的 `protect-main` 规则已由维护者启用：上述八个检查均为 required，
+来源限定为 GitHub Actions；要求通过 PR 合并且分支与默认分支保持最新，禁止强推和删除。
+仓库文件不能替代 GitHub 服务端规则；修改 job 名称时需同步检查 required 名称，避免阻塞合并。
 
 ## 外部数据与发布
 

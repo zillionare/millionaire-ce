@@ -17,7 +17,7 @@
 | 腾讯政策 | 默认关闭；wizard 一次显式启用固定 30 天，到期请求层和发布循环停用，不能从 wizard 续期；独立扩展接口、明确启用/停用，升级保留用户代码。 |
 | 安全与日期 | 删除未签名 remember_user 冒充路径；管理员写操作和 profile 更新真实权限/输入校验；统一交易所时区；非法方向、NaN/Infinity 下单拒绝。 |
 | 结构重构 | runtime、Paper、Backtest、ML、策略/交易/wizard 页面按职责拆分；共享行情 schema、订单入口、风险控件、表格、账户选择和数据进度；保留旧位置参数及对外 DTO 的可变性契约。 |
-| 安装与发布 | 自包含 Python/锁依赖；macOS LaunchAgent/可选 LaunchDaemon、Ubuntu systemd、Windows WinSW；前台 Tk 控制器；CI 三平台单测与四个原生构建目标，tag 通过全部门禁后自动发布同批已验收产物。 |
+| 安装与发布 | 自包含 Python/锁依赖；macOS ARM64 LaunchAgent/可选 LaunchDaemon、Ubuntu systemd、Windows WinSW；前台 Tk 控制器；CI 三平台单测与三个原生构建目标，tag 通过全部门禁后自动发布同批已验收产物。 |
 
 ## 当前证据
 
@@ -43,7 +43,7 @@
 - 尚无 Apple Developer ID/公证和 Windows 发行者签名证书。
 - 多交易日无人值守、操作系统重启/断电不是进程强杀测试的同义词，尚未取得现场证据。
 - mini-two 现有部署尚未替换；没有改动其当前服务和用户数据。
-- GitHub 当前权限为 WRITE，不能设置仓库服务器端分支保护；维护者需将 quality、三平台 tests、acceptance 设为 required。
+- GitHub 当前权限为 WRITE；维护者已建立 Active 的 `protect-main` 规则，要求 quality、三平台 tests、acceptance 和三个安装验收共八项通过，且分支与默认分支保持最新。禁止强推和删除，合并需经过 PR。
 
 ## 使用入口
 
@@ -60,3 +60,12 @@
 PR：https://github.com/zillionare/millionaire-ce/pull/1 。发布 workflow 支持手工完整预检；手工运行不发布，匹配包版本的 v* tag 才会自动创建 GitHub Release。当前尚未创建发布 tag，mini-two 的部署保持原状。
 
 最终本机回归为 4606 passed / 3 skipped、覆盖率 84.85%；严格 release_gate 10 passed 无 skip/xfail，质量反例 17 项通过。关闭流程先暂停调度，再取消并等待运行中的维护/策略/优化任务，最后关闭存储；系统服务超时强制退出仍由操作系统监督，原子事务用于异常退出后的恢复。
+
+## 支持范围与文档后续约定
+
+维护者决定 macOS 仅支持 Apple Silicon（ARM64）。安装 matrix 已移除 `macos-x86_64`，
+发布流水线复用该 matrix，因此本次变更后的版本不再构建、验收或发布 Intel 安装包。
+此前 Intel 安装验收属于历史证据，不作为继续支持的声明；原生安装和质量文档已同步。
+
+最终用户手册尚未达到正式发布标准，具体内容规划、功能表述边界与验收要求见
+[文档规划](DOCUMENTATION-PLAN.md)。该规划不代表相应用户手册已经完成。
