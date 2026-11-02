@@ -24,7 +24,7 @@
 最终提交前本机证据目录为忽略提交的 `quality-reports/`，CI 将上传对应 artifacts。
 
 - 生产质量扫描：Ruff/100 字符、CCR≤15、复制块≤5行、文件≤1000行、statements≤50、locals≤15 全通过；未放宽预算或新增历史豁免。
-- 离线 unit：4605 passed、3 skipped；总覆盖率 84.86%。普通单测的三个 skip 不作为发布验收证据。
+- 离线 unit：4606 passed、3 skipped；总覆盖率 84.85%。普通单测的三个 skip 不作为发布验收证据。
 - CE release_gate：10 passed、276 deselected；JUnit 校验无 skip/xfail。
 - 质量门禁反例：17 项全部通过。
 - 真实 Tushare：2 项只读小样本通过；JUnit 校验无 skip，未输出或保存 token。
@@ -58,3 +58,5 @@
 补充资源清理：主 SQLite 库在工作线程停止后关闭全部连接；认证库在重绑定和应用退出时关闭，支持重新打开；TrackingStore 每次读写同时结束事务和连接，异常退出也会回滚并关库。新增 Windows 可重命名/删除数据库文件的回归。
 
 PR：https://github.com/zillionare/millionaire-ce/pull/1 。发布 workflow 支持手工完整预检；手工运行不发布，匹配包版本的 v* tag 才会自动创建 GitHub Release。当前尚未创建发布 tag，mini-two 的部署保持原状。
+
+最终本机回归为 4606 passed / 3 skipped、覆盖率 84.85%；严格 release_gate 10 passed 无 skip/xfail，质量反例 17 项通过。关闭流程先暂停调度，再取消并等待运行中的维护/策略/优化任务，最后关闭存储；系统服务超时强制退出仍由操作系统监督，原子事务用于异常退出后的恢复。

@@ -81,7 +81,10 @@ def bundle_openmp(payload):
     library = next(
         payload.glob("runtime/lib/python*/site-packages/lightgbm/lib/lib_lightgbm.dylib")
     )
-    shutil.copy2(Path(prefix) / "lib/libomp.dylib", library.parent / "libomp.dylib")
+    destination = library.parent / "libomp.dylib"
+    destination.unlink(missing_ok=True)
+    shutil.copy2(Path(prefix) / "lib/libomp.dylib", destination)
+    shutil.copy2(Path(prefix) / "LICENSE.TXT", library.parent / "libomp-LICENSE.txt")
     dependencies = subprocess.check_output(["otool", "-L", str(library)], text=True)
     for line in dependencies.splitlines()[1:]:
         dependency = line.strip().split(" ", 1)[0]
@@ -94,6 +97,7 @@ def windows_wrapper(payload):
     """Verify the pinned service wrapper before putting it in a distributable."""
     metadata = json.loads((ROOT / "packaging/winsw.json").read_text(encoding="utf-8"))
     destination = payload / "millionaire-service.exe"
+    shutil.copy2(ROOT / "packaging/licenses/WinSW.txt", payload / "WinSW-LICENSE.txt")
     with urllib.request.urlopen(metadata["url"], timeout=60) as response:
         destination.write_bytes(response.read())
     if hashlib.sha256(destination.read_bytes()).hexdigest() != metadata["sha256"]:

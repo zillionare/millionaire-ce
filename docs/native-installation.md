@@ -12,7 +12,7 @@
 
 当前工程验证状态见 `review/2026-11-02/IMPLEMENTATION.md`；尚未通过的目标不能作为
 已发布支持证据。macOS 包目前没有 Developer ID 签名或 Apple 公证；内置动态库使用
-ad-hoc 签名。Windows 没有配置发行者代码签名证书。
+ad-hoc 签名。Windows 没有配置发行者代码签名证书。WinSW 和 OpenMP 的版权许可声明随相应安装包提供。
 
 安装后通过 `millionaire-ce control` 打开前台控制器，启停服务、查看状态或打开浏览器。
 Windows 安装器会创建控制器快捷方式。关闭控制器窗口不影响后台服务。
