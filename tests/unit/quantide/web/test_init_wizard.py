@@ -511,16 +511,17 @@ async def test_handle_step_data_setup_requires_tushare_token(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_step5_data_setup_shows_dev_stub_sample_import_notice(monkeypatch):
+async def test_step5_data_setup_shows_dev_stub_sample_import_notice(monkeypatch, tmp_path):
     monkeypatch.setattr(wizard_step_views, "dev_stubs_enabled", lambda: True)
 
-    html = str(init_wizard_page.Step5_DataSetup({"app_home": "/tmp/dev-stub-home"}))
+    home = str(tmp_path / "dev-stub-home")
+    html = str(init_wizard_page.Step5_DataSetup({"app_home": home}))
 
     assert "当前进程已启用开发 Stub 模式" in html
     assert "不会访问真实 Tushare" in html
     assert "Tushare 访问密钥" not in html
     assert "首次下载时长" not in html
-    assert "/tmp/dev-stub-home" in html
+    assert home in html
 
 
 def test_wizard_buttons_step_five_uses_direct_next_in_dev_stub(monkeypatch):
