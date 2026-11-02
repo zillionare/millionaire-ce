@@ -42,7 +42,7 @@ jobs:
         run: brew list --versions libomp || brew install libomp
       - name: Install Windows GUI installer compiler
         if: runner.os == 'Windows'
-        run: choco install innosetup --version=6.4.3 --allow-downgrade -y --no-progress
+        run: python scripts/install_windows_compiler.py
       - name: Build standalone installer from the tested wheel
         shell: python
         run: |

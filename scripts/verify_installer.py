@@ -91,8 +91,19 @@ class NativeInstallation:
             self.python = Path("/opt/millionaire-ce/runtime/bin/python3.13")
             self.config = Path("/var/lib/millionaire-ce/config")
 
+    def command(self):
+        """Exercise the public symlink, not just the internal runtime executable."""
+        if os.name == "nt":
+            return [self.python, "-m", "quantide.cli"]
+        entry = (
+            self.directory / "bin/millionaire-ce"
+            if sys.platform == "darwin"
+            else Path("/usr/bin/millionaire-ce")
+        )
+        return [entry]
+
     def service(self, action):
-        run([self.python, "-m", "quantide.cli", "service", action], self.environment)
+        run([*self.command(), "service", action], self.environment)
 
     def uninstall(self):
         """Default uninstall retains data; test cleanup is explicitly separate."""
@@ -119,6 +130,7 @@ def verify(installation):
         probe.bind(("127.0.0.1", 8130))
     installation.install()
     first = health()
+    run([*installation.command(), "--help"], installation.environment)
     controller = subprocess.check_output(
         [str(installation.python), str(Path(__file__).with_name("verify_controller.py"))],
         env=installation.environment,

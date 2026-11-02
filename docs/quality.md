@@ -94,7 +94,8 @@ socket，供本地 gateway stub/事件循环使用。日常 CI 不读取 Tushare
 - `.github/workflows/nightly.yml` 每周一 UTC 03:00 跑完整回归和真实 Tushare
   小样本检查，也支持手工运行。未配置 token 时真实源用例明确输出
   `LIVE_SKIPPED: missing TUSHARE_TOKEN`；该周期检查不是合并凭据门槛。
-- `.github/workflows/release.yml` 只响应 `v*` tag。先对同一个 tag 的源码调用
+- `.github/workflows/release.yml` 响应 `v*` tag，也允许手工运行完整预检（不发布）。
+  先对同一个 ref 的源码调用
   完整 CI，并调用严格真实数据检查；只有二者都成功，`publish` 才运行。
 - tag 必须等于 `v` 加 pyproject 包版本；发布 job 下载同次 CI 已安装和测试的
   `package-ubuntu-latest` 产物，再次校验后创建 GitHub Release，不重新构建另一份
