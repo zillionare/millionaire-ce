@@ -319,4 +319,4 @@ def shutdown_optimizations() -> None:
     for task in tasks:
         thread = getattr(task, "thread", None)
         if thread is not None:
-            thread.join(timeout=5)
+            thread.join()

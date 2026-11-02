@@ -178,3 +178,21 @@ async def test_counter_duplicate_partial_cancel_and_abrupt_restart(counter_serve
         assert broker.query_assets().total == 10100
     finally:
         broker.close()
+
+
+@pytest.mark.asyncio
+async def test_counter_bulk_cancel_accepts_strategy_order_side_enum(counter_server):
+    from quantide.core.enums import OrderSide
+
+    _, url = counter_server()
+    broker = SimulatedBrokerAdapter(url)
+    try:
+        await broker.buy(SYMBOL, 100, price=9, order_time=START)
+        await broker.buy(SYMBOL, 100, price=8, order_time=START)
+        assert len(broker.query_orders("open")) == 2
+        assert await broker.cancel_all_orders(OrderSide.SELL) == 0
+        assert await broker.cancel_all_orders(OrderSide.BUY) == 2
+        assert broker.query_orders("open") == []
+        assert len(broker.query_orders("cancelled")) == 2
+    finally:
+        broker.close()

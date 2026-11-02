@@ -155,7 +155,7 @@ class StrategyRuntimeManager(RuntimeRiskControls, RuntimeStatePersistence, Runti
                 runtime.stop_event.set()
         for runtime in workers:
             if runtime.thread is not None and runtime.thread is not threading.current_thread():
-                runtime.thread.join(timeout=5)
+                runtime.thread.join()
         self._save_specs()
 
     def create_backtest_runtime(

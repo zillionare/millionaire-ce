@@ -32,9 +32,14 @@ class SchedulerManager:
             self._is_running = True
             logger.info("Scheduler started")
 
-    def stop(self):
+    def pause(self):
+        """Prevent new scheduled work before shutdown signals existing workers."""
         if self._scheduler and self._is_running:
-            self._scheduler.shutdown(wait=False)
+            self._scheduler.pause()
+
+    def stop(self, wait=False):
+        if self._scheduler and self._is_running:
+            self._scheduler.shutdown(wait=wait)
             self._is_running = False
             self._scheduler = None
             logger.info("Scheduler stopped")

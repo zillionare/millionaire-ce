@@ -25,7 +25,7 @@
 
 - 生产质量扫描：Ruff/100 字符、CCR≤15、复制块≤5行、文件≤1000行、statements≤50、locals≤15 全通过；未放宽预算或新增历史豁免。
 - 离线 unit：4605 passed、3 skipped；总覆盖率 84.86%。普通单测的三个 skip 不作为发布验收证据。
-- CE release_gate：9 passed、276 deselected；JUnit 校验无 skip/xfail。
+- CE release_gate：10 passed、276 deselected；JUnit 校验无 skip/xfail。
 - 质量门禁反例：17 项全部通过。
 - 真实 Tushare：2 项只读小样本通过；JUnit 校验无 skip，未输出或保存 token。
 - actionlint 1.7.12、MkDocs strict、Poetry/uv 锁检查通过。

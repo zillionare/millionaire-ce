@@ -20,12 +20,13 @@ def _component_shutdown_callbacks(modes, app):
 
     publisher = modes._quote_publisher
     callbacks = [
+        scheduler.pause,
         data_sync_service.cancel,
         shutdown_optimizations,
         app.state.strategy_runtime_manager.shutdown,
         data_readiness_monitor.stop,
         limit_price_refresher.stop,
-        scheduler.stop,
+        lambda: scheduler.stop(wait=True),
         quote_monitor.stop,
         minute_bar_aggregator.stop,
         market_data_hub.stop,

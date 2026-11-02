@@ -120,11 +120,12 @@ class SimulatedBrokerAdapter(AbstractBroker):
 
     async def cancel_all_orders(self, side=None):
         orders = self._state()["orders"].values()
+        side_name = getattr(side, "name", str(side)).lower() if side is not None else None
         pending = [
             order
             for order in orders
             if order["status"] in {"open", "partial"}
-            and (side is None or order["request"]["side"] == str(side).lower())
+            and (side is None or order["request"]["side"] == side_name)
         ]
         for order in pending:
             await self.cancel(order["order_id"])
@@ -145,6 +146,7 @@ class SimulatedBrokerAdapter(AbstractBroker):
                 else datetime.datetime.min,
             )
             for order in self._state()["orders"].values()
+            if status is None or order["status"] == status
             if status is None or order["status"] == status
         ]
 
