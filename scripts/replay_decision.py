@@ -22,6 +22,8 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from quantide.config.output_paths import external_runtime_path  # noqa: E402
+from quantide.config.paths import get_strategy_runtime_state_path  # noqa: E402
 from quantide.data import init_data  # noqa: E402
 from quantide.data.fetchers.tencent import TencentDataFetcher  # noqa: E402
 from quantide.data.models.daily_bars import daily_bars  # noqa: E402
@@ -168,19 +170,27 @@ def main() -> int:
     parser.add_argument("--date", default=datetime.date.today().isoformat())
     parser.add_argument("--time", default="14:57")
     parser.add_argument("--runtime-id", default="")
-    parser.add_argument("--runtime-state", default="~/.config/quantide/strategy_runtimes.json")
+    parser.add_argument("--runtime-state", default=None, help="运行规格文件；默认读取配置目录")
     parser.add_argument("--quotes", default="", help="JSON quote snapshot; omit to fetch Tencent")
-    parser.add_argument("--save-quotes", default="", help="save fetched quotes to this path")
+    parser.add_argument(
+        "--save-quotes",
+        type=external_runtime_path,
+        default=None,
+        help="save fetched quotes outside the source checkout",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     day = datetime.date.fromisoformat(args.date)
     hour, minute = (int(x) for x in args.time.split(":", 1))
     tm = datetime.time(hour, minute)
-    init_data(args.data_home, init_db=False)
+    init_data(args.data_home)
     ml._ensure_data_connected()
     config, runtime_id = _load_runtime_config(
-        Path(args.runtime_state).expanduser(), args.runtime_id or None
+        Path(args.runtime_state).expanduser()
+        if args.runtime_state
+        else get_strategy_runtime_state_path(),
+        args.runtime_id or None,
     )
     quotes, source = _load_quotes(args)
     report = build_report(day, tm, config, quotes, source)

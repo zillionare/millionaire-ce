@@ -24,31 +24,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from loguru import logger
 
-from quantide.config.paths import normalize_data_home
+from quantide.config.paths import get_app_db_path, normalize_data_home
 
 
 def init_app_state(token: str, db_path: str | None = None, data_home: str | None = None) -> None:
-    """Create app_state record with Tushare token."""
+    """Bind configured stores, updating the token without resetting saved settings."""
+    from quantide.data import init_data
     from quantide.data.models.app_state import AppState
     from quantide.data.sqlite import db
 
-    if db_path:
-        db.init(db_path)
-
-    state = AppState(
-        id=1,
-        init_completed=True,
-        init_step=6,
-        app_home=normalize_data_home(data_home),
-        data_source="tushare",
-        tushare_token=token,
-        epoch=datetime.date(2005, 1, 1),
-        app_host="127.0.0.1",
-        app_port=8130,
-        app_prefix="/quantide",
-    )
-
+    db.init(db_path or get_app_db_path())
+    rows = list(db["app_state"].rows_where("id = ?", (1,)))
+    state = AppState.from_dict(rows[0]) if rows else AppState()
+    state.app_home = normalize_data_home(str(data_home or "").strip() or state.app_home)
+    state.data_source = "tushare"
+    state.tushare_token = token
     db["app_state"].upsert(state.to_dict(), pk="id")
+    init_data(state.app_home, init_db=False)
     logger.info("app_state initialized with Tushare token")
 
 
@@ -117,10 +109,12 @@ def verify_data(data_home: str | None = None) -> dict:
     """Verify data completeness after sync."""
     import polars as pl
 
+    from quantide.config.settings import get_data_home
+
     results = {}
 
     # Daily bars
-    home = Path(normalize_data_home(data_home))
+    home = Path(normalize_data_home(str(data_home or "").strip() or get_data_home()))
     daily_path = home / "data/bars/daily"
     if daily_path.exists():
         daily = pl.read_parquet(str(daily_path))

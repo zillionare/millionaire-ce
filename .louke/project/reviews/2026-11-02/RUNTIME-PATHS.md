@@ -13,6 +13,8 @@
   `millionaire-service.xml` 写到仓库根目录，或把服务数据配置为源码目录。
 - `daily_basic` 改为延迟读取有效目录；ML 自动连接和 replay 脚本移除独立硬编码默认值。
   wizard 展示有效默认值并说明临时目录口径；macOS 原生安装器明确选择持久行情目录。
+  replay 默认先加载配置数据库，并从配置目录读取运行规格；快照输出也受路径校验。
+  日线修复脚本先打开正确的配置库、保留已有设置并绑定行情存储，避免默认重置数据目录。
 - `start.sh` 读取 `QUANTIDE_LOG_HOME`，无配置写入临时项目子目录，不再写平铺的
   `/tmp/millionaire.log`。
 - pytest 在应用导入前隔离配置和行情目录，避免 session key、账户数据库、模型目录等
