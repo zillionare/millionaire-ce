@@ -6,7 +6,7 @@ from datetime import datetime
 from fasthtml.common import *
 from loguru import logger
 from monsterui.all import *
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import RedirectResponse
 
 from quantide.config.features import supports_live_trading
 from quantide.core.enums import BrokerKind
@@ -15,6 +15,7 @@ from quantide.data.sqlite import db
 from quantide.service.registry import BrokerRegistry
 from quantide.service.sim_broker import PaperBroker
 from quantide.web.application import fast_app
+from quantide.web.components.navigation import SystemBreadcrumb
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import AppTheme
 
@@ -80,20 +81,14 @@ def LiveAccountCard(account: dict, is_active: bool = False):
                 ),
                 Button(
                     "删除",
-                    cls=(
-                        "uk-button uk-button-default uk-button-small text-red-600 "
-                        "border-red-600 hover:bg-red-50 ml-2"
-                    ),
+                    cls=("q-btn q-btn--sm text-red-600 border-red-600 ml-2"),
                     hx_delete=f"/system/accounts/live/{account.get('id')}",
                     hx_confirm="确定要删除此账号吗？",
                     hx_target="#live-accounts-list",
                 ),
                 Button(
                     "刷新",
-                    cls=(
-                        "uk-button uk-button-default uk-button-small text-gray-600 "
-                        "border-gray-300 hover:bg-gray-50 ml-2"
-                    ),
+                    cls=("q-btn q-btn--sm text-gray-600 ml-2"),
                     hx_post=f"/system/accounts/live/{account.get('id')}/refresh",
                     hx_target="#live-accounts-list",
                 ),
@@ -147,10 +142,7 @@ def SimAccountCard(account: dict, is_active: bool = False):
                 Button(
                     "删除",
                     type="button",
-                    cls=(
-                        "text-sm text-red-600 hover:text-red-800 px-3 py-1 border "
-                        "border-red-600 rounded hover:bg-red-50"
-                    ),
+                    cls=("q-btn q-btn--sm text-red-600 border-red-600"),
                     onclick=f"document.getElementById('delete-dialog-{account.get('id')}').classList.remove('hidden')",
                 ),
                 ConfirmDialogModal(
@@ -162,10 +154,7 @@ def SimAccountCard(account: dict, is_active: bool = False):
                 Button(
                     "重置",
                     type="button",
-                    cls=(
-                        "text-sm text-gray-600 hover:text-gray-900 px-3 py-1 border "
-                        "border-gray-300 rounded hover:bg-gray-50 ml-2"
-                    ),
+                    cls=("q-btn q-btn--sm text-gray-600 ml-2"),
                     onclick=f"document.getElementById('reset-dialog-{account.get('id')}').classList.remove('hidden')",
                 ),
                 ConfirmDialogModal(
@@ -195,7 +184,7 @@ def ConfirmDialogModal(
                     Button(
                         "确定",
                         type="submit",
-                        cls="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700",
+                        cls="q-btn q-btn--danger",
                     ),
                     action=confirm_url,
                     method=confirm_method,
@@ -205,10 +194,7 @@ def ConfirmDialogModal(
                     "取消",
                     type="button",
                     onclick=f"document.getElementById('{dialog_id}').classList.add('hidden')",
-                    cls=(
-                        "ml-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg "
-                        "hover:bg-gray-50"
-                    ),
+                    cls="q-btn ml-2",
                 ),
                 cls="flex justify-end",
             ),
@@ -243,18 +229,16 @@ def AccountsPage(
     return Div(
         modal_script,
         # 面包屑导航
-        Div(
-            Nav(
-                A("首页", href="/", cls="text-sm text-gray-600 hover:text-[#e41815]"),
-                Span(" / ", cls="text-gray-400"),
-                Span("账号管理", cls="text-sm text-gray-900 font-medium"),
-                cls="flex items-center space-x-2 mb-4",
-            ),
-        ),
+        SystemBreadcrumb("账号管理"),
         # 页面标题
         Div(
             H1("账号管理", cls="text-2xl font-bold text-gray-900"),
-            P("管理您的实盘账户和模拟交易账户", cls="text-sm text-gray-600 mt-1"),
+            P(
+                "管理您的实盘账户和模拟交易账户"
+                if supports_live_trading()
+                else "管理您的模拟交易账户",
+                cls="text-sm text-gray-600 mt-1",
+            ),
             cls="mb-6",
         ),
         # 实盘账户区域（仅私有版；CE 不展示任何实盘账户控件）
@@ -302,10 +286,7 @@ def AccountsPage(
                 Button(
                     "清空所有模拟交易账户",
                     type="button",
-                    cls=(
-                        "text-sm text-red-600 hover:text-red-800 px-3 py-1 border "
-                        "border-red-600 rounded hover:bg-red-50"
-                    ),
+                    cls=("q-btn q-btn--sm text-red-600 border-red-600"),
                     onclick="document.getElementById('delete-all-dialog').classList.remove('hidden')",
                 ),
                 ConfirmDialogModal(
@@ -335,11 +316,7 @@ def AccountsPage(
                         " 新建模拟交易账户",
                         type="button",
                         onclick="document.getElementById('create-sim-modal').classList.remove('hidden')",
-                        cls=(
-                            "flex items-center space-x-2 px-4 py-2 text-sm text-gray-600 "
-                            "border border-dashed border-gray-300 rounded-lg "
-                            "hover:bg-gray-50 hover:border-gray-400"
-                        ),
+                        cls=("q-btn q-btn--primary flex items-center space-x-2"),
                     ),
                     cls="mt-4",
                 ),
@@ -349,7 +326,7 @@ def AccountsPage(
             ),
             cls="bg-white rounded-lg shadow",
         ),
-        cls="p-6",
+        cls="space-y-6",
     )
 
 
@@ -357,7 +334,7 @@ def accounts_list(request):
     """账号管理主页面"""
     session = request.scope.get("session", {})
     layout = MainLayout(title="账号管理", user=session.get("auth"))
-    layout.header_active = "交易"
+    layout.header_active = "系统维护"
     layout.set_sidebar_active("/system/accounts")
 
     reg = _get_registry(request)
@@ -380,7 +357,7 @@ def accounts_list(request):
         return AccountsPage(live_accounts, sim_accounts, active_kind, active_id, show_create_modal)
 
     layout.main_block = main_block
-    return HTMLResponse(to_xml(layout.render(request)))
+    return layout.render(request)
 
 
 @rt("/")

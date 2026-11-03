@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -77,10 +78,33 @@ class StrategyLoader:
             Path(__file__).resolve().parents[1] / "strategies" / "example"
         ).resolve()
         self._builtin_module_prefix = "quantide.strategies.example"
+        self._builtin_generation = None
+        self._builtin_lock = threading.RLock()
 
     def get_builtin_scan_directory(self) -> str:
         """返回内置示例策略目录。"""
         return str(self._builtin_example_dir)
+
+    def ensure_builtin_strategies(self) -> None:
+        """Register shipped examples without replacing a user's same-name strategy."""
+        with self._builtin_lock:
+            generation = db._connection_generation
+            if generation == self._builtin_generation:
+                return
+            self._register_builtin_strategies()
+            self._builtin_generation = generation
+
+    def _register_builtin_strategies(self) -> None:
+        source = ScanSource(self._builtin_example_dir, self._builtin_module_prefix)
+        for name, info in self._scan_source(source).items():
+            existing = list(db["strategy_info"].rows_where("name = ?", (name,)))
+            if existing and not str(existing[0].get("module_path", "")).startswith(
+                self._builtin_module_prefix + "."
+            ):
+                continue
+            if existing:
+                info.id = existing[0]["id"]
+            db["strategy_info"].upsert(info.to_dict(), pk=StrategyInfo.__pk__)
 
     def get_user_scan_directory(self) -> str:
         """返回用户配置的策略目录。"""

@@ -1,5 +1,25 @@
 # Repository instructions for coding agents
 
+## Product names and documentation claims
+
+- `millionaire` refers to the CE and pro product family. Use `millionaire-ce`
+  (or CE) for the community edition and `millionaire pro` for pro-only features,
+  including real trading and built-in triple-barrier risk programs. Shared
+  architecture may be described as millionaire; make edition boundaries explicit.
+- Preserve public package names, CLI commands and runtime edition identifiers.
+  Product wording is not authorization to rename these compatibility contracts.
+- Check implementation before presenting a feature as available. Historical
+  specs describe requirements, not proof of delivery. Keep the product overview's
+  promotional tone while stating current scope and model assumptions accurately.
+- Daily Shadow-Run is a two-instance comparison: the paper instance runs on
+  current quotes and the backtest instance runs after the daily bar is available.
+  Describe this natural daily cadence directly; reserve limitations for actual
+  gaps such as the incomplete 30-minute replay lifecycle.
+- Native desktop installs provide a macOS menu-bar app and a Windows system-tray
+  app, displayed after installation and started at login. Keep their lifetime
+  independent of the background service; quitting a UI must leave its service
+  process running. Ubuntu desktops retain the window controller.
+
 ## Output locations
 
 - Never generate runtime data, temporary files, builds, reports, logs, screenshots,

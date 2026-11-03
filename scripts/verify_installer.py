@@ -57,6 +57,7 @@ class NativeInstallation:
             "MILLIONAIRE_SERVICE_HOME": str(directory / "service-data"),
             "MILLIONAIRE_INSTALL_ROOT": str(directory / "installed"),
             "MILLIONAIRE_BIN_DIR": str(directory / "bin"),
+            "MILLIONAIRE_APPLICATIONS_DIR": str(directory / "Applications"),
             "QUANTIDE_CONFIG_HOME": str(directory / "config"),
             "QUANTIDE_DATA_HOME": str(directory / "data"),
         }
@@ -120,7 +121,8 @@ class NativeInstallation:
                 self.environment,
             )
         elif sys.platform == "darwin":
-            run(["sh", self.directory / "installed/uninstall.sh"], self.environment)
+            # End users may run the archive's script from their extraction folder.
+            run(["sh", next(self.source.glob("*/uninstall.sh"))], self.environment)
         else:
             run(["dpkg", "--remove", "millionaire-ce"], self.environment)
 
@@ -137,7 +139,7 @@ def verify(installation):
         [str(installation.python), str(Path(__file__).with_name("verify_controller.py"))],
         env=installation.environment,
         text=True,
-        timeout=90,
+        timeout=180,
     )
     marker = installation.config / "installation-persistence.txt"
     marker.write_text("must survive restart, upgrade and default uninstall", encoding="utf-8")
@@ -203,6 +205,13 @@ def main():
             if os.name == "nt" and (Path(temporary) / "installed/unins000.exe").exists():
                 installation.uninstall()
             if installation.python is not None and installation.python.exists():
+                if sys.platform == "darwin":
+                    subprocess.run(
+                        [str(installation.python), "-m", "quantide.cli", "control", "--uninstall"],
+                        env=installation.environment,
+                        check=False,
+                        timeout=15,
+                    )
                 subprocess.run(
                     [str(installation.python), "-m", "quantide.cli", "service", "uninstall"],
                     env=installation.environment,

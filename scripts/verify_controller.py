@@ -1,9 +1,11 @@
 """Exercise the installed native controller against its actual test service."""
 
 import json
+import sys
 import time
 import urllib.request
 import webbrowser
+from pathlib import Path
 
 from quantide.service.desktop_control import create_controller
 
@@ -76,4 +78,19 @@ class ControllerVerification:
 
 
 if __name__ == "__main__":
-    print(json.dumps(ControllerVerification().run()))
+    if sys.platform in {"darwin", "win32"}:
+        # This script is executed with the installed Python outside site-packages.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        if sys.platform == "darwin":
+            from scripts.verify_macos_menu import verify_menu
+
+            result = verify_menu()
+        else:
+            from scripts.verify_windows_tray import verify_tray
+
+            result = verify_tray()
+        assert responsive(), "Quitting the menu stopped the service"
+        result["service_survives_menu_quit"] = True
+    else:
+        result = ControllerVerification().run()
+    print(json.dumps(result))

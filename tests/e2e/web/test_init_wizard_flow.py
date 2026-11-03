@@ -59,53 +59,33 @@ def _advance_to_runtime_step(client, market_home) -> None:
         admin_password_confirm="StrongPass!123",
     )
     assert response.status_code == 200
-    assert "CE 使用 MarketDataHub" in response.text
+    assert "Tushare 访问密钥" in response.text
 
 
 @pytest.mark.e2e
 @pytest.mark.release_gate
-def test_init_wizard_happy_path_uses_market_data_hub_in_ce():
-    with init_wizard_e2e_session() as session, patched_tushare_fetcher():
+def test_init_wizard_happy_path_defers_download_until_after_source_configuration():
+    from tests.e2e.support.initialization_sources import complete_initialization_sources
+
+    with init_wizard_e2e_session() as session, complete_initialization_sources():
         _advance_to_runtime_step(session.client, session.market_home)
-
-        response = _next_step(
-            session.client,
-            5,
-            4,
-        )
-        assert response.status_code == 200
-        assert "当前数据源" in response.text
-        assert "Tushare 访问密钥" in response.text
-
-        state = init_wizard.get_state(force_refresh=True)
-        assert state.app_home == str(session.market_home)
-        assert state.gateway_enabled is False
-
-        response = _next_step(
-            session.client,
-            6,
-            5,
-            epoch="2024-01-01",
-            data_source="tushare",
-            tushare_token="ts-token",
-            history_years="2",
-        )
-        assert response.status_code == 200
-        assert "配置已保存，您可以立即进入系统开始使用。" in response.text
-
-        state = init_wizard.get_state(force_refresh=True)
-        assert state.data_source == "tushare"
-        assert state.tushare_token == "ts-token"
-        assert state.history_years == 2
-
+        response = _next_step(session.client, 5, 4, epoch="2024-01-01", data_source="tushare",
+                              tushare_token="ts-token", history_years="3")
+        assert "配置实时行情数据源" in response.text
+        assert not init_wizard.get_state().init_completed
+        response = _next_step(session.client, 6, 5)
+        assert "开始下载历史数据" in response.text
+        assert not init_wizard.get_state().gateway_enabled
+        response = session.client.post("/init-wizard/download")
+        assert "sync-progress-bar" in response.text
+        payload = _parse_sync_progress_payload(session.client.get("/init-wizard/sync-progress").text)
+        assert payload["completed"] and payload["error"] is None
         response = session.client.post("/init-wizard/complete")
-        assert response.status_code == 200
         assert "window.location.href = '/'" in response.text
-
         state = init_wizard.get_state(force_refresh=True)
-        assert state.init_completed is True
-        assert state.init_step == 6
-
+        assert state.init_completed and state.init_step == 6
+        assert state.tushare_token == "ts-token"
+        assert state.history_years == 3
         response = session.client.get("/init-wizard/", follow_redirects=False)
         assert response.status_code in (302, 307)
         assert response.headers["location"] == "/"
@@ -136,7 +116,7 @@ def test_init_wizard_download_validation_stays_on_data_setup(
 
 
 @pytest.mark.e2e
-def test_init_wizard_dev_stub_step_five_imports_samples_without_download_dialog(monkeypatch):
+def test_init_wizard_dev_stub_step_four_imports_samples_without_download_dialog(monkeypatch):
     monkeypatch.setenv(DEV_STUBS_ENV_VAR, "1")
     reset_dev_stub_runtime_for_tests()
 
@@ -168,16 +148,12 @@ def test_init_wizard_dev_stub_step_five_imports_samples_without_download_dialog(
                 admin_password_confirm="StrongPass!123",
             )
             assert response.status_code == 200
-            assert "本步骤只展示运行时网关信息" in response.text
-
-            response = _next_step(session.client, 5, 4)
-            assert response.status_code == 200
             assert "当前进程已启用开发 Stub 模式" in response.text
             assert "Tushare 访问密钥" not in response.text
             assert "/init-wizard/download" not in response.text
-            assert "/init-wizard/step/6" in response.text
+            assert "/init-wizard/step/5" in response.text
 
-            response = _next_step(session.client, 6, 5)
+            response = _next_step(session.client, 5, 4, epoch="2024-01-01")
             assert response.status_code == 200
             assert "配置已保存，您可以立即进入系统开始使用。" in response.text
             assert "sync-progress-bar" not in response.text
@@ -221,9 +197,11 @@ def test_init_wizard_download_success_reports_completed_progress():
     ):
         _advance_to_runtime_step(session.client, session.market_home)
 
-        response = _next_step(session.client, 5, 4)
-        assert response.status_code == 200
-        assert "当前数据源" in response.text
+        response = _next_step(session.client, 5, 4, epoch="2024-01-01", data_source="tushare",
+                              tushare_token="ts-token", history_years="1")
+        assert "配置实时行情数据源" in response.text
+        response = _next_step(session.client, 6, 5)
+        assert "开始下载历史数据" in response.text
 
         response = session.client.post(
             "/init-wizard/download",
@@ -236,6 +214,7 @@ def test_init_wizard_download_success_reports_completed_progress():
         )
         assert response.status_code == 200
         assert "sync-progress-bar" in response.text
+        assert "开始下载历史数据" in response.text, "Closing a failed download must leave a retry action"
         progress_script = session.client.get("/static/init-wizard-progress.js")
         assert progress_script.status_code == 200
         assert "/init-wizard/sync-progress" in progress_script.text

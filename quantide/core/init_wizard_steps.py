@@ -10,9 +10,9 @@ WIZARD_STEP_DEFINITIONS: tuple[tuple[int, str], ...] = (
     (1, "欢迎"),
     (2, "运行环境"),
     (3, "管理员密码"),
-    (4, "行情与交易"),
-    (5, "数据源设置及下载"),
-    (6, "完成"),
+    (4, "配置数据源"),
+    (5, "配置实时行情"),
+    (6, "数据准备与完成"),
 )
 
 WIZARD_TOTAL_STEPS = len(WIZARD_STEP_DEFINITIONS)

@@ -7,10 +7,13 @@ import urllib.request
 
 def main():
     """Allow native service launch to finish, including first-run imports."""
+    from quantide.config.server_address import local_url
+
+    url = local_url() + "/api/health"
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8130/api/health", timeout=1) as response:
+            with urllib.request.urlopen(url, timeout=1) as response:
                 payload = json.load(response)
             if payload.get("status") == "ok":
                 return

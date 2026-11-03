@@ -3,17 +3,21 @@
 Millionaire CE 采用 MIT 许可证，分发包名为 `millionaire-ce`，导入名为 `quantide`。
 本手册对应 `0.3.0` 交付线；正式安装包须在 Release 中实际提供后才能下载使用。
 
+millionaire 是 CE 与 millionaire pro 的合称。本页列出社区版的交付范围；
+仅属于专业版的功能均使用 millionaire pro 明确标注。
+
 ## 已提供的能力
 
 | 能力 | 本版范围 |
 | --- | --- |
 | 历史数据 | Tushare 日线、日历、证券主数据；BaoStock 沪深分钟数据。策略正式支持日线与 30 分钟。 |
-| 实时行情 | 可选腾讯 30 天演示源和用户行情扩展；腾讯默认关闭。 |
+| 实时行情 | Tushare 官方股票实时快照（独立权限）、用户扩展、可选腾讯 30 天演示；腾讯默认关闭。 |
 | 策略运行 | 回测、仿真、独立 HTTP 模拟柜台；统一策略/Broker 接口与固定策略周期。 |
 | 交易条件 | 资金、可用持仓、T+1、涨跌停等检查与模拟撮合；数据前提见[执行约定](execution.md)。 |
 | 研究工具 | 示例策略、LightGBM 日线选股、极简因子检验（Rank IC/分层/分年）、参数优化、样本内外结果、SHAP 预测解释。 |
-| 安装与服务 | macOS ARM64、Ubuntu x86_64、Windows x64 自包含安装器，原生后台服务和前台控制器。 |
+| 安装与服务 | macOS ARM64、Ubuntu x86_64、Windows x64 自包含安装器；macOS 菜单栏、Windows 系统托盘、Ubuntu 桌面控制器与原生后台服务。 |
 | 运行恢复 | 账户/订单/成交持久化、提交对账、数据任务进度、异常进程退出后的恢复路径。 |
+| 影子伴行 | 日线策略双实例对照：当日收盘、历史数据就绪后运行回测实例，与仿真实例对比净值和回撤；30 分钟对照待补齐。见[使用说明](paper-trading.md#shadow-run)。 |
 | 通用风控扩展 | `RiskStrategy`、`RiskOverlay` 和风险程序注册接口；宿主可以注册自己的实现。 |
 
 ## 未包含的能力
@@ -24,7 +28,7 @@ Millionaire CE 采用 MIT 许可证，分发包名为 `millionaire-ce`，导入�
 - 完整收益归因和通用 AI 因子/策略审计；见[下一版规划](roadmap.md)。
 
 未知或私有风险程序 ID 会被拒绝，不会静默替换为另一个程序。通用接口和生命周期
-保留下来，供 Millionaire 等宿主显式装配。详见[风险扩展契约](design/risk_program_selection.md)。
+保留下来，供 millionaire pro 或用户宿主扩展显式装配。详见[风险扩展契约](design/risk_program_selection.md)。
 
 ## 三模式一致性的含义
 

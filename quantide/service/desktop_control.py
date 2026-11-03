@@ -5,24 +5,27 @@ import os
 import subprocess
 import sys
 import threading
-import tkinter as tk
 import webbrowser
-from tkinter import messagebox
 
 from quantide.config.paths import get_app_config_dir
 
 
 def _controller_buttons(window, action):
     """Build service actions and schedule controller status refreshes."""
+    import tkinter as tk
+    from tkinter import messagebox
+
     controls = tk.Frame(window)
     controls.pack(pady=8)
     for title, command in (("启动", "start"), ("停止", "stop"), ("状态", "status")):
         tk.Button(controls, text=title, command=lambda name=command: action(name)).pack(
             side="left", padx=5
         )
-    tk.Button(
-        window, text="打开网页界面", command=lambda: webbrowser.open("http://127.0.0.1:8130")
-    ).pack(pady=5)
+    from quantide.config.server_address import controller_url
+
+    tk.Button(window, text="打开网页界面", command=lambda: webbrowser.open(controller_url())).pack(
+        pady=5
+    )
     tk.Button(
         window,
         text="日志位置",
@@ -39,6 +42,8 @@ def _controller_buttons(window, action):
 
 def create_controller():
     """Build the native controls without transferring service process ownership."""
+    import tkinter as tk
+
     window = tk.Tk()
     window.title("Millionaire CE")
     window.geometry("440x240")
@@ -76,7 +81,30 @@ def create_controller():
     return window
 
 
-def main():
+def main(*, install=False, uninstall=False, system=False):
     """Open service controls; closing this window leaves the background service running."""
+    if sys.platform == "win32" and not (install or uninstall or system):
+        from quantide.service.host_service import install_root
+
+        tray = install_root() / "MillionaireTray.exe"
+        if tray.exists():
+            subprocess.Popen([str(tray)])
+            return 0
+    if sys.platform == "darwin":
+        from quantide.service.macos_menu import (
+            bundle_path,
+            install_menu,
+            open_menu,
+            uninstall_menu,
+        )
+
+        if uninstall:
+            return uninstall_menu(system)
+        if install:
+            return install_menu(system)
+        if bundle_path().exists():
+            return open_menu()
+    if install or uninstall or system:
+        raise ValueError("Menu registration requires a native macOS installation")
     create_controller().mainloop()
     return 0

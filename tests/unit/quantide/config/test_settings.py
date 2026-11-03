@@ -93,14 +93,14 @@ def test_start_script_binds_localhost_unless_explicitly_overridden():
     script = (project_root / "start.sh").read_text(encoding="utf-8")
 
     assert '"--host" "0.0.0.0"' not in script
-    assert "${QUANTIDE_HOST:-127.0.0.1}" in script
+    assert "python -m quantide.cli" in script
 
 
 def test_module_entrypoint_binds_localhost_unless_explicitly_overridden():
     project_root = Path(__file__).resolve().parents[4]
     source = (project_root / "quantide" / "app.py").read_text(encoding="utf-8")
 
-    assert 'os.getenv("QUANTIDE_HOST", "127.0.0.1")' in source
+    assert "effective_address()" in source
 
 
 def test_get_settings_prefers_app_state(db, tmp_path: Path):

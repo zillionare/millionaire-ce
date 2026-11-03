@@ -16,10 +16,12 @@ from quantide.config.dev_stubs import (
 )
 from quantide.config.features import supports_live_trading
 from quantide.config.paths import normalize_data_home
+from quantide.config.realtime_source import configure_realtime_source, realtime_source
 from quantide.config.tencent_trial import configure_trial
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.stocks import stock_list
+from quantide.service.data_source_access import ensure_access_report, load_access_report
 from quantide.service.init_wizard import init_wizard
 from quantide.web.pages import wizard_state
 from quantide.web.pages.wizard_components import (
@@ -194,6 +196,9 @@ from quantide.web.pages.wizard_sync import (
 @rt("/")
 async def get(request: Request):
     """初始化向导主页"""
+    session = getattr(request, "scope", {}).get("session")
+    if isinstance(session, dict):
+        session["initializing"] = True
     force = _request_in_force_mode(request)
     _set_reconfigure_mode(force)
 
@@ -280,14 +285,14 @@ async def _save_admin_step(form_dict, step):
 async def _save_gateway_step(form_dict, step):
     """Apply the fixed demo window and the edition-specific gateway configuration."""
     try:
-        configure_trial(str(form_dict.get("tencent_trial_enabled", "")) == "on")
+        _configure_wizard_realtime(form_dict)
     except ValueError as exc:
         state = init_wizard.get_state(force_refresh=True).to_dict()
         return _render_wizard_main_content(
-            4,
+            5,
             state,
             step_content=Step4_Gateway(state),
-            current_step_value=4,
+            current_step_value=5,
             error_message=str(exc),
         )
     if not supports_live_trading():
@@ -312,10 +317,10 @@ def _save_stub_gateway():
         state = init_wizard.get_state(force_refresh=True)
         state_dict = state.to_dict()
         return _render_wizard_main_content(
-            4,
+            5,
             state_dict,
             step_content=Step4_Gateway(state_dict),
-            current_step_value=4,
+            current_step_value=5,
             error_message="开发 Stub gateway 尚未就绪，请重新启动应用后再试。",
         )
     try:
@@ -330,10 +335,10 @@ def _save_stub_gateway():
         state = init_wizard.get_state(force_refresh=True)
         state_dict = state.to_dict()
         return _render_wizard_main_content(
-            4,
+            5,
             state_dict,
             step_content=Step4_Gateway(state_dict),
-            current_step_value=4,
+            current_step_value=5,
             error_message=str(e),
         )
 
@@ -357,27 +362,27 @@ def _save_custom_gateway(form_dict):
         )
     except ValueError as e:
         return _render_wizard_main_content(
-            4,
+            5,
             state_dict,
             step_content=Step4_Gateway(state_dict),
-            current_step_value=4,
+            current_step_value=5,
             error_message=str(e),
         )
 
     if enabled and not server:
         return _render_wizard_main_content(
-            4,
+            5,
             state_dict,
             step_content=Step4_Gateway(state_dict),
-            current_step_value=4,
+            current_step_value=5,
             error_message="启用 gateway 时必须填写服务器地址",
         )
     if enabled and not api_key:
         return _render_wizard_main_content(
-            4,
+            5,
             state_dict,
             step_content=Step4_Gateway(state_dict),
-            current_step_value=4,
+            current_step_value=5,
             error_message="启用 gateway 时必须填写访问密钥",
         )
 
@@ -392,10 +397,10 @@ def _save_custom_gateway(form_dict):
             state_dict[GATEWAY_FORM_FIELDS["prefix"]] = prefix
             state_dict[GATEWAY_FORM_FIELDS["api_key"]] = api_key
             return _render_wizard_main_content(
-                4,
+                5,
                 state_dict,
                 step_content=Step4_Gateway(state_dict),
-                current_step_value=4,
+                current_step_value=5,
                 error_message=f"{msg}",
             )
 
@@ -409,16 +414,16 @@ def _save_custom_gateway(form_dict):
         )
     except Exception as e:
         return _render_wizard_main_content(
-            4,
+            5,
             state_dict,
             step_content=Step4_Gateway(state_dict),
-            current_step_value=4,
+            current_step_value=5,
             error_message=str(e),
         )
 
 
 async def _save_history_step(form_dict, step):
-    """Validate and save wizard step 5, returning its error view when necessary."""
+    """Validate and save the historical source before any bulk download."""
     state = init_wizard.get_state(force_refresh=True)
     state_dict = _merge_state(
         state.to_dict(), _extract_form_updates(form_dict, DATA_INIT_FIELD_ALIASES)
@@ -438,14 +443,16 @@ async def _save_history_step(form_dict, step):
     except ValueError as e:
         step_content = Step5_DataSetup(state_dict)
         return _render_wizard_main_content(
-            5,
+            4,
             state_dict,
             step_content=step_content,
-            current_step_value=5,
+            current_step_value=4,
             error_message=str(e),
         )
     if dev_stubs_enabled():
         try:
+            if not supports_live_trading():
+                _disable_ce_gateway()
             init_wizard.save_data_init_config(
                 epoch=epoch,
                 data_source="tushare",
@@ -457,13 +464,13 @@ async def _save_history_step(form_dict, step):
         except Exception as e:
             step_content = Step5_DataSetup(state_dict)
             return _render_wizard_main_content(
-                5,
+                4,
                 state_dict,
                 step_content=step_content,
-                current_step_value=5,
+                current_step_value=4,
                 error_message=str(e),
             )
-        init_wizard.update_step(step)
+        init_wizard.update_step(6)
         state = init_wizard.get_state(force_refresh=True)
         state_dict = state.to_dict()
         return _render_wizard_main_content(6, state_dict, current_step_value=6)
@@ -473,10 +480,10 @@ async def _save_history_step(form_dict, step):
     if data_source == "tushare" and not token:
         step_content = Step5_DataSetup(state_dict)
         return _render_wizard_main_content(
-            5,
+            4,
             state_dict,
             step_content=step_content,
-            current_step_value=5,
+            current_step_value=4,
             error_message="必须填写 Tushare Token",
         )
     try:
@@ -489,12 +496,84 @@ async def _save_history_step(form_dict, step):
     except Exception as e:
         step_content = Step5_DataSetup(state_dict)
         return _render_wizard_main_content(
-            5,
+            4,
             state_dict,
             step_content=step_content,
-            current_step_value=5,
+            current_step_value=4,
             error_message=str(e),
         )
+    if not supports_live_trading():
+        _disable_ce_gateway()
+    return await _check_configured_data_source(force=True)
+
+
+def _configure_wizard_realtime(form):
+    state = init_wizard.get_state(force_refresh=True)
+    report = load_access_report(state)
+    if not dev_stubs_enabled() and not supports_live_trading():
+        if not report or not report.get("history_ready"):
+            raise ValueError("请先完成数据源配置和历史数据权限检查。")
+    if report and report.get("realtime_ready"):
+        configure_trial(False)
+        configure_realtime_source("tushare")
+        return
+    demo = str(form.get("tencent_trial_enabled", "")) == "on"
+    extension = str(form.get("use_quote_extension", "")) == "on"
+    if demo and extension:
+        raise ValueError("腾讯演示与自定义行情扩展请选择一项。")
+    configure_trial(demo)
+    configure_realtime_source("tencent" if demo else ("extension" if extension else "none"))
+
+
+def _source_check_error(state, message):
+    init_wizard.update_step(4)
+    values = state.to_dict()
+    return _render_wizard_main_content(
+        4, values, step_content=Step5_DataSetup(values), current_step_value=4, error_message=message
+    )
+
+
+async def _check_configured_data_source(*, force=False):
+    state = init_wizard.get_state(force_refresh=True)
+    try:
+        report = await asyncio.to_thread(ensure_access_report, state, force=force)
+    except Exception:
+        return _source_check_error(state, "数据源检测未完成，请检查配置和网络后重试。")
+    if not report["history_ready"]:
+        return _source_check_error(
+            state, "历史数据所需接口尚未全部通过检测，请查看下方结果并处理后重试。"
+        )
+    if report["realtime_ready"]:
+        configure_trial(False)
+        configure_realtime_source("tushare")
+        if not supports_live_trading():
+            init_wizard.update_step(6)
+            return _render_wizard_main_content(6, state.to_dict(), current_step_value=6)
+    return None
+
+
+async def _validate_download_source(state):
+    result = await _check_configured_data_source()
+    report = load_access_report(state)
+    if not report or not report.get("history_ready"):
+        return result
+    selected = realtime_source()
+    needs_choice = not selected or (selected == "tushare" and not report.get("realtime_ready"))
+    if needs_choice and not supports_live_trading():
+        init_wizard.update_step(5)
+        return _render_wizard_main_content(
+            5,
+            state.to_dict(),
+            current_step_value=5,
+            error_message="请先选择实时行情方案，也可以暂不启用。",
+        )
+    return None
+
+
+def _download_progress_view(state):
+    return _render_wizard_main_content(
+        6, state.to_dict(), current_step_value=6, extra_nodes=(SyncProgressDialog(),)
+    )
 
 
 @rt("/step/{step}")
@@ -506,12 +585,17 @@ async def handle_step(request: Request, step: int):
     nav = str(form_dict.get("nav", "next")).lower()
     current_step = int(str(form_dict.get("_current_step", step)).strip() or step)
 
+    if nav == "prev" and step == 5 and not supports_live_trading():
+        report = load_access_report(init_wizard.get_state())
+        if report and report.get("realtime_ready"):
+            step = 4
+
     if nav != "prev":
         handlers = {
             2: _save_runtime_step,
             3: _save_admin_step,
-            4: _save_gateway_step,
-            5: _save_history_step,
+            4: _save_history_step,
+            5: _save_gateway_step,
         }
         handler = handlers.get(current_step)
         if handler is not None:
@@ -634,8 +718,7 @@ async def handle_update_download_range(request: Request):
 async def handle_download(request: Request):
     """开始下载初始化数据"""
     _set_reconfigure_mode(_request_in_force_mode(request))
-    form_data = await request.form()
-    form_dict = dict(form_data)
+    form_dict = dict(await request.form())
     state = init_wizard.get_state(force_refresh=True)
     state_dict = _merge_state(
         state.to_dict(), _extract_form_updates(form_dict, DATA_INIT_FIELD_ALIASES)
@@ -658,10 +741,10 @@ async def handle_download(request: Request):
         except Exception as e:
             step_content = Step5_DataSetup(state_dict)
             return _render_wizard_main_content(
-                5,
+                4,
                 state_dict,
                 step_content=step_content,
-                current_step_value=5,
+                current_step_value=4,
                 error_message=f"导入开发 Stub 样本失败：{e}",
             )
         return _render_wizard_main_content(6, state.to_dict(), current_step_value=6)
@@ -687,14 +770,19 @@ async def handle_download(request: Request):
         except Exception as e:
             step_content = Step5_DataSetup(state_dict)
             return _render_wizard_main_content(
-                5,
+                4,
                 state_dict,
                 step_content=step_content,
-                current_step_value=5,
+                current_step_value=4,
                 error_message=f"下载前参数校验失败：{e}",
             )
 
-    init_wizard.update_step(5)
+    error = await _validate_download_source(state)
+    if error is not None:
+        return error
+    if wizard_state._sync_status.get("is_running"):
+        return _download_progress_view(state)
+    init_wizard.update_step(6)
     state = init_wizard.get_state(force_refresh=True)
     _set_download_error(None)
 
@@ -714,21 +802,19 @@ async def handle_download(request: Request):
     start_wizard_sync(state.history_start_date)
     logger.info(f"开始下载历史数据，起始日期: {state.history_start_date}")
 
-    state_dict = state.to_dict()
-    return _render_wizard_main_content(
-        5,
-        state_dict,
-        step_content=Step5_DataSetup(state_dict),
-        current_step_value=5,
-        show_buttons=False,
-        extra_nodes=(SyncProgressDialog(),),
-    )
+    return _download_progress_view(state)
 
 
 @rt("/complete")
 async def handle_complete(request: Request):
     """完成初始化并跳转目标菜单"""
     try:
+        if not dev_stubs_enabled() and not init_wizard.get_state().init_completed:
+            return _render_wizard_main_content(
+                6,
+                init_wizard.get_state().to_dict(),
+                error_message="请先完成历史数据下载，再进入系统。",
+            )
         init_wizard.complete_initialization()
         _bootstrap_runtime_for_initialized_app(request.app)
         target = init_wizard.get_completion_redirect()

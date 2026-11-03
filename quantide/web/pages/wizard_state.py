@@ -37,7 +37,7 @@ def _set_download_error(message: str | None) -> None:
 def _get_download_error(step: int, explicit_error: str | None = None) -> str | None:
     if explicit_error:
         return explicit_error
-    if step == 5:
+    if step == 6:
         return _download_error_message
     return None
 

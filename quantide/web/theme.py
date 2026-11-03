@@ -57,6 +57,8 @@ class AppTheme:
             summary { list-style: none; }
             summary::-webkit-details-marker { display: none; }
             summary::marker { content: ""; }
+            #layout-sidebar summary::before,
+            #layout-sidebar summary::after { content: none !important; display: none !important; }
         """)
 
         # HTMX

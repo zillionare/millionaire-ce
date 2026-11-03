@@ -141,20 +141,29 @@ class RuntimeBootstrap:
         ``QUANTIDE_QUOTE_INTERVAL`` 控制间隔（秒）。
         """
         global _quote_publisher
+        from quantide.config.realtime_source import realtime_source
         from quantide.config.tencent_trial import trial_status
         from quantide.providers.extensions import load_quote_provider, quote_provider_enabled
 
-        use_extension = quote_provider_enabled()
-        if not use_extension and not trial_status().enabled:
+        selected = realtime_source()
+        use_extension = selected == "extension" or (not selected and quote_provider_enabled())
+        use_tushare = selected == "tushare"
+        if selected == "none" or not (use_tushare or use_extension or trial_status().enabled):
             return
         with _quote_publisher_lock:
             if _quote_publisher is None:
-                _quote_publisher = (
-                    load_quote_provider() if use_extension else self._create_tencent_publisher()
-                )
+                if use_tushare:
+                    from quantide.providers.tushare_publisher import TusharePublisher
+
+                    _quote_publisher = TusharePublisher()
+                else:
+                    _quote_publisher = (
+                        load_quote_provider() if use_extension else self._create_tencent_publisher()
+                    )
             publisher = _quote_publisher
             publisher.start()
-        adapters.register("quote_publisher", "user" if use_extension else "tencent", publisher)
+        name = "tushare" if use_tushare else ("user" if use_extension else "tencent")
+        adapters.register("quote_publisher", name, publisher)
 
     @staticmethod
     def _create_tencent_publisher():

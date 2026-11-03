@@ -118,7 +118,7 @@ def _wizard_step_meta() -> dict[int, dict[str, str]]:
             "title": "运行环境",
             ("description"): (
                 "配置行情数据存储位置、访问控制、监听端口和路径前缀。默认仅允许本机访问。"
-                "配置数据库固定保存在系统配置目录。"
+                "配置数据库固定保存在系统配置目录。监听设置将在服务重启后生效。"
             ),
         },
         3: {
@@ -129,27 +129,18 @@ def _wizard_step_meta() -> dict[int, dict[str, str]]:
             ),
         },
         4: {
-            "title": ("配置交易/实时行情网关" if supports_live_trading() else "确认仿真行情"),
-            "description": (
-                "配置 gateway 连接信息，用于获取实时行情和执行交易。"
-                if supports_live_trading()
-                else (
-                    "CE 使用 MarketDataHub 接收行情（可通过 Tencent "
-                    "行情发布路径提供），仿真交易无需配置实盘网关。"
-                )
-            ),
+            "title": "配置数据源",
+            "description": "填写数据源与历史范围，下一步先检查所需接口权限，不会开始下载历史数据。",
         },
         5: {
-            "title": "数据源设置及下载",
-            ("description"): (
-                "配置数据源，触发首次下载。首次下载可以仅下载少量数据，后续系统会以后台任"
-                "务继续下载，直到数据补齐到您设定的数据起始日。将下载以下数据：证券日历、"
-                "全A证券列表、历史日线行情（含复权因子与涨跌停价格）、ST数据。"
+            "title": "配置实时行情数据源",
+            "description": (
+                "用于仿真与实盘交易的实时行情，需要提供最新价格、当日涨跌停及复权所需数据。"
             ),
         },
         6: {
-            "title": "初始化完成",
-            "description": "恭喜！您的系统已经初始化完成。点击下方按钮，立即进入系统。",
+            "title": "数据准备与完成",
+            "description": "确认配置后显式开始历史数据下载；完成后进入系统。",
         },
     }
 
@@ -159,7 +150,7 @@ def _get_step_meta(step: int) -> dict[str, str]:
     meta = dict(step_meta.get(step, step_meta[1]))
     if not dev_stubs_enabled():
         return meta
-    if step == 4:
+    if step == 5:
         return {
             "title": "开发 Stub 交易网关",
             ("description"): (
@@ -167,7 +158,7 @@ def _get_step_meta(step: int) -> dict[str, str]:
                 "stub，本步骤只展示运行时网关信息，不需要手工配置。"
             ),
         }
-    if step == 5:
+    if step == 4:
         return {
             "title": "导入开发 Stub 样本数据",
             ("description"): (

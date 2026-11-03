@@ -331,10 +331,10 @@ def test_set_download_error_strips_whitespace():
     assert wizard_state._download_error_message == "boom"
 
 
-def test_get_download_error_step5_uses_global():
-    """[AC-NFR1101-01] test_get_download_error_step5_uses_global."""
+def test_get_download_error_step6_uses_global():
+    """[AC-NFR1101-01] test_get_download_error_step6_uses_global."""
     wizard_state._download_error_message = "global-msg"
-    got = _get_download_error(step=5)
+    got = _get_download_error(step=6)
     assert got == "global-msg"
 
 

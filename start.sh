@@ -63,10 +63,9 @@ fi
 exec > >(tee -a "$LOG_FILE")
 exec 2>&1
 
-# 启动应用（默认仅监听本机；显式设置 QUANTIDE_HOST 可覆盖）
-HOST="${QUANTIDE_HOST:-127.0.0.1}"
-UVICORN_ARGS=("quantide.app:app" "--host" "$HOST" "--port" "8000")
+# 启动应用；命令行读取已保存的监听设置，并允许环境变量显式覆盖。
+CLI_ARGS=("--no-browser")
 if [ -n "$RELOAD_MODE" ]; then
-    UVICORN_ARGS+=("--reload")
+    CLI_ARGS+=("--reload")
 fi
-uvicorn "${UVICORN_ARGS[@]}"
+python -m quantide.cli "${CLI_ARGS[@]}"

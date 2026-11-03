@@ -11,9 +11,11 @@ from starlette.testclient import TestClient
 def client():
     """创建测试客户端"""
     from quantide.app_factory import create_app
+    from tests.e2e.support.auth_fixture import sign_in_test_admin
 
     app = create_app(enforce_single_instance=False)
     with TestClient(app) as c:
+        sign_in_test_admin(c)
         yield c
 
 
@@ -170,9 +172,11 @@ class TestCalendarStaleBanner:
     def test_banner_appears_when_data_is_stale(self, trade_calendar_data):
         """数据陈旧时页面显示 warning 横幅。"""
         from quantide.app_factory import create_app
+        from tests.e2e.support.auth_fixture import sign_in_test_admin
 
         app = create_app(enforce_single_instance=False)
         with TestClient(app) as c:
+            sign_in_test_admin(c)
             trade_calendar_data._data = _make_calendar_table(
                 datetime.date(2024, 1, 1), datetime.date(2024, 12, 31)
             )
@@ -186,9 +190,11 @@ class TestCalendarStaleBanner:
     def test_banner_absent_when_data_covers_month(self, trade_calendar_data):
         """数据覆盖所选月份时，warning 横幅不出现。"""
         from quantide.app_factory import create_app
+        from tests.e2e.support.auth_fixture import sign_in_test_admin
 
         app = create_app(enforce_single_instance=False)
         with TestClient(app) as c:
+            sign_in_test_admin(c)
             trade_calendar_data._data = _make_calendar_table(
                 datetime.date(2024, 1, 1), datetime.date(2024, 12, 31)
             )
@@ -197,5 +203,3 @@ class TestCalendarStaleBanner:
             )
         assert resp.status_code == 200
         assert "2024-01-01 ~ 2024-12-31" not in resp.text
-
-

@@ -37,6 +37,12 @@ def configure_quote_provider(enabled: bool) -> None:
     if enabled and not (directory / "quote_provider.py").is_file():
         raise FileNotFoundError(f"Create {directory / 'quote_provider.py'} before enabling it")
     write_json(directory / "quote-provider.json", {"enabled": enabled})
+    from quantide.config.realtime_source import configure_realtime_source, realtime_source
+
+    if enabled:
+        configure_realtime_source("extension")
+    elif realtime_source() == "extension":
+        configure_realtime_source("none")
 
 
 def publish_quotes(quotes: dict[str, dict[str, Any]], limits: dict | None = None) -> None:

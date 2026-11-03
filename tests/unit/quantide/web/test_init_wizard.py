@@ -19,6 +19,13 @@ from quantide.web.pages import init_wizard as init_wizard_page
 def private_edition_wizard_cases(monkeypatch):
     """Keep legacy gateway-form cases exercising the shared private path."""
     monkeypatch.setattr('quantide.config.features.get_runtime_edition', lambda: 'millionaire')
+    monkeypatch.setattr(init_wizard_page, "ensure_access_report",
+                        lambda state, **kw: {"history_ready": True, "realtime_ready": False})
+    monkeypatch.setattr(init_wizard_page, "load_access_report",
+                        lambda state: {"history_ready": True, "realtime_ready": False})
+    monkeypatch.setattr(wizard_step_views, "dev_stubs_enabled",
+                        lambda: init_wizard_page.dev_stubs_enabled())
+
 
 
 class FakeRequest:
@@ -303,7 +310,7 @@ async def test_handle_step_gateway_config_uses_canonical_field_names(monkeypatch
     await init_wizard_page.handle_step(
         FakeRequest(
             {
-                "_current_step": "4",
+                "_current_step": "5",
                 "nav": "next",
                 "gateway_enabled": "true",
                 "gateway_server": "127.0.0.1",
@@ -312,7 +319,7 @@ async def test_handle_step_gateway_config_uses_canonical_field_names(monkeypatch
                 "gateway_prefix": "/gateway",
             }
         ),
-        5,
+        6,
     )
 
     assert fake_wizard.gateway_test_calls == [
@@ -332,7 +339,7 @@ async def test_handle_step_gateway_config_uses_canonical_field_names(monkeypatch
             "api_key": "gateway-key",
         }
     ]
-    assert fake_wizard.updated_step == 5
+    assert fake_wizard.updated_step == 6
 
 
 @pytest.mark.asyncio
@@ -347,11 +354,11 @@ async def test_handle_step_gateway_config_uses_persisted_prefix_alias_when_omitt
     await init_wizard_page.handle_step(
         FakeRequest(
             {
-                "_current_step": "4",
+                "_current_step": "5",
                 "nav": "next",
             }
         ),
-        5,
+        6,
     )
 
     assert fake_wizard.gateway_test_calls == []
@@ -364,7 +371,7 @@ async def test_handle_step_gateway_config_uses_persisted_prefix_alias_when_omitt
             "api_key": "persisted-key",
         }
     ]
-    assert fake_wizard.updated_step == 5
+    assert fake_wizard.updated_step == 6
 
 
 @pytest.mark.asyncio
@@ -408,11 +415,11 @@ async def test_handle_step_gateway_config_uses_dev_stub_runtime_when_enabled(mon
     await init_wizard_page.handle_step(
         FakeRequest(
             {
-                "_current_step": "4",
+                "_current_step": "5",
                 "nav": "next",
             }
         ),
-        5,
+        6,
     )
 
     assert fake_wizard.gateway_test_calls == []
@@ -425,7 +432,7 @@ async def test_handle_step_gateway_config_uses_dev_stub_runtime_when_enabled(mon
             "api_key": "stub-api-key",
         }
     ]
-    assert fake_wizard.updated_step == 5
+    assert fake_wizard.updated_step == 6
 
 
 @pytest.mark.asyncio
@@ -436,7 +443,7 @@ async def test_handle_step_gateway_config_requires_api_key_when_enabled(monkeypa
     response = await init_wizard_page.handle_step(
         FakeRequest(
             {
-                "_current_step": "4",
+                "_current_step": "5",
                 "nav": "next",
                 "gateway_enabled": "true",
                 "gateway_server": "127.0.0.1",
@@ -445,7 +452,7 @@ async def test_handle_step_gateway_config_requires_api_key_when_enabled(monkeypa
                 "gateway_prefix": "/gateway",
             }
         ),
-        5,
+        6,
     )
 
     html = str(response)
@@ -463,7 +470,7 @@ async def test_handle_step_data_setup_uses_canonical_field_names(monkeypatch):
     await init_wizard_page.handle_step(
         FakeRequest(
             {
-                "_current_step": "5",
+                "_current_step": "4",
                 "nav": "next",
                 "epoch": "2024-01-01",
                 "data_source": "tushare",
@@ -471,7 +478,7 @@ async def test_handle_step_data_setup_uses_canonical_field_names(monkeypatch):
                 "history_years": "3",
             }
         ),
-        6,
+        5,
     )
 
     assert fake_wizard.data_calls == [
@@ -482,7 +489,7 @@ async def test_handle_step_data_setup_uses_canonical_field_names(monkeypatch):
             "history_years": 3,
         }
     ]
-    assert fake_wizard.updated_step == 6
+    assert fake_wizard.updated_step == 5
 
 
 @pytest.mark.asyncio
@@ -493,7 +500,7 @@ async def test_handle_step_data_setup_requires_tushare_token(monkeypatch):
     response = await init_wizard_page.handle_step(
         FakeRequest(
             {
-                "_current_step": "5",
+                "_current_step": "4",
                 "nav": "next",
                 "epoch": "2024-01-01",
                 "data_source": "tushare",
@@ -501,7 +508,7 @@ async def test_handle_step_data_setup_requires_tushare_token(monkeypatch):
                 "history_years": "3",
             }
         ),
-        6,
+        5,
     )
 
     html = str(response)
@@ -551,11 +558,11 @@ async def test_handle_step_data_setup_uses_dev_stub_token_and_imports_samples(mo
     response = await init_wizard_page.handle_step(
         FakeRequest(
             {
-                "_current_step": "5",
+                "_current_step": "4",
                 "nav": "next",
             }
         ),
-        6,
+        5,
     )
 
     html = str(response)
@@ -606,13 +613,13 @@ async def test_handle_download_skips_progress_dialog_in_dev_stub(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_data_sync_failure_persists_error_to_step_five_header(monkeypatch):
+async def test_run_data_sync_failure_persists_error_to_step_six_header(monkeypatch):
     fake_wizard, pipeline = _mock_wizard_pipeline(monkeypatch, error="network broken")
     await wizard_sync._run_data_sync(fake_wizard.state.history_start_date)
     html = str(init_wizard_page._render_wizard_main_content(
-        5, fake_wizard.state.to_dict(),
+        6, fake_wizard.state.to_dict(),
         step_content=init_wizard_page.Step5_DataSetup(fake_wizard.state.to_dict()),
-        current_step_value=5,
+        current_step_value=6,
     ))
     assert wizard_state._sync_status["error"] == "network broken"
     assert "下载失败：network broken" in html
@@ -696,6 +703,7 @@ async def test_force_reconfigure_keeps_query_and_prefills_saved_values(monkeypat
 @pytest.mark.asyncio
 async def test_handle_complete_redirects_to_root(monkeypatch):
     fake_wizard = FakeInitWizard()
+    fake_wizard.state.init_completed = True
     monkeypatch.setattr(init_wizard_page, "init_wizard", fake_wizard)
     monkeypatch.setattr(init_wizard_page, "_bootstrap_runtime_for_initialized_app", lambda app: None)
 

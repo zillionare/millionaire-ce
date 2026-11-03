@@ -42,11 +42,12 @@ from quantide.service.strategy_runtime import strategy_runtime_manager
 from quantide.web.apis.analysis import kline_router, search_router
 from quantide.web.apis.broker import app as broker_api_app
 from quantide.web.application import fast_app
+from quantide.web.auth.guard import AuthGuard
 from quantide.web.auth.manager import AuthManager
 from quantide.web.middleware import BrokerRegistryMiddleware, exception_handler
 from quantide.web.middleware_feature import FeatureCheckMiddleware
 from quantide.web.middleware_init import InitCheckMiddleware
-from quantide.web.pages.accounts import accounts_app, accounts_list
+from quantide.web.pages.accounts import accounts_app
 from quantide.web.pages.analysis import analysis_handler
 from quantide.web.pages.data_calendar import data_calendar_app
 from quantide.web.pages.data_db import data_db_app
@@ -69,6 +70,7 @@ from quantide.web.pages.system.datasource import system_datasource_app
 from quantide.web.pages.system.gateway import system_gateway_app
 from quantide.web.pages.system.jobs import _init_scheduler_jobs, system_jobs_app
 from quantide.web.pages.system.market import system_market_app
+from quantide.web.pages.system.network import system_network_app
 from quantide.web.pages.system.realtime import system_realtime_app
 from quantide.web.pages.system.risk_events import system_risk_events_app
 from quantide.web.pages.system.runtime_monitor import system_runtime_monitor_app
@@ -413,8 +415,7 @@ def create_app(
                 trade_lightning_execute,
                 methods=["POST"],
             ),
-            Route("/system/accounts", accounts_list, methods=["GET"]),
-            Route("/system/accounts/", accounts_list, methods=["GET"]),
+            Route("/system/accounts", lambda req: RedirectResponse("/system/accounts/")),
             Mount("/system/accounts", accounts_app),
             Route("/strategy", lambda req: RedirectResponse("/strategy/")),
             Route(
@@ -500,6 +501,12 @@ def create_app(
             ),
             Mount("/system/datasource", system_datasource_app),
             Route(
+                "/system/network",
+                lambda req: RedirectResponse("/system/network/", status_code=303),
+                methods=["GET"],
+            ),
+            Mount("/system/network", system_network_app),
+            Route(
                 "/system/risk-events",
                 lambda req: RedirectResponse("/system/risk-events/", status_code=303),
                 methods=["GET"],
@@ -515,6 +522,7 @@ def create_app(
         ],
     )
 
+    app.user_middleware.append(Middleware(AuthGuard, auth=auth))
     auth.initialize(app, prefix="/auth")
     _bind_session_key(app, app.secret_key)
     app.state.runtime = runtime

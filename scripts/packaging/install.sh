@@ -36,18 +36,31 @@ if [ -L "$install_root/current" ]; then previous=$(readlink "$install_root/curre
 version=$(cat "$archive_root/VERSION")
 destination=$(mktemp -d "$install_root/versions/$version.XXXXXX")
 cp -R "$archive_root/runtime" "$archive_root/millionaire-ce" "$destination/"
+if [ -d "$archive_root/Millionaire CE.app" ]; then
+    cp -R "$archive_root/Millionaire CE.app" "$destination/"
+fi
 if [ "$scope" = system ]; then chmod 755 "$install_root" "$install_root/versions" "$destination"; fi
 committed=false
 rollback() {
     result=$?
     trap - 0
     if [ "$committed" != true ]; then
+        if [ "$scope" = system ]; then
+            "$destination/millionaire-ce" control --uninstall --system >/dev/null 2>&1 || true
+        else
+            "$destination/millionaire-ce" control --uninstall >/dev/null 2>&1 || true
+        fi
         "$destination/millionaire-ce" service uninstall "$@" >/dev/null 2>&1 || true
         if [ -n "$previous" ]; then
             rm -f "$install_root/current"
             ln -s "$previous" "$install_root/current"
             "$previous/millionaire-ce" service install "$@" || true
             "$previous/millionaire-ce" service start "$@" || true
+            if [ "$scope" = system ]; then
+                "$previous/millionaire-ce" control --install --system >/dev/null 2>&1 || true
+            else
+                "$previous/millionaire-ce" control --install >/dev/null 2>&1 || true
+            fi
         else
             rm -f "$install_root/current"
         fi
@@ -65,7 +78,13 @@ ln -s "$destination" "$install_root/current.new.$$"
 "$install_root/current/millionaire-ce" service install "$@"
 "$install_root/current/millionaire-ce" service start "$@"
 "$destination/runtime/bin/python3.13" "$archive_root/wait-for-service.py"
+if [ "$scope" = system ]; then
+    "$destination/millionaire-ce" control --install --system
+else
+    "$destination/millionaire-ce" control --install
+fi
 cp "$archive_root/uninstall.sh" "$install_root/uninstall.sh"
+chmod 755 "$install_root/uninstall.sh"
 printf '%s\n' "$scope" > "$install_root/service-scope"
 printf '%s\n' "$bin_dir" > "$install_root/bin-dir"
 printf '%s\n' 'Millionaire CE managed installation' > "$install_root/.millionaire-ce-install"

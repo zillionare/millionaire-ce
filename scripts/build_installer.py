@@ -16,6 +16,8 @@ import zipfile
 from pathlib import Path
 
 from scripts.artifact_paths import artifact_root, external_path
+from scripts.build_macos_controller import build_menu_app
+from scripts.build_windows_controller import build_tray_app
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGING = Path(__file__).resolve().parent / "packaging"
@@ -144,6 +146,7 @@ def build_platform(payload, version, output_dir):
     architecture = platform.machine().lower()
     if os.name == "nt":
         windows_wrapper(payload)
+        build_tray_app(payload)
         compiler = shutil.which("ISCC") or r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
         run(
             compiler,
@@ -181,6 +184,7 @@ def build_installer(wheel, work, output):
     python = stage_runtime(payload, wheel.resolve())
     if sys.platform == "darwin":
         bundle_openmp(payload)
+        build_menu_app(payload)
     run(
         python,
         "-c",
@@ -195,6 +199,7 @@ def build_installer(wheel, work, output):
         path.with_name(path.name + ".sha256").write_text(
             hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n",
             encoding="utf-8",
+            newline="\n",
         )
     return 0
 

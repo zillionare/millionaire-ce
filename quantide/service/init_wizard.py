@@ -276,6 +276,9 @@ class InitWizardService:
             port: 服务端口。
             prefix: 服务前缀。
         """
+        from quantide.config.server_address import validate_address
+
+        host, port = validate_address(host, port)
         normalized_home = normalize_data_home(home)
 
         state = self.get_state()

@@ -261,9 +261,9 @@ def test_get_progress_uses_new_step_labels(db):
         "欢迎",
         "运行环境",
         "管理员密码",
-        "行情与交易",
-        "数据源设置及下载",
-        "完成",
+        "配置数据源",
+        "配置实时行情",
+        "数据准备与完成",
     ]
     assert progress["total_steps"] == WIZARD_TOTAL_STEPS
 

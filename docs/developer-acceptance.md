@@ -142,7 +142,7 @@ QUANTIDE_ENABLE_DEV_STUBS=1 uvicorn quantide.app:app --reload
 5. 旧入口 `/strategy/live` 不得绕过 CE 的 live feature gate。
 6. 如果本次改动涉及交易逻辑，至少再跑一次 backtest/paper parity 定向用例。
 
-私有版专属的 gateway/live UI 合同用例使用 `private_only` marker，不能作为
+millionaire pro 专属的 gateway/live UI 合同用例使用 `private_only` marker，不能作为
 CE 验收证据。需要验证这些共享内部实现时，必须显式启用
 `QUANTIDE_ENABLE_EDITION_OVERRIDE=1 QUANTIDE_EDITION=zillionaire`；普通 CE
 运行不应启动 live broker，也不应恢复持久化的 live runtime。

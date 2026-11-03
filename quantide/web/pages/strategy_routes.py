@@ -79,6 +79,8 @@ BACKTEST_WIZARD_SCRIPT = (
     "buttons.length; j++) {\n            buttons[j].classList.toggle('hidden', "
     "buttons[j].getAttribute('data-bt-show') !== String(step));\n        }\n        var "
     "indicator = document.getElementById('backtest-step-indicator');\n        if "
-    "(indicator) { indicator.textContent = '第 ' + step + ' / 3 步'; }\n    }\n    "
+    "(indicator) { indicator.textContent = '第 ' + step + ' / 3 步'; }\n    "
+    "var body = document.querySelector('.backtest-dialog__body');\n    "
+    "if (body) { body.scrollTop = 0; }\n    }\n    "
     "window.showBacktestStep = showStep;\n    showStep(1);\n})();\n"
 )

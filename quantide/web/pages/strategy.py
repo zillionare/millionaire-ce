@@ -406,7 +406,7 @@ def index(req, session):
         },
     ]
 
-    # 从缓存加载策略（不再每次扫描）
+    strategy_loader.ensure_builtin_strategies()
     strategies = strategy_loader.load_from_cache()
     strategy_rows = _build_strategy_rows(strategies)
     backtest_rows = _build_backtest_rows(strategies, **_get_backtest_deploy_capabilities(req))
@@ -465,7 +465,7 @@ def index(req, session):
                 Div(
                     H2("策略列表", cls="text-lg font-semibold text-gray-900"),
                     P(
-                        "内置示例已默认参与扫描；如需复制到自己的策略目录，请点击“复制示例策略”。",
+                        "内置示例已自动加载；如需复制到自己的策略目录，请点击“复制示例策略”。",
                         cls="mt-1 text-sm text-gray-500",
                     ),
                 ),
@@ -488,11 +488,8 @@ def index(req, session):
                         Input(
                             type="text",
                             placeholder="按策略名过滤...",
-                            cls=(
-                                "pl-10 pr-4 py-2 border border-gray-300 rounded-lg "
-                                "bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 "
-                                "focus:border-transparent"
-                            ),
+                            cls="q-input text-gray-900",
+                            style="padding-left: 2.5rem; width: 16rem;",
                         ),
                         Svg(
                             SvgPath(
@@ -503,7 +500,9 @@ def index(req, session):
                                     "stroke-width": "2",
                                 },
                             ),
-                            cls="w-5 h-5 text-gray-400 absolute left-3 top-2.5",
+                            cls="w-5 h-5 text-gray-400",
+                            style="position: absolute; left: 0.75rem; top: 50%; "
+                            "transform: translateY(-50%); pointer-events: none;",
                             fill="none",
                             stroke="currentColor",
                             viewBox="0 0 24 24",

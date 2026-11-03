@@ -93,6 +93,11 @@ SYSTEM_MAINTENANCE_MENU = [
                 ),
             },
             {
+                "title": "服务访问",
+                "url": "/system/network",
+                "icon_path": "M4 4h16v12H4zM8 20h8m-4-4v4",
+            },
+            {
                 "title": "定时任务",
                 "url": "/system/jobs",
                 "icon_path": "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",

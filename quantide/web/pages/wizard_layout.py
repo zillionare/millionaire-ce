@@ -42,8 +42,8 @@ def _build_step_content(step: int, state_dict: dict[str, Any]):
         1: Step1_Welcome,
         2: lambda: Step2_Runtime(state_dict),
         3: lambda: Step3_Admin(state_dict),
-        4: lambda: Step4_Gateway(state_dict),
-        5: lambda: Step5_DataSetup(state_dict),
+        4: lambda: Step5_DataSetup(state_dict),
+        5: lambda: Step4_Gateway(state_dict),
         6: lambda: Step6_Complete(state_dict),
     }
     builder = step_content_builders.get(step, Step1_Welcome)
@@ -134,96 +134,52 @@ def _render_wizard_main_content(
     )
 
 
+def _navigation_button(title, target, nav, primary=False):
+    return Button(
+        title,
+        type="submit",
+        name="nav",
+        value=nav,
+        cls="btn px-5 py-2.5 rounded-md font-medium text-sm",
+        style=f"background: {PRIMARY_COLOR if primary else 'white'}; "
+        f"color: {'white' if primary else '#374151'}; border: 1px solid #d1d5db;",
+        hx_post=_with_force_query(target),
+        hx_target="#wizard-main-container",
+        hx_swap="innerHTML",
+        hx_include="[name]",
+        hx_disabled_elt="this",
+        hx_indicator="#data-source-checking" if title == "检测并继续" else None,
+    )
+
+
 def WizardButtons(current_step: int, total_steps: int = WIZARD_TOTAL_STEPS):
-    """向导导航按钮 - 上一步在左，下一步在右"""
+    """Keep configuration navigation separate from the explicit history download."""
     if current_step >= total_steps:
+        state = init_wizard.get_state()
+        if not state.init_completed and not dev_stubs_enabled():
+            return _download_buttons()
         return Div(
-            Button(
-                "进入系统",
-                cls="btn px-6 py-2.5 rounded-md font-medium text-sm",
-                style=(
-                    "background: "
-                    f"{PRIMARY_COLOR}"
-                    "; color: white; border: none; box-shadow: 0 1px 2px rgba(209, 53, "
-                    "39, 0.3); transition: all 0.2s;"
-                ),
-                hx_post=_with_force_query("/init-wizard/complete"),
-                hx_target="#wizard-main-container",
-                hx_swap="innerHTML",
-            ),
+            _navigation_button("进入系统", "/init-wizard/complete", "next", True),
             cls="flex justify-end",
         )
-
-    left_buttons = []
-    right_buttons = []
-
+    previous = []
     if current_step > 1:
-        left_buttons.append(
-            Button(
-                "上一步",
-                type="submit",
-                name="nav",
-                value="prev",
-                cls="btn px-5 py-2.5 rounded-md font-medium text-sm",
-                style=(
-                    "background: white; color: #374151; border: 1px solid #d1d5db; "
-                    "transition: all 0.2s;"
-                ),
-                hx_post=_with_force_query(f"/init-wizard/step/{current_step - 1}"),
-                hx_target="#wizard-main-container",
-                hx_swap="innerHTML",
-                hx_include="[name]",
-            )
+        previous.append(
+            _navigation_button("上一步", f"/init-wizard/step/{current_step - 1}", "prev")
         )
-
-    if current_step < total_steps:
-        if current_step == 5:
-            next_target = "/init-wizard/download"
-            if dev_stubs_enabled():
-                next_target = f"/init-wizard/step/{current_step + 1}"
-            right_buttons.append(
-                Button(
-                    "下一步",
-                    type="submit",
-                    name="nav",
-                    value="next",
-                    cls="btn px-5 py-2.5 rounded-md font-medium text-sm",
-                    style=(
-                        "background: "
-                        f"{PRIMARY_COLOR}"
-                        "; color: white; border: none; box-shadow: 0 1px 2px rgba(209, "
-                        "53, 39, 0.3); transition: all 0.2s;"
-                    ),
-                    hx_post=_with_force_query(next_target),
-                    hx_target="#wizard-main-container",
-                    hx_swap="innerHTML",
-                    hx_include="[name]",
-                )
-            )
-        else:
-            right_buttons.append(
-                Button(
-                    "下一步",
-                    type="submit",
-                    name="nav",
-                    value="next",
-                    cls="btn px-5 py-2.5 rounded-md font-medium text-sm",
-                    style=(
-                        "background: "
-                        f"{PRIMARY_COLOR}"
-                        "; color: white; border: none; box-shadow: 0 1px 2px rgba(209, "
-                        "53, 39, 0.3); transition: all 0.2s;"
-                    ),
-                    hx_post=_with_force_query(f"/init-wizard/step/{current_step + 1}"),
-                    hx_target="#wizard-main-container",
-                    hx_swap="innerHTML",
-                    hx_include="[name]",
-                )
-            )
-
+    label = "检测并继续" if current_step == 4 and not dev_stubs_enabled() else "下一步"
     return Div(
-        Div(*left_buttons, cls="flex gap-3"),
-        Div(*right_buttons, cls="flex gap-3"),
+        Div(*previous),
+        _navigation_button(label, f"/init-wizard/step/{current_step + 1}", "next", True),
+        cls="flex justify-between items-center",
+    )
+
+
+def _download_buttons():
+    """Start history download only after the user confirms all configuration."""
+    return Div(
+        _navigation_button("上一步", "/init-wizard/step/5", "prev"),
+        _navigation_button("开始下载历史数据", "/init-wizard/download", "next", True),
         cls="flex justify-between items-center",
     )
 
@@ -243,7 +199,7 @@ def InitWizardPage(step: int = 1, form_data: dict | None = None):
 
     return BaseLayout(
         Div(
-            Link(rel="stylesheet", href="/static/init-wizard.css"),
+            Link(rel="stylesheet", href="/static/init-wizard.css?v=2"),
             Div(_render_wizard_main_content(step, state_dict), id="wizard-main-container"),
         ),
         page_title=f"系统初始化 - {get_branding().product_name}",

@@ -1,7 +1,11 @@
 # 启停、升级与备份恢复
 
-后台服务运行网页、同步任务和策略。前台控制器负责启停和打开浏览器，关闭控制器
-窗口不停止服务。只停止某个策略请使用“系统维护 → 运行时监控”。
+后台服务运行网页、同步任务和策略。macOS 默认提供菜单栏 **M** 控件，可查看状态、
+启停服务、打开网页和日志目录。退出菜单栏控件不停止服务，重新显示时打开用户
+“应用程序”中的 Millionaire CE，或运行 `millionaire-ce control`。
+Windows 使用系统托盘控件，右键提供同类操作，双击打开网页；退出后可从开始菜单或
+桌面快捷方式重新打开。Ubuntu 桌面使用窗口式控制器。
+只停止某个策略请使用“系统维护 → 运行时监控”。
 
 ## 日常启停
 
@@ -22,7 +26,7 @@ sudo millionaire-ce service start
 sudo journalctl -u millionaire-ce -n 100 --no-pager
 ```
 
-Windows 优先使用控制器；命令行可在管理员 PowerShell 中运行安装目录自带 Python：
+Windows 优先使用系统托盘菜单；命令行可在管理员 PowerShell 中运行安装目录自带 Python：
 
 ```powershell
 & 'C:\Program Files\MillionaireCE\runtime\python.exe' -m quantide.cli service status

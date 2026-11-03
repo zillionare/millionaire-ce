@@ -94,10 +94,10 @@ administrator-password step creates or updates the `admin` account. Until that
 step is completed, login is unavailable, and no `admin`/`admin123` account is
 created by default.
 
-The bundled launch paths bind to `127.0.0.1` by default. Set `--host` or
-`QUANTIDE_HOST` explicitly to expose the UI on another interface. A persisted
-non-localhost `app_host` remains honored by settings consumers; it is not
-silently rewritten to localhost.
+The listener defaults to `127.0.0.1:8130`. The wizard's saved address and port
+take effect when the service restarts. Administrators can change them later at
+System Maintenance → System Settings → Service Access. Explicit `--host` and
+`--port` arguments or `QUANTIDE_HOST` and `QUANTIDE_PORT` override saved values.
 
 ## Background service
 

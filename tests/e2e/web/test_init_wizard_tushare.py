@@ -56,9 +56,12 @@ def _advance_to_data_setup(client, market_home) -> None:
     )
     assert response.status_code == 200
 
-    response = _next_step(client, 5, 4)
+    response = _next_step(client, 5, 4, epoch="2024-01-01", data_source="tushare",
+                          tushare_token="stub-token", history_years="3")
     assert response.status_code == 200
-    assert "当前数据源" in response.text
+    assert "配置实时行情数据源" in response.text
+    response = _next_step(client, 6, 5)
+    assert "开始下载历史数据" in response.text
 
 
 def _wait_for_sync_completion(client) -> dict:

@@ -117,7 +117,7 @@ def test_strategy_index_page_explains_copy_entry(monkeypatch, db):
     html = to_xml(strategy_page.index(None, {"auth": "admin"}))
 
     assert "复制示例策略" in html
-    assert "内置示例已默认参与扫描" in html
+    assert "内置示例已自动加载" in html
     assert 'id="risk-event-center"' not in html
     assert 'id="runtime-monitor"' not in html
 

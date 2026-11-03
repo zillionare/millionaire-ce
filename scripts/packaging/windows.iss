@@ -29,15 +29,18 @@ Source: "{#Payload}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cr
 
 [Dirs]
 Name: "{commonappdata}\MillionaireCE"; Permissions: admins-full system-full
+Name: "{commonappdata}\MillionaireCE-Status"; Permissions: users-readexec admins-full system-full
 
 [Icons]
-Name: "{group}\Millionaire CE Controller"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m quantide.cli control"; WorkingDir: "{app}"
-Name: "{commondesktop}\Millionaire CE"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m quantide.cli control"; WorkingDir: "{app}"
+Name: "{group}\Millionaire CE Controller"; Filename: "{app}\MillionaireTray.exe"; WorkingDir: "{app}"
+Name: "{commondesktop}\Millionaire CE"; Filename: "{app}\MillionaireTray.exe"; WorkingDir: "{app}"
+Name: "{commonstartup}\Millionaire CE"; Filename: "{app}\MillionaireTray.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m quantide.cli control"; Description: "Open service controller"; Flags: postinstall nowait skipifsilent runasoriginaluser
+Filename: "{app}\MillionaireTray.exe"; Flags: nowait runasoriginaluser
 
 [UninstallRun]
+Filename: "{app}\MillionaireTray.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "QuitMillionaireTray"
 Filename: "{app}\runtime\python.exe"; Parameters: "-m quantide.cli service stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopMillionaireService"
 Filename: "{app}\runtime\python.exe"; Parameters: "-m quantide.cli service uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "UninstallMillionaireService"
 
@@ -55,6 +58,12 @@ var
   ExitCode: Integer;
 begin
   Result := '';
+  if FileExists(ExpandConstant('{app}\MillionaireTray.exe')) then
+    if not Exec(ExpandConstant('{app}\MillionaireTray.exe'), '--quit', '',
+      SW_HIDE, ewWaitUntilTerminated, ExitCode) then begin
+      Result := 'Unable to close the existing tray controller.';
+      Exit;
+    end;
   if FileExists(ExpandConstant('{app}\runtime\python.exe')) then
     if not Exec(ExpandConstant('{app}\runtime\python.exe'),
       '-m quantide.cli service stop', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then

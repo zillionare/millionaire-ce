@@ -139,6 +139,15 @@
     .q-btn--icon { padding: 0; width: 32px; height: 32px; }
     .q-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+    /* Override the document's native button defaults in strategy rows. */
+    .strategy-actions button.q-btn { margin: 0; line-height: normal; }
+    .strategy-actions button.q-btn--ghost { background: transparent; border-color: transparent; }
+    .strategy-actions button.q-btn--ghost:hover { background: var(--bg-subtle); }
+    .strategy-actions button.q-btn--success {
+      background: var(--success); border-color: var(--success); color: #fff;
+    }
+    .strategy-actions button.q-btn--success:hover { background: var(--success-dark); }
+
     /* ---------------- Badge / Chip ---------------- */
     .q-badge {
       display: inline-flex; align-items: center; padding: 2px 8px;
@@ -172,6 +181,31 @@
       padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border);
       display: flex; justify-content: flex-end; gap: var(--space-2); flex-shrink: 0;
     }
+
+    .backtest-dialog-overlay {
+      position: fixed; inset: 0; z-index: 50; padding: 16px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.5);
+    }
+    .backtest-dialog {
+      width: min(600px, 100%);
+      height: min(800px, (100vw - 32px) * 4 / 3, 100vh - 32px);
+      height: min(800px, (100vw - 32px) * 4 / 3, 100dvh - 32px);
+      display: flex; flex-direction: column; overflow: hidden;
+      background: var(--bg); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+    }
+    .backtest-dialog__header {
+      display: flex; align-items: center; flex-wrap: wrap; flex-shrink: 0;
+      padding: 16px 24px; border-bottom: 1px solid var(--border);
+    }
+    .backtest-dialog__header h3 { margin: 0; overflow-wrap: anywhere; }
+    .backtest-dialog__form { display: flex; flex: 1; flex-direction: column; min-height: 0; margin: 0; }
+    .backtest-dialog__body { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px; }
+    .backtest-dialog__footer {
+      display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px;
+      flex-shrink: 0; padding: 12px 24px; border-top: 1px solid var(--border);
+    }
+    .backtest-dialog__footer button { margin: 0; }
 
     /* ---------------- 面包屑 ---------------- */
     .q-breadcrumb { display: flex; align-items: center; gap: var(--space-2); font-size: 14px; color: var(--fg-muted); }

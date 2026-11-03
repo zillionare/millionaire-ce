@@ -48,6 +48,14 @@
                     padding-top: 16px;
                     border-top: 1px solid #e5e7eb;
                 }
+                #wizard-footer-region button {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: auto;
+                    min-width: 88px;
+                    white-space: nowrap;
+                }
                 #wizard-main-container {
                     display: flex;
                     align-items: flex-start;

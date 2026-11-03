@@ -218,16 +218,13 @@ def _build_strategy_rows(strategies: dict) -> list:
         )
 
         action_controls: list[Any] = [
-            Button(
+            fh.Button(
                 UkIcon("play", size=16, cls="text-[#e41815]"),
                 title="重新运行回测",
                 hx_get=f"/strategy/{name}/backtest/modal",
                 hx_target="#modal-container",
                 hx_indicator="#global-loading",
-                cls=(
-                    "w-8 h-8 flex items-center justify-center bg-transparent border-0 "
-                    "shadow-none p-0 hover:text-[#c91412]"
-                ),
+                cls="q-btn q-btn--sm q-btn--ghost",
                 type="button",
             )
         ]
@@ -236,33 +233,25 @@ def _build_strategy_rows(strategies: dict) -> list:
                 "优化",
                 title="参数优化：在样本内挑选参数并用样本外检验",
                 href=f"/strategy/{name}/optimize",
-                cls=(
-                    "px-2 py-1 text-xs font-medium text-gray-700 "
-                    "bg-gray-50 hover:bg-gray-100 rounded border "
-                    "border-gray-200"
-                ),
+                cls="q-btn q-btn--sm",
             )
         )
         if _supports_stock_selection(cls):
             action_controls.append(
-                Button(
+                fh.Button(
                     "选股",
                     title="运行机器学习模型选出当日个股",
                     hx_get=f"/strategy/{name}/select/modal",
                     hx_target="#modal-container",
                     hx_indicator="#global-loading",
-                    cls=(
-                        "px-2 py-1 text-xs font-medium text-green-700 "
-                        "bg-green-50 hover:bg-green-100 rounded border "
-                        "border-green-200"
-                    ),
+                    cls="q-btn q-btn--sm q-btn--success",
                     type="button",
                 )
             )
 
         rows.append(
             Tr(
-                Td(Div(*action_controls, cls="flex items-center gap-2")),
+                Td(Div(*action_controls, cls="strategy-actions flex items-center gap-2")),
                 Td(name, cls="text-gray-900 font-medium"),
                 Td(doc, cls="text-gray-600"),
                 Td(version, cls="text-gray-900"),
@@ -578,12 +567,10 @@ def backtest_modal(name: str, req=None):
                     id="backtest-step-indicator",
                     cls="text-xs text-gray-500 ml-2",
                 ),
-                cls="flex items-center mb-4",
+                cls="backtest-dialog__header",
             ),
             Form(
-                step1,
-                step2,
-                step3,
+                Div(step1, step2, step3, cls="backtest-dialog__body"),
                 Div(
                     strategy_close_button("取消", data_bt_show="1"),
                     Button(
@@ -592,6 +579,13 @@ def backtest_modal(name: str, req=None):
                         cls="btn btn-ghost",
                         onclick="showBacktestStep(1)",
                         data_bt_show="2",
+                    ),
+                    Button(
+                        "上一步",
+                        type="button",
+                        cls="btn btn-ghost",
+                        onclick="showBacktestStep(2)",
+                        data_bt_show="3",
                     ),
                     Button(
                         "下一步：选择因子",
@@ -617,13 +611,17 @@ def backtest_modal(name: str, req=None):
                         hx_include="closest form",
                         data_bt_show="3",
                     ),
-                    cls="flex justify-end gap-2 mt-6",
+                    cls="backtest-dialog__footer",
                 ),
+                cls="backtest-dialog__form",
             ),
-            cls="bg-white p-6 rounded-xl shadow-xl max-w-2xl w-full",
+            cls="backtest-dialog",
+            role="dialog",
+            aria_modal="true",
+            aria_label=f"运行回测 - {name}",
         ),
         Script(BACKTEST_WIZARD_SCRIPT),
-        cls="fixed inset-0 bg-black/50 flex items-center justify-center z-50",
+        cls="backtest-dialog-overlay",
         id="strategy-modal",
     )
 

@@ -73,7 +73,7 @@ def test_form_hint_renders_paragraph():
 def test_get_step_meta_dev_stub_step4_returns_stub_dict():
     """[AC-NFR1101-01] When dev_stubs_enabled and step==4, returns stub-specific dict."""
     with patch.object(wizard_components, "dev_stubs_enabled", return_value=True):
-        meta = _get_step_meta(4)
+        meta = _get_step_meta(5)
     assert meta["title"] == "开发 Stub 交易网关"
     assert "stub" in meta["description"] or "Stub" in meta["description"]
 
@@ -81,7 +81,7 @@ def test_get_step_meta_dev_stub_step4_returns_stub_dict():
 def test_get_step_meta_dev_stub_step5_returns_stub_dict():
     """[AC-NFR1101-01] When dev_stubs_enabled and step==5, returns stub-specific dict."""
     with patch.object(wizard_components, "dev_stubs_enabled", return_value=True):
-        meta = _get_step_meta(5)
+        meta = _get_step_meta(4)
     assert "样本数据" in meta["title"]
 
 
@@ -150,7 +150,7 @@ async def test_handle_step_step2_save_runtime_config_exception():
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step4_dev_stub_runtime_none():
+async def test_handle_step_step5_dev_stub_runtime_none():
     """[AC-NFR1101-01] dev-stubs + runtime None -> error content rendered."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=True), \
@@ -163,14 +163,14 @@ async def test_handle_step_step4_dev_stub_runtime_none():
         fake_state.to_dict = MagicMock(return_value={"k": "v"})
         mock_iw.get_state = MagicMock(return_value=fake_state)
         req = MagicMock()
-        req.form = AsyncMock(return_value={"nav": "next", "_current_step": "4"})
-        resp = await handle_step(req, step=4)
+        req.form = AsyncMock(return_value={"nav": "next", "_current_step": "5"})
+        resp = await handle_step(req, step=5)
     assert resp == "err"
     mock_render.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step4_dev_stub_save_gateway_exception():
+async def test_handle_step_step5_dev_stub_save_gateway_exception():
     """[AC-NFR1101-01] dev-stubs + save_gateway_config raises -> except branch at 1419-1428."""
     fake_runtime = MagicMock()
     fake_runtime.gateway_server = "localhost"
@@ -189,8 +189,8 @@ async def test_handle_step_step4_dev_stub_save_gateway_exception():
         mock_iw.get_state = MagicMock(return_value=fake_state)
         mock_iw.save_gateway_config = MagicMock(side_effect=Exception("save gw boom"))
         req = MagicMock()
-        req.form = AsyncMock(return_value={"nav": "next", "_current_step": "4"})
-        resp = await handle_step(req, step=4)
+        req.form = AsyncMock(return_value={"nav": "next", "_current_step": "5"})
+        resp = await handle_step(req, step=5)
     assert resp == "err"
     mock_render.assert_called_once()
 
@@ -202,7 +202,7 @@ async def test_handle_step_step4_dev_stub_save_gateway_exception():
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step4_non_stub_port_parse_error():
+async def test_handle_step_step5_non_stub_port_parse_error():
     """[AC-NFR1101-01] Non-dev-stub + bad port -> ValueError -> error content (line 1448)."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=False), \
@@ -222,20 +222,20 @@ async def test_handle_step_step4_non_stub_port_parse_error():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "4",
+            "_current_step": "5",
             "gateway_enabled": "on",
             "gateway_server": "localhost",
             "gateway_port": "not-a-port",
             "gateway_prefix": "/",
             "gateway_api_key": "k",
         })
-        resp = await handle_step(req, step=4)
+        resp = await handle_step(req, step=5)
     assert resp == "err"
     mock_render.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step4_non_stub_enabled_no_server():
+async def test_handle_step_step5_non_stub_enabled_no_server():
     """[AC-NFR1101-01] Enabled gateway without server -> error content (line 1457-1464)."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=False), \
@@ -255,20 +255,20 @@ async def test_handle_step_step4_non_stub_enabled_no_server():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "4",
+            "_current_step": "5",
             "gateway_enabled": "on",
             "gateway_server": "   ",
             "gateway_port": "8000",
             "gateway_prefix": "/",
             "gateway_api_key": "k",
         })
-        resp = await handle_step(req, step=4)
+        resp = await handle_step(req, step=5)
     assert resp == "err"
     mock_render.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step4_non_stub_enabled_no_api_key():
+async def test_handle_step_step5_non_stub_enabled_no_api_key():
     """[AC-NFR1101-01] Enabled gateway without api_key -> error content (line 1465-1472)."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=False), \
@@ -288,20 +288,20 @@ async def test_handle_step_step4_non_stub_enabled_no_api_key():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "4",
+            "_current_step": "5",
             "gateway_enabled": "on",
             "gateway_server": "localhost",
             "gateway_port": "8000",
             "gateway_prefix": "/",
             "gateway_api_key": "",
         })
-        resp = await handle_step(req, step=4)
+        resp = await handle_step(req, step=5)
     assert resp == "err"
     mock_render.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step4_non_stub_test_connection_fails():
+async def test_handle_step_step5_non_stub_test_connection_fails():
     """[AC-NFR1101-01] Enabled gateway, test_gateway_connection returns ok=False (line 1478-1490)."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=False), \
@@ -322,21 +322,21 @@ async def test_handle_step_step4_non_stub_test_connection_fails():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "4",
+            "_current_step": "5",
             "gateway_enabled": "on",
             "gateway_server": "localhost",
             "gateway_port": "8000",
             "gateway_prefix": "/",
             "gateway_api_key": "k",
         })
-        resp = await handle_step(req, step=4)
+        resp = await handle_step(req, step=5)
     assert resp == "err"
     mock_render.assert_called_once()
     mock_iw.save_gateway_config.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step4_non_stub_save_gateway_exception():
+async def test_handle_step_step5_non_stub_save_gateway_exception():
     """[AC-NFR1101-01] Non-dev-stub + save_gateway_config raises (line 1500-1507)."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=False), \
@@ -358,14 +358,14 @@ async def test_handle_step_step4_non_stub_save_gateway_exception():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "4",
+            "_current_step": "5",
             "gateway_enabled": "on",
             "gateway_server": "localhost",
             "gateway_port": "8000",
             "gateway_prefix": "/",
             "gateway_api_key": "k",
         })
-        resp = await handle_step(req, step=4)
+        resp = await handle_step(req, step=5)
     assert resp == "err"
     mock_render.assert_called_once()
 
@@ -376,7 +376,7 @@ async def test_handle_step_step4_non_stub_save_gateway_exception():
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step5_bad_epoch_raises_value_error():
+async def test_handle_step_step4_bad_epoch_raises_value_error():
     """[AC-NFR1101-01] Non-dev-stub + unparseable epoch -> ValueError -> error content (1519-1527)."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=False), \
@@ -395,13 +395,13 @@ async def test_handle_step_step5_bad_epoch_raises_value_error():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "5",
+            "_current_step": "4",
             "epoch": "not-a-date",
             "data_source": "tushare",
             "tushare_token": "tok",
             "history_years": "1",
         })
-        resp = await handle_step(req, step=5)
+        resp = await handle_step(req, step=4)
     assert resp == "err"
     mock_render.assert_called_once()
     # save_data_init_config should not have been called because epoch parse failed.
@@ -409,7 +409,7 @@ async def test_handle_step_step5_bad_epoch_raises_value_error():
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step5_bad_history_years_raises_value_error():
+async def test_handle_step_step4_bad_history_years_raises_value_error():
     """[AC-NFR1101-01] Non-dev-stub + non-numeric history_years -> ValueError at 1519."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=False), \
@@ -428,13 +428,13 @@ async def test_handle_step_step5_bad_history_years_raises_value_error():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "5",
+            "_current_step": "4",
             "epoch": "2020-01-01",
             "data_source": "tushare",
             "tushare_token": "tok",
             "history_years": "not-a-number",
         })
-        resp = await handle_step(req, step=5)
+        resp = await handle_step(req, step=4)
     assert resp == "err"
     mock_render.assert_called_once()
 
@@ -445,7 +445,7 @@ async def test_handle_step_step5_bad_history_years_raises_value_error():
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step5_dev_stub_save_exception():
+async def test_handle_step_step4_dev_stub_save_exception():
     """[AC-NFR1101-01] dev-stubs + save_data_init_config raises -> except at 1538-1546."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=True), \
@@ -465,10 +465,10 @@ async def test_handle_step_step5_dev_stub_save_exception():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "5",
+            "_current_step": "4",
             "epoch": "2020-01-01",
         })
-        resp = await handle_step(req, step=5)
+        resp = await handle_step(req, step=4)
     assert resp == "err"
     mock_render.assert_called_once()
 
@@ -479,7 +479,7 @@ async def test_handle_step_step5_dev_stub_save_exception():
 
 
 @pytest.mark.asyncio
-async def test_handle_step_step5_non_stub_save_exception():
+async def test_handle_step_step4_non_stub_save_exception():
     """[AC-NFR1101-01] Non-dev-stub + save_data_init_config raises -> except at 1570-1578."""
     with patch.object(iw_mod, "init_wizard") as mock_iw, \
          patch.object(iw_mod, "dev_stubs_enabled", return_value=False), \
@@ -499,13 +499,13 @@ async def test_handle_step_step5_non_stub_save_exception():
         req = MagicMock()
         req.form = AsyncMock(return_value={
             "nav": "next",
-            "_current_step": "5",
+            "_current_step": "4",
             "epoch": "2020-01-01",
             "data_source": "tushare",
             "tushare_token": "tok",
             "history_years": "1",
         })
-        resp = await handle_step(req, step=5)
+        resp = await handle_step(req, step=4)
     assert resp == "err"
     mock_render.assert_called_once()
 
@@ -571,3 +571,10 @@ async def test_handle_download_non_stub_save_exception():
         resp = await handle_download(req)
     assert resp == "err"
     mock_render.assert_called_once()
+
+
+@pytest.fixture(autouse=True)
+def _enable_private_gateway_contract(request, monkeypatch):
+    # These cases verify shared private-host gateway validation, now at step five.
+    if request.node.name.startswith("test_handle_step_step5_"):
+        monkeypatch.setattr(iw_mod, "supports_live_trading", lambda: True)

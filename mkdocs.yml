@@ -13,7 +13,7 @@ nav:
       - 初始化与数据准备: initialization.md
       - 页面入口: ui.md
   - 研究与策略:
-      - 数据约定: data.md
+      - 标准行情交换协议: SQEP.md
       - 第一次回测与报告: backtesting.md
       - 成交时序与策略防呆: execution.md
       - 编写策略: strategies.md

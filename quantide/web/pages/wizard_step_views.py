@@ -14,7 +14,6 @@ from quantide.config.dev_stubs import (
 )
 from quantide.config.features import supports_live_trading
 from quantide.config.paths import normalize_data_home
-from quantide.web.components.tencent_trial import TencentTrialControl
 from quantide.web.pages.wizard_components import (
     FormLabel,
     FormRow,
@@ -39,8 +38,8 @@ from quantide.web.pages.wizard_state import (
 
 def Step1_Welcome():
     """步骤1：欢迎页"""
-    gateway_text = "配置交易/实时行情网关" if supports_live_trading() else "确认仿真行情路径"
-    data_text = "配置数据源并下载历史数据。"
+    gateway_text = "配置实时行情数据源，按需选择一次 30 天演示"
+    data_text = "配置数据源并检查账号权限；确认全部配置后再开始下载。"
     if dev_stubs_enabled():
         gateway_text = "确认开发 Stub 自动注入的交易/实时行情网关"
         data_text = "导入开发 Stub 内置样本数据。"
@@ -49,8 +48,8 @@ def Step1_Welcome():
         Ol(
             Li("配置运行时环境，比如数据存放目录。", style=FONT_STYLES["description"]),
             Li("配置管理员密码", style=FONT_STYLES["description"]),
-            Li(gateway_text, style=FONT_STYLES["description"]),
             Li(data_text, style=FONT_STYLES["description"]),
+            Li(gateway_text, style=FONT_STYLES["description"]),
             cls="list-decimal pl-6 space-y-2",
         ),
         cls="w-full",
@@ -237,27 +236,11 @@ def Step2_Runtime(state: dict | None = None):
 
 
 def Step4_Gateway(state: dict | None = None):
-    """步骤4：网关配置"""
+    """Realtime setup, retaining the shared pro-edition gateway form."""
     if not supports_live_trading():
-        return Div(
-            H3("CE 仿真模式", cls="text-lg font-semibold text-gray-900 mb-3"),
-            TencentTrialControl(),
-            P(
-                (
-                    "当前 CE 版本暂不支持实盘交易，因此不显示实盘网关配置。仿真账户和运行"
-                    "时会继续使用 MarketDataHub 行情；可按部署需要启用 Tencent "
-                    "行情发布路径。"
-                ),
-                style=FONT_STYLES["description"],
-                cls="mb-4",
-            ),
-            Div(
-                Span("仿真行情", cls="font-medium text-gray-700 mr-2"),
-                Span("MarketDataHub（支持自定义行情扩展）", cls="text-gray-900"),
-                cls="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4",
-            ),
-            cls="w-full",
-        )
+        from quantide.web.pages.wizard_data_views import RealtimeSetup
+
+        return RealtimeSetup()
     if dev_stubs_enabled():
         return _stub_gateway_step()
 
@@ -366,7 +349,7 @@ def _render_download_range_info(years: int) -> Any:
 
 
 def Step5_DataSetup(state: dict | None = None):
-    """步骤5：数据源设置及下载"""
+    """Configure and check the historical source, now displayed as step four."""
     if dev_stubs_enabled():
         state = state or {}
         app_home = normalize_data_home(state.get(RUNTIME_FORM_FIELDS["home"]))
@@ -458,6 +441,8 @@ def Step5_DataSetup(state: dict | None = None):
                     name=DATA_INIT_FORM_FIELDS["tushare_token"],
                     value=values[DATA_INIT_FORM_FIELDS["tushare_token"]],
                     placeholder="请输入您的 tushare token",
+                    type="password",
+                    autocomplete="off",
                     required=True,
                     cls="uk-input",
                 ),
@@ -488,12 +473,18 @@ def Step5_DataSetup(state: dict | None = None):
             _render_download_range_info(years),
             id="download-range-info",
         ),
+        _access_report_view(),
         cls="w-full",
     )
 
 
 def Step6_Complete(state: dict | None = None):
     """步骤6：完成页面"""
+    state = state or {}
+    if not state.get("init_completed") and not dev_stubs_enabled():
+        from quantide.web.pages.wizard_data_views import HistoryConfirmation
+
+        return HistoryConfirmation(state)
     return Div(
         Div(
             "✓",
@@ -508,6 +499,12 @@ def Step6_Complete(state: dict | None = None):
             cls="text-center mt-6",
             style=FONT_STYLES["description"],
         ),
+        P(
+            "已经运行的服务更换实时源后，请通过服务控件重启服务，使新配置生效。",
+            cls="text-sm text-gray-500 mt-2",
+        )
+        if state.get("init_completed")
+        else None,
         cls="w-full py-8",
     )
 
@@ -566,4 +563,17 @@ def _stub_gateway_step():
             ),
         ),
         cls="w-full",
+    )
+
+
+def _access_report_view():
+    from quantide.web.pages.wizard_data_views import AccessReport
+
+    return Div(
+        P(
+            "日线与参考数据使用 Tushare；30 分钟历史由 BaoStock 提供，无需额外 Token。",
+            cls="text-sm mt-4",
+        ),
+        P("正在检测数据源权限，请稍候…", id="data-source-checking", cls="htmx-indicator mt-4"),
+        AccessReport(),
     )
