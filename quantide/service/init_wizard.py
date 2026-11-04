@@ -46,15 +46,16 @@ class InitWizardService:
     4. 初始化完成标志管理
     """
 
-    _instance = None
+    _instance: "InitWizardService | None" = None
+    _initialized: bool
 
-    def __new__(cls):
+    def __new__(cls) -> "InitWizardService":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         if self._initialized:
             return
         self._state: AppState | None = None
@@ -117,7 +118,7 @@ class InitWizardService:
         by_years = datetime.date.today() - datetime.timedelta(days=365 * years)
         return max(epoch, by_years)
 
-    def _ensure_db(self):
+    def _ensure_db(self) -> None:
         """确保数据库已初始化"""
         if not db._initialized:
             raise RuntimeError("数据库未初始化，请先调用 db.init()")
@@ -168,7 +169,7 @@ class InitWizardService:
         self._state.updated_at = datetime.datetime.now()
 
         try:
-            db["app_state"].upsert(self._state.to_dict(), pk=AppState.__pk__)  # type: ignore[arg-type]
+            db["app_state"].upsert(self._state.to_dict(), pk=AppState.__pk__)
             # 强制提交，确保其他连接能看到更新
             db.conn.commit()
             logger.info("应用状态已保存")

@@ -1,8 +1,24 @@
 """Trade form and quote information components."""
 
 from fasthtml.common import *
+from fasthtml.common import (
+    FT,
+    Div,
+    NotStr,
+    Option,
+    P,
+    Script,
+    Span,
+    ft_hx,
+)
 from fasthtml.common import Select as _Select
 from monsterui.all import *
+from monsterui.all import (
+    Button,
+    Form,
+    Input,
+    UkIcon,
+)
 
 from quantide.web.components.trade_toast import TradeToast
 from quantide.web.pages.trade_lightning import (
@@ -18,7 +34,7 @@ def AssetInfoBar(
     cash: float = 0,
     market_value: float = 0,
     principal: float = 0,
-):
+) -> FT:
     """资产信息条"""
     cash_ratio = (cash / total * 100) if total > 0 else 0
     position_ratio = (market_value / total * 100) if total > 0 else 0
@@ -86,7 +102,7 @@ def LightningTradePanel(
     cash: float = 0,
     total: float = 0,
     is_live: bool = True,
-):
+) -> FT:
     """闪电交易面板 - 符合 spec 的下单键盘。
 
     实盘显示闪电单；仿真只保留普通下单（补单/测试），并提示原因。

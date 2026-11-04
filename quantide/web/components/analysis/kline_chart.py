@@ -1,6 +1,12 @@
 """K线图组件 - 基于 Lightweight Charts"""
 
 from fasthtml.common import *
+from fasthtml.common import (
+    FT,
+    Button,
+    Div,
+    Script,
+)
 
 
 class KlineChart:
@@ -16,7 +22,7 @@ class KlineChart:
         symbol: str = "",
         name: str = "",
         freq: str = "day",
-    ):
+    ) -> None:
         self.chart_id = chart_id
         self.js_id = chart_id.replace("-", "_")  # JavaScript 变量名不能包含 -
         self.height = height
@@ -239,7 +245,7 @@ class KlineChart:
         return Div(*buttons, cls="flex gap-2")
 
     @staticmethod
-    def ma_buttons(chart_id: str, ma_periods: list[int] = None) -> FT:
+    def ma_buttons(chart_id: str, ma_periods: list[int] | None = None) -> FT:
         """渲染均线切换按钮"""
         if ma_periods is None:
             ma_periods = [5, 10, 20, 60]

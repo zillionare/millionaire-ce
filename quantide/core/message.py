@@ -67,13 +67,13 @@ from quantide.core.singleton import singleton
 class MessageHub:
     """进程内消息中心，管理消息的发布与订阅（异步分发且线程安全）"""
 
-    def __init__(self, queue_size: int = 10000):
+    def __init__(self, queue_size: int = 10000) -> None:
         self._lock = threading.Lock()
-        self._subscribers: dict[str, list[Callable]] = {}
-        self._queues: dict[str, Queue] = {}
+        self._subscribers: dict[str, list[Callable[[Any], object]]] = {}
+        self._queues: dict[str, Queue[Any]] = {}
 
         # 异步分发队列
-        self._dispatch_queue: Queue = Queue(maxsize=queue_size)
+        self._dispatch_queue: Queue[tuple[str, Any]] = Queue(maxsize=queue_size)
         self._stop_event = threading.Event()
         self._worker = threading.Thread(
             target=self._dispatch_loop, name="MessageHubWorker", daemon=True
@@ -84,7 +84,7 @@ class MessageHub:
         self._last_log_time: dict[str, datetime.datetime] = {}
         self._log_interval = datetime.timedelta(seconds=60)  # 每分钟最多记录一次
 
-    def subscribe(self, topic: str, callback: Callable) -> None:
+    def subscribe(self, topic: str, callback: Callable[[Any], object]) -> None:
         """
         订阅指定主题的消息
 
@@ -99,7 +99,7 @@ class MessageHub:
             if callback not in self._subscribers[topic]:
                 self._subscribers[topic].append(callback)
 
-    def unsubscribe(self, topic: str, callback: Callable) -> None:
+    def unsubscribe(self, topic: str, callback: Callable[[Any], object]) -> None:
         """取消订阅指定主题的消息"""
         with self._lock:
             if topic in self._subscribers:
@@ -124,7 +124,7 @@ class MessageHub:
                 topic,
             )
 
-    def _dispatch_loop(self):
+    def _dispatch_loop(self) -> None:
         """后台分发线程主循环"""
         logger.info("MessageHub dispatch loop started")
         try:
@@ -156,7 +156,7 @@ class MessageHub:
         finally:
             logger.info("MessageHub dispatch loop exited")
 
-    def _put_to_pull_queue(self, topic: str, msg_content: Any):
+    def _put_to_pull_queue(self, topic: str, msg_content: Any) -> None:
         """将消息放入 pull 模式的队列中"""
         with self._lock:
             if topic not in self._queues:
@@ -197,7 +197,7 @@ class MessageHub:
 
         return queue.get(timeout=timeout)
 
-    def start(self):
+    def start(self) -> None:
         """Restart delivery when a new application lifespan owns this process."""
         with self._lock:
             if self._worker.is_alive():
@@ -208,7 +208,7 @@ class MessageHub:
             )
             self._worker.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """停止分发线程"""
         self._stop_event.set()
         if self._worker.is_alive():

@@ -1,6 +1,8 @@
 """FastHTML applications with a persistent session key outside the working directory."""
 
 import secrets
+from collections.abc import Callable
+from typing import Any, Protocol, TypeVar, overload
 
 from fasthtml.common import fast_app as _fast_app
 from filelock import FileLock
@@ -8,8 +10,20 @@ from filelock import FileLock
 from quantide.config.paths import ensure_app_config_dir
 from quantide.core.atomic_files import atomic_path
 
+_Handler = TypeVar("_Handler", bound=Callable[..., Any])
 
-def session_secret():
+
+class _RouteDecorator(Protocol):
+    def __call__(self, handler: _Handler) -> _Handler: ...
+
+
+class RouteRegistrar(Protocol):
+    """FastHTML's route decorator preserves the registered handler."""
+
+    def __call__(self, path: str, *args: Any, **kwargs: Any) -> _RouteDecorator: ...
+
+
+def session_secret() -> str:
     """Keep service startup independent of a writable current working directory."""
     path = ensure_app_config_dir() / ".session-key"
     with FileLock(str(path) + ".lock", timeout=10):
@@ -25,7 +39,15 @@ def session_secret():
         return value
 
 
-def fast_app(*args, **kwargs):
+@overload
+def fast_app(db_file: None = None, *args: Any, **kwargs: Any) -> tuple[Any, RouteRegistrar]: ...
+
+
+@overload
+def fast_app(db_file: str, *args: Any, **kwargs: Any) -> tuple[Any, ...]: ...
+
+
+def fast_app(*args: Any, **kwargs: Any) -> Any:
     """Create an application using the installation's durable session secret."""
     kwargs.setdefault("secret_key", session_secret())
     return _fast_app(*args, **kwargs)

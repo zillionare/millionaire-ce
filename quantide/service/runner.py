@@ -3,8 +3,10 @@ import inspect
 import json
 import threading
 import uuid
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, cast
 
+import polars as pl
 from loguru import logger
 
 from quantide.config.settings import get_cheat_on_close_time
@@ -14,7 +16,7 @@ from quantide.core.order_execution import BROKER_ORDER_METHODS
 from quantide.core.ports import ClockPort
 from quantide.core.ports.broker import ExecutionResult
 from quantide.core.runtime.clock_bridge import BacktestClockAdapter
-from quantide.core.strategy import BaseStrategy, RiskStrategy
+from quantide.core.strategy import BaseStrategy, RiskStrategy, Strategy
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.minute_bars import minute_bars
@@ -30,7 +32,7 @@ from quantide.service.risk_programs import (
 )
 
 
-async def _await_overlay(result):
+async def _await_overlay(result: Any) -> None:
     """Support both synchronous and asynchronous risk overlay adapters."""
     if inspect.isawaitable(result):
         await result
@@ -52,7 +54,7 @@ class _BacktestNextOpenBrokerProxy:
     def __getattribute__(self, item: str) -> Any:
         if item in object.__getattribute__(self, "_ORDER_METHODS"):
 
-            async def queued(*args, **kwargs):
+            async def queued(*args: Any, **kwargs: Any) -> ExecutionResult:
                 object.__getattribute__(self, "pending").append((item, args, kwargs))
                 return ExecutionResult.empty()
 
@@ -75,7 +77,7 @@ class _BacktestNextOpenBrokerProxy:
 class BacktestRunner:
     """回测运行器，负责管理回测的生命周期和时间循环。"""
 
-    def __init__(self, clock: ClockPort | None = None):
+    def __init__(self, clock: ClockPort | None = None) -> None:
         """初始化回测运行器.
 
         Args:
@@ -84,12 +86,12 @@ class BacktestRunner:
         self._clock = clock or BacktestClockAdapter()
         self._stop_event = threading.Event()
 
-    def stop(self):
+    def stop(self) -> None:
         """Request interruption at the next replay boundary."""
         self._stop_event.set()
 
     @staticmethod
-    def strategy_interval(strategy_cls: type[BaseStrategy]) -> str:
+    def strategy_interval(strategy_cls: type[Strategy]) -> str:
         """Return the immutable interval declared by a strategy class."""
         declared = getattr(strategy_cls, "BAR_INTERVAL", None)
         if not isinstance(declared, str):
@@ -110,7 +112,7 @@ class BacktestRunner:
     @classmethod
     def validate_strategy_interval(
         cls,
-        strategy_cls: type[BaseStrategy],
+        strategy_cls: type[Strategy],
         config: dict[str, Any] | None,
         frame_type: FrameType | str,
     ) -> str:
@@ -363,14 +365,12 @@ class BacktestRunner:
         benchmark: Any,
         start_date: datetime.date,
         end_date: datetime.date,
-    ):
+    ) -> pl.DataFrame | None:
         """读取指数日线并计算基准日收益率；不可用时返回 None。"""
         code = str(benchmark).strip() if benchmark else ""
         if not code:
             return None
         try:
-            import polars as pl
-
             from quantide.data import get_index_bars_store
 
             store = get_index_bars_store()
@@ -437,7 +437,9 @@ class BacktestRunner:
 
             if assets:
                 quote_date = self._resolve_day_signal_date(current_date, bar_tm)
-                df = daily_bars.get_bars_in_range(quote_date, quote_date, assets)
+                df = cast(
+                    pl.DataFrame, daily_bars.get_bars_in_range(quote_date, quote_date, assets)
+                )
                 if not df.is_empty():
                     for row in df.iter_rows(named=True):
                         quote[row["asset"]] = {
@@ -501,7 +503,9 @@ class BacktestRunner:
         )
         return self._run_metrics(portfolio_id, config, start_date, end_date)
 
-    def _normalized_run_config(self, strategy_cls, config, frame_type):
+    def _normalized_run_config(
+        self, strategy_cls: type[BaseStrategy], config: dict[str, Any], frame_type: FrameType
+    ) -> dict[str, Any]:
         if inspect.isclass(strategy_cls) and issubclass(strategy_cls, RiskStrategy):
             raise RiskStrategyNotBacktestable(getattr(strategy_cls, "__name__", ""))
         self.validate_strategy_interval(strategy_cls, config, frame_type)
@@ -515,7 +519,9 @@ class BacktestRunner:
             config.setdefault(ALLOW_SAME_BAR_REPURCHASE_KEY, True)
         return config
 
-    def _iter_backtest_frames(self, start_date, end_date, frame_type):
+    def _iter_backtest_frames(
+        self, start_date: datetime.date, end_date: datetime.date, frame_type: FrameType
+    ) -> Iterable[datetime.date | datetime.datetime]:
         if frame_type in {
             FrameType.MIN1,
             FrameType.MIN5,
@@ -530,7 +536,13 @@ class BacktestRunner:
             )
         return self._clock.iter_frames(start_date, end_date, frame_type)
 
-    def _next_open_settings(self, strategy_cls, config, frame_type, broker):
+    def _next_open_settings(
+        self,
+        strategy_cls: type[BaseStrategy],
+        config: dict[str, Any],
+        frame_type: FrameType,
+        broker: BacktestBroker,
+    ) -> tuple[_BacktestNextOpenBrokerProxy | None, tuple[int, int]]:
         fill_timing, _, cheat_tm = self._resolve_fill_timing(strategy_cls, config)
         declared = getattr(strategy_cls, "fill_timing", None)
         if not isinstance(declared, str):
@@ -554,8 +566,15 @@ class BacktestRunner:
         return proxy, cheat_tm
 
     async def _run_clock_frames(
-        self, strategy, broker, strategy_cls, config, start_date, end_date, frame_type
-    ):
+        self,
+        strategy: BaseStrategy,
+        broker: BacktestBroker,
+        strategy_cls: type[BaseStrategy],
+        config: dict[str, Any],
+        start_date: datetime.date,
+        end_date: datetime.date,
+        frame_type: FrameType,
+    ) -> None:
         proxy, cheat_tm = self._next_open_settings(strategy_cls, config, frame_type, broker)
         strategy.interval = frame_type.value
         last_trade_day = None
@@ -578,14 +597,23 @@ class BacktestRunner:
             self._set_strategy_time(strategy, broker, close_tm)
             await strategy.on_day_close(close_tm)
 
-    def _set_strategy_time(self, strategy, broker, moment):
+    def _set_strategy_time(
+        self, strategy: BaseStrategy, broker: BacktestBroker, moment: datetime.datetime
+    ) -> None:
         self._clock.set_now(moment)
         broker.set_clock(moment)
         strategy._current_time = moment
 
     async def _run_strategy_bar(
-        self, strategy, broker, current_date, bar_tm, config, frame_type, proxy
-    ):
+        self,
+        strategy: BaseStrategy,
+        broker: BacktestBroker,
+        current_date: datetime.date,
+        bar_tm: datetime.datetime,
+        config: dict[str, Any],
+        frame_type: FrameType,
+        proxy: _BacktestNextOpenBrokerProxy | None,
+    ) -> None:
         if proxy is not None:
             await proxy.flush(bar_tm)
             if frame_type == FrameType.DAY:
@@ -608,7 +636,15 @@ class BacktestRunner:
             broker.sync_risk_overlay(bar_tm)
             await _await_overlay(broker.run_risk_overlay_intraday(bar_tm))
 
-    def _record_run_log(self, portfolio_id, strategy, broker, level, message, save_logs):
+    def _record_run_log(
+        self,
+        portfolio_id: str,
+        strategy: BaseStrategy,
+        broker: BacktestBroker,
+        level: str,
+        message: str,
+        save_logs: bool,
+    ) -> None:
         record_backtest_log(
             portfolio_id=portfolio_id,
             level=level,
@@ -618,7 +654,13 @@ class BacktestRunner:
             save_to_file=save_logs,
         )
 
-    def _run_metrics(self, portfolio_id, config, start_date, end_date):
+    def _run_metrics(
+        self,
+        portfolio_id: str,
+        config: dict[str, Any],
+        start_date: datetime.date,
+        end_date: datetime.date,
+    ) -> dict[str, Any]:
         baseline = self._benchmark_returns(
             config.get("benchmark", "000300.SH"), start_date, end_date
         )
