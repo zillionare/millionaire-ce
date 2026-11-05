@@ -6,12 +6,24 @@ import json
 from calendar import monthrange
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Any, Protocol, cast
 
+import pandas as pd
 import tushare as ts
 
 from quantide.config.paths import ensure_app_config_dir
 from quantide.core.atomic_files import write_json
 from quantide.data.fetchers.tushare_realtime import compatible_snapshot
+from quantide.data.models.app_state import AppState
+
+
+class ProbeClient(Protocol):
+    """The subset of the Tushare client used by the access probe."""
+
+    def query(self, endpoint: str, *, fields: str, **params: object) -> pd.DataFrame:
+        """Read a small sample from one endpoint."""
+        ...
+
 
 CACHE_SECONDS = 900
 SAMPLE_ASSET = "000001.SZ"
@@ -35,10 +47,10 @@ class AccessQuery:
     endpoint: str
     label: str
     columns: tuple[str, ...]
-    params: dict
+    params: dict[str, Any]
 
 
-def _historical_queries(day):
+def _historical_queries(day: str) -> tuple[AccessQuery, ...]:
     sample = {"ts_code": SAMPLE_ASSET, "trade_date": day}
     month_end = day[:6] + str(monthrange(int(day[:4]), int(day[4:6]))[1])
     return (
@@ -68,7 +80,7 @@ def _historical_queries(day):
     )
 
 
-def _realtime_queries():
+def _realtime_queries() -> tuple[AccessQuery, ...]:
     return (
         AccessQuery(
             "rt_k",
@@ -85,7 +97,7 @@ def _realtime_queries():
     )
 
 
-def _failure_status(error):
+def _failure_status(error: BaseException) -> tuple[str, str]:
     text = str(error).casefold()
     if any(word in text for word in ("频率", "频次", "限流", "最多访问", "rate limit", "too many")):
         return "rate_limited", "请求受限，请稍后重试。"
@@ -98,7 +110,9 @@ def _failure_status(error):
     return "unavailable", "连接或服务异常，暂时无法确认；请检查网络并重试。"
 
 
-def _read_check(client, query):
+def _read_check(
+    client: ProbeClient, query: AccessQuery
+) -> tuple[dict[str, Any], pd.DataFrame | None]:
     row = {"endpoint": query.endpoint, "label": query.label}
     try:
         frame = client.query(query.endpoint, fields=",".join(query.columns), **query.params)
@@ -114,7 +128,8 @@ def _read_check(client, query):
     if not set(query.columns).issubset(frame.columns):
         return {**row, "status": "incompatible", "message": "返回字段不完整，暂不能接入。"}, frame
     if query.endpoint == "rt_k" and not any(
-        compatible_snapshot(record) for record in frame.to_dict("records")
+        compatible_snapshot(record)
+        for record in cast(list[dict[str, Any]], frame.to_dict("records"))
     ):
         return {
             **row,
@@ -124,17 +139,21 @@ def _read_check(client, query):
     return {**row, "status": "ok", "message": "样本检查通过。"}, frame
 
 
-def access_fingerprint(token, start, source="tushare"):
+def access_fingerprint(
+    token: str, start: datetime.date | str | None, source: str = "tushare"
+) -> str:
     """Bind saved results to credentials and the first download window without saving the token."""
     return hashlib.sha256(f"{source}\0{token}\0{start}".encode()).hexdigest()
 
 
-def create_probe_client(token):
+def create_probe_client(token: str) -> ProbeClient:
     """Use explicit credentials and bounded calls without changing SDK-global state."""
-    return ts.pro_api(token=token, timeout=5)
+    return cast(ProbeClient, ts.pro_api(token=token, timeout=5))
 
 
-def check_tushare_access(token, start, *, client=None):
+def check_tushare_access(
+    token: str, start: str | datetime.date, *, client: ProbeClient | None = None
+) -> dict[str, Any]:
     """Read at most eleven small samples; never bulk download or write SDK tokens."""
     client = client or create_probe_client(token)
     start = datetime.date.fromisoformat(str(start))
@@ -151,7 +170,7 @@ def check_tushare_access(token, start, *, client=None):
     )
     calendar_check, frame = _read_check(client, calendar_query)
     checks = [calendar_check]
-    if calendar_check["status"] == "ok":
+    if calendar_check["status"] == "ok" and frame is not None:
         opened = frame[frame["is_open"].astype(str) == "1"].sort_values("cal_date")
         if not opened.empty:
             sample_day = str(opened["cal_date"].iloc[0]).replace("-", "")[:8]
@@ -174,7 +193,7 @@ def check_tushare_access(token, start, *, client=None):
     }
 
 
-def load_access_report(state):
+def load_access_report(state: AppState) -> dict[str, Any] | None:
     """Return a recent result only for the currently saved credentials and download range."""
     path = ensure_app_config_dir() / "data-source-check.json"
     if not path.is_file():
@@ -187,19 +206,21 @@ def load_access_report(state):
             state.tushare_token, state.history_start_date, state.data_source
         )
         if 0 <= age < CACHE_SECONDS and report["fingerprint"] == expected:
-            return report
+            return cast(dict[str, Any], report)
     except (ValueError, KeyError, TypeError):
         return None
     return None
 
 
-def ensure_access_report(state, *, force=False):
+def ensure_access_report(state: AppState, *, force: bool = False) -> dict[str, Any]:
     """Keep forward navigation and direct download requests on the same validation path."""
     cached = load_access_report(state)
     if cached is not None and not force:
         return cached
     if state.data_source != "tushare":
         raise ValueError("当前向导仅支持检测 Tushare；其它历史源请按扩展文档接入。")
+    if state.history_start_date is None:
+        raise ValueError("历史起始日期未配置，无法检测数据源权限。")
     report = check_tushare_access(state.tushare_token, state.history_start_date)
     write_json(ensure_app_config_dir() / "data-source-check.json", report)
     return report

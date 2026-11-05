@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polars as pl
@@ -113,6 +114,23 @@ from quantide.strategies.example._ml_support import (
 
 class MLExplanation:
     """Build explanations independently of order execution."""
+
+    if TYPE_CHECKING:
+        _pipeline_version: str
+        train_window: int
+        future_return_horizon: int
+        universe_size: int
+        universe_mode: str
+        market_cap_trim_pct: float
+        selected_features: list[str]
+        use_lightgbm: bool
+        universe_rebalance_days: int
+        retrain_days: int
+        _cached_norm_panel: pl.DataFrame | None
+
+        def _held_assets(self, as_of: datetime.date | None = None) -> list[str]: ...
+        def _ensure_backtest_panel(self, signal_date: datetime.date) -> None: ...
+        def _panel_cache_key(self, signal_date: datetime.date) -> tuple[Any, ...]: ...
 
     def _explain_cache_keys(
         self, signal_date: datetime.date, build_signal: datetime.date | None = None
@@ -257,7 +275,7 @@ class MLExplanation:
 
     def _attribution_model(
         self, target_date: datetime.date, build_signal: datetime.date | None = None
-    ) -> tuple[Any, str]:
+    ) -> tuple[object, str]:
         """取（或训练）归因所需的模型，按决策日缓存。
 
         模型缓存键含流水线版本、因子版本、训练参数、因子集与当时持仓；
@@ -378,11 +396,14 @@ class _AttributionNumbers:
     baseline: float
 
 
-def _model_attribution(model, engine, x, index):
+def _model_attribution(
+    model: object | None, engine: str, x: np.ndarray, index: int
+) -> _AttributionNumbers | None:
     """Normalize predictions and feature contributions with the same cross-section scale."""
-    if engine == "LightGBM" and hasattr(model, "predict"):
-        raw = np.asarray(model.predict(x), dtype=np.float64)
-        shap = np.asarray(model.predict(x, pred_contrib=True), dtype=np.float64)
+    predict = getattr(model, "predict", None)
+    if engine == "LightGBM" and callable(predict):
+        raw = np.asarray(predict(x), dtype=np.float64)
+        shap = np.asarray(predict(x, pred_contrib=True), dtype=np.float64)
         scale = float(np.std(raw)) + 1e-6
         contributions = shap[index][:-1] / scale
         baseline = (float(shap[index][-1]) - float(np.mean(raw))) / scale
@@ -396,7 +417,13 @@ def _model_attribution(model, engine, x, index):
     return _AttributionNumbers(_zscore_1d(raw), contributions, baseline)
 
 
-def _prediction_features(cross, index, features, z_row, contributions):
+def _prediction_features(
+    cross: pl.DataFrame,
+    index: int,
+    features: Sequence[str],
+    z_row: np.ndarray,
+    contributions: np.ndarray,
+) -> list[dict[str, Any]]:
     raw = cross.row(index, named=True)
     values = [
         {
@@ -410,7 +437,14 @@ def _prediction_features(cross, index, features, z_row, contributions):
     return sorted(values, key=lambda item: abs(item["total"]), reverse=True)
 
 
-def _explain_prediction_cross(self, asset, cross, build_signal, refit_signal, refit_build):
+def _explain_prediction_cross(
+    self: MLExplanation,
+    asset: str,
+    cross: pl.DataFrame,
+    build_signal: datetime.date | None,
+    refit_signal: datetime.date | None,
+    refit_build: datetime.date | None,
+) -> dict[str, Any] | None:
     """Attribute the selected asset using the model effective for this decision."""
     target_date = cross["date"][0]
     assets = cross["asset"].to_list()

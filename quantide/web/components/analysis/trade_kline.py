@@ -10,8 +10,9 @@
 import bisect
 import datetime
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 from fasthtml.common import Button, Div, P, Script, Span
@@ -42,14 +43,21 @@ TRADE_KLINE_PANEL_LABELS = {
 
 
 def _resolve_trade_attribution(
-    active_panel, asset, buy_attribution, buy_dt, pair, portfolio_id, sell_attribution, sell_dt
-):
+    active_panel: str,
+    asset: str,
+    buy_attribution: dict[str, Any] | None,
+    buy_dt: datetime.date,
+    pair: TradePair,
+    portfolio_id: str,
+    sell_attribution: dict[str, Any] | None,
+    sell_dt: datetime.date | None,
+) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
     """Resolve trade attribution."""
     if active_panel == TRADE_KLINE_PANEL_BUY:
         buy_attribution = _decision_attribution(portfolio_id, asset, buy_dt, pair.buy_tm)
         if buy_attribution is None:
             active_panel = TRADE_KLINE_PANEL_SUMMARY
-    elif active_panel == TRADE_KLINE_PANEL_SELL:
+    elif active_panel == TRADE_KLINE_PANEL_SELL and sell_dt is not None:
         sell_attribution = _decision_attribution(portfolio_id, asset, sell_dt, pair.sell_tm)
         if sell_attribution is None:
             active_panel = TRADE_KLINE_PANEL_SUMMARY
@@ -99,7 +107,7 @@ def _decision_attribution(
     return explain_prediction(portfolio_id, asset, signal_date)
 
 
-def _trade_date(tm: Any) -> datetime.date | None:
+def _trade_date(tm: object) -> datetime.date | None:
     """从成交时间中提取交易日。"""
     if isinstance(tm, datetime.datetime):
         return tm.date()
@@ -219,8 +227,11 @@ def _find_pair(
 
 
 def build_trade_kline_payload(
-    portfolio_id, buy_tid, sell_tid=None, panel=TRADE_KLINE_PANEL_SUMMARY
-):
+    portfolio_id: str,
+    buy_tid: str,
+    sell_tid: str | None = None,
+    panel: str = TRADE_KLINE_PANEL_SUMMARY,
+) -> dict[str, Any] | None:
     """Build a pair chart from a visible price window and optional attribution."""
     pair = _find_pair(portfolio_id, buy_tid, sell_tid)
     if pair is None:
@@ -297,12 +308,12 @@ def _chart_script(payload: dict[str, Any]) -> str:
     )
 
 
-def _format_number(value: Any, digits: int = 2) -> str:
+def _format_number(value: object, digits: int = 2) -> str:
     """格式化面板数值。"""
     if value is None:
         return "—"
     try:
-        return f"{float(value):,.{digits}f}"
+        return f"{float(cast(float | int | str, value)):,.{digits}f}"
     except (TypeError, ValueError):
         return str(value)
 
@@ -505,7 +516,9 @@ class _TradeChartWindow:
     post_count: int
 
 
-def _trade_chart_window(asset, buy_dt, sell_dt):
+def _trade_chart_window(
+    asset: str, buy_dt: datetime.date, sell_dt: datetime.date | None
+) -> _TradeChartWindow | None:
     """Compute indicators on full history before clipping the visible trade window."""
     history_start = buy_dt - datetime.timedelta(days=TRADE_KLINE_HISTORY_CALENDAR_DAYS)
     raw = _load_raw_bars(asset, history_start, max(daily_bars.end or buy_dt, buy_dt))
@@ -533,7 +546,7 @@ def _trade_chart_window(asset, buy_dt, sell_dt):
     return _TradeChartWindow(raw, pl.concat([frame, post]), anchor, post.height)
 
 
-def _chart_indicators(qfq):
+def _chart_indicators(qfq: pl.DataFrame) -> pl.DataFrame:
     return qfq.with_columns(
         [
             pl.col("close")
@@ -549,7 +562,7 @@ def _chart_indicators(qfq):
     )
 
 
-def _chart_bar(row):
+def _chart_bar(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "dt": str(row.get("date")),
         **{
@@ -560,7 +573,9 @@ def _chart_bar(row):
     }
 
 
-def _pair_chart_values(pair, buy_dt, sell_dt):
+def _pair_chart_values(
+    pair: TradePair, buy_dt: datetime.date, sell_dt: datetime.date | None
+) -> dict[str, Any]:
     return {
         "buy_tid": pair.buy_tid,
         "sell_tid": pair.sell_tid,
@@ -582,7 +597,13 @@ def _pair_chart_values(pair, buy_dt, sell_dt):
     }
 
 
-def _trade_attribution_payload(portfolio_id, pair, panel, buy_dt, sell_dt):
+def _trade_attribution_payload(
+    portfolio_id: str,
+    pair: TradePair,
+    panel: str,
+    buy_dt: datetime.date,
+    sell_dt: datetime.date | None,
+) -> dict[str, Any]:
     panels = [TRADE_KLINE_PANEL_SUMMARY]
     if _portfolio_supports_attribution(portfolio_id):
         panels.append(TRADE_KLINE_PANEL_BUY)
@@ -600,7 +621,9 @@ def _trade_attribution_payload(portfolio_id, pair, panel, buy_dt, sell_dt):
     }
 
 
-def _marker_point(marker, dates, date_index):
+def _marker_point(
+    marker: Mapping[str, Any], dates: Sequence[str], date_index: Mapping[str, int]
+) -> dict[str, Any] | None:
     """Align a trade marker to its visible bar without inventing out-of-range trades."""
     index = date_index.get(marker["dt"])
     if index is None:
@@ -632,9 +655,13 @@ def _marker_point(marker, dates, date_index):
     return point
 
 
-def _chart_markers(markers, dates):
+def _chart_markers(
+    markers: Sequence[Mapping[str, Any]], dates: Sequence[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[Mapping[str, Any]]]]:
     date_index = {dt: index for index, dt in enumerate(dates)}
-    buy_points, sell_points, marker_map = [], [], {}
+    buy_points: list[Any] = []
+    sell_points: list[Any] = []
+    marker_map: dict[Any, list[Any]] = {}
     for marker in markers:
         point = _marker_point(marker, dates, date_index)
         if point is None:

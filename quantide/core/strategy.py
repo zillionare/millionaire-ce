@@ -3,19 +3,22 @@ from abc import ABC
 
 # Strategy hooks intentionally have no-op defaults for backward compatibility.
 # ruff: noqa: B024,B027
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from loguru import logger
 
-from quantide.core.enums import FrameType
-from quantide.core.ports import BrokerPort
-from quantide.core.ports.broker import ExecutionResult
+if TYPE_CHECKING:
+    from loguru import Record
+
+from quantide.core.enums import FrameType, OrderSide
+from quantide.core.order_values import coerce_order_side
+from quantide.core.ports.broker import ExecutionResult, StrategyBroker
 
 
 class Strategy(ABC):
-    def __init__(self, broker: BrokerPort, config: dict[str, Any]) -> None:
-        self.broker = broker
+    def __init__(self, broker: StrategyBroker, config: dict[str, Any]) -> None:
+        self.broker: StrategyBroker = broker
         self.config = config
         logger_kwargs = {"strategy": self.__class__.__name__}
         portfolio_id = getattr(broker, "portfolio_id", "")
@@ -24,6 +27,7 @@ class Strategy(ABC):
         self.logger = logger.bind(**logger_kwargs)
         self.interval: str = "1d"
         self._current_time: datetime.datetime | None = None
+        self._positions_by_date: dict[datetime.date, dict[str, float]] = {}
 
     @staticmethod
     def default_config() -> dict[str, Any]:
@@ -98,7 +102,7 @@ class Strategy(ABC):
                     tzinfo=log_time.tzinfo,
                 )
 
-                def _time_patcher(record: dict[str, Any]) -> None:
+                def _time_patcher(record: "Record") -> None:
                     record["time"] = sim_time
 
                 self.logger.patch(_time_patcher).log(level, msg, *args, **kwargs)
@@ -141,7 +145,7 @@ class BaseStrategy(Strategy):
 
     @property
     def cash(self) -> float:
-        return self.broker.cash
+        return float(self.broker.cash)
 
     async def buy(
         self, asset: str, shares: int, price: float = 0, order_time: datetime.datetime | None = None
@@ -190,10 +194,12 @@ class BaseStrategy(Strategy):
         return await self.broker.sell_amount(asset, amount, price, order_time)
 
     async def cancel_order(self, qt_oid: str) -> None:
-        return await self.broker.cancel_order(qt_oid)
+        await self.broker.cancel_order(qt_oid)
 
-    async def cancel_all_orders(self, side: str | None = None) -> int:
-        return await self.broker.cancel_all_orders(side)
+    async def cancel_all_orders(self, side: OrderSide | str | None = None) -> int:
+        normalized = coerce_order_side(side) if side is not None else None
+        cancelled = await self.broker.cancel_all_orders(normalized)
+        return 0 if cancelled is None else int(cancelled)
 
     async def trade_target_pct(
         self,
@@ -206,7 +212,7 @@ class BaseStrategy(Strategy):
 
 
 class RiskStrategy(Strategy):
-    def __init__(self, broker: BrokerPort, config: dict[str, Any]) -> None:
+    def __init__(self, broker: StrategyBroker, config: dict[str, Any]) -> None:
         super().__init__(broker, config)
         import uuid
 

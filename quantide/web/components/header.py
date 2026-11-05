@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fasthtml.common import A, Button, Div, Header, Nav, Script, Span
@@ -10,7 +11,9 @@ from monsterui.all import UkIcon
 from quantide.web.design_system import BRAND
 
 
-def _normalize_nav_item(item: tuple[str, str] | dict[str, Any]) -> dict[str, Any]:
+def _normalize_nav_item(
+    item: tuple[str, str] | Mapping[str, Any],
+) -> Mapping[str, Any]:
     """规范化导航项。"""
     if isinstance(item, dict):
         return item
@@ -18,7 +21,11 @@ def _normalize_nav_item(item: tuple[str, str] | dict[str, Any]) -> dict[str, Any
     return {"title": title, "url": url}
 
 
-def _nav_link(index, raw_item, active_title):
+def _nav_link(
+    index: int,
+    raw_item: tuple[str, str] | Mapping[str, Any],
+    active_title: str,
+) -> Any:
     """Render one header item, including its optional dropdown."""
     item = _normalize_nav_item(raw_item)
     title = str(item.get("title", ""))
@@ -86,7 +93,9 @@ def _nav_link(index, raw_item, active_title):
     )
 
 
-def _build_nav_links(nav_items, active_title):
+def _build_nav_links(
+    nav_items: Sequence[tuple[str, str] | Mapping[str, Any]], active_title: str
+) -> list[Any]:
     """Build header links in the configured order."""
     return [_nav_link(index, item, active_title) for index, item in enumerate(nav_items or [])]
 
@@ -334,7 +343,7 @@ def header_component(
     risk_summary: dict[str, int] | None = None,
     recent_risk_events: list[dict[str, Any]] | None = None,
     runtime_summary: dict[str, int] | None = None,
-):
+) -> Any:
     """构建主导航栏。
 
     黑白灰 + 品牌红强调（品牌字、当前导航、告警）。

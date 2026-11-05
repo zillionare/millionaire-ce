@@ -109,6 +109,20 @@ class ShadowBroker:
     def total_assets(self) -> float:
         return self._cash + sum(p.mv for p in self.positions.values())
 
+    def _execution_valuation_price(self, asset: str, position: Position) -> float:
+        """Value a holding with prices available while the order is executed."""
+        price = self._execution_reference_price(asset)
+        if price > 0:
+            return price
+        return max(0.0, position.price)
+
+    def _execution_total_assets(self) -> float:
+        """Account equity for order sizing without day-close lookahead."""
+        return self._cash + sum(
+            position.shares * self._execution_valuation_price(asset, position)
+            for asset, position in self._positions.items()
+        )
+
     @property
     def asset(self) -> Asset:
         market_value = sum(p.mv for p in self.positions.values())
@@ -274,6 +288,7 @@ class ShadowBroker:
         shares: int | float,
         price: float = 0,
         order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
         **kwargs: Any,
     ) -> ExecutionResult:
         shares = self._lot_shares(shares)
@@ -315,6 +330,7 @@ class ShadowBroker:
         shares: int | float,
         price: float = 0,
         order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
         **kwargs: Any,
     ) -> ExecutionResult:
         shares = self._lot_shares(shares)
@@ -341,6 +357,7 @@ class ShadowBroker:
         amount: int | float,
         price: int | float = 0,
         order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
         **kwargs: Any,
     ) -> ExecutionResult:
         fill = self._execution_reference_price(asset)
@@ -357,6 +374,7 @@ class ShadowBroker:
         amount: int | float,
         price: int | float = 0,
         order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
         **kwargs: Any,
     ) -> ExecutionResult:
         position = self.positions.get(asset)
@@ -369,6 +387,72 @@ class ShadowBroker:
         if shares <= 0:
             return ExecutionResult.empty()
         return await self.sell(asset, shares, price=price, order_time=order_time)
+
+    async def buy_percent(
+        self,
+        asset: str,
+        percent: float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs: Any,
+    ) -> ExecutionResult:
+        """Buy a percentage of total assets using the shadow account."""
+        if percent <= 0:
+            return ExecutionResult.empty()
+        return await self.buy_amount(
+            asset, self._execution_total_assets() * percent, price, order_time, timeout
+        )
+
+    async def sell_percent(
+        self,
+        asset: str,
+        percent: float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs: Any,
+    ) -> ExecutionResult:
+        """Sell a percentage of the held position using the shadow account."""
+        position = self.positions.get(asset)
+        if position is None or percent <= 0:
+            return ExecutionResult.empty()
+        shares = position.shares if percent >= 0.9999 else position.shares * percent
+        return await self.sell(asset, shares, price, order_time, timeout)
+
+    async def trade_target_pct(
+        self,
+        asset: str,
+        target_pct: float,
+        price: float = 0,
+        order_time: datetime.datetime | None = None,
+        timeout: float = 0.5,
+        **kwargs: Any,
+    ) -> ExecutionResult:
+        """Rebalance one asset to a target percentage of total assets."""
+        reference = self._execution_reference_price(asset)
+        if reference <= 0:
+            return ExecutionResult.empty()
+        position = self._positions.get(asset)
+        current_value = position.shares * reference if position is not None else 0.0
+        difference = self._execution_total_assets() * target_pct - current_value
+        if difference > 0:
+            return await self.buy_amount(asset, difference, price, order_time, timeout)
+        if difference < 0:
+            return await self.sell_amount(asset, -difference, price, order_time, timeout)
+        return ExecutionResult.empty()
+
+    async def cancel_order(self, qt_oid: str) -> None:
+        """Shadow orders are matched immediately, so there is nothing to cancel."""
+        return None
+
+    async def cancel_all_orders(self, side: OrderSide | None = None) -> int:
+        """Shadow orders are matched immediately, so there is nothing to cancel."""
+        return 0
+
+    def get_ticks(self, asset: str, count: int) -> pl.DataFrame:
+        """Tick data is not available to the daily shadow matcher."""
+        return pl.DataFrame()
 
 
 __all__ = ["ShadowBroker"]

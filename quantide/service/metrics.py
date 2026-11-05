@@ -3,7 +3,10 @@
 提供投资组合的风险和收益指标计算，包括夏普比率、最大回撤、年化收益等。
 """
 
+from __future__ import annotations
+
 import datetime
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -12,9 +15,17 @@ import polars as pl
 from quantide.data.sqlite import db
 
 
-def _relative_benchmark_statistics(aligned_benchmark, years, cagr, metrics_dict, aligned_returns):
+def _relative_benchmark_statistics(
+    aligned_benchmark: pd.Series[float],
+    years: float,
+    cagr: float,
+    metrics_dict: dict[str, Any],
+    aligned_returns: pd.Series[float],
+) -> None:
     """Relative benchmark statistics."""
-    benchmark_cagr = (1 + aligned_benchmark).prod() ** (252 / len(aligned_benchmark)) - 1
+    benchmark_cagr = (
+        cast(float, (1 + aligned_benchmark).prod()) ** (252 / len(aligned_benchmark)) - 1
+    )
     if years > 0:
         excess_return = cagr - benchmark_cagr
         metrics_dict["Excess Return (ann.)"] = f"{excess_return:.2%}"
@@ -46,7 +57,7 @@ def _relative_benchmark_statistics(aligned_benchmark, years, cagr, metrics_dict,
     metrics_dict["Correlation"] = f"{correlation:.2f}"
 
 
-def bills(portfolio_id: str):
+def bills(portfolio_id: str) -> dict[str, pl.DataFrame]:
     """获取 portfolio_id 对应的所有订单、交易、持仓、资产记录"""
     # 1. 获取所有订单
     orders = db.orders_all(portfolio_id=portfolio_id)
@@ -139,7 +150,7 @@ def metrics(
     return stats
 
 
-def _drawdown_duration(metrics_dict, drawdown):
+def _drawdown_duration(metrics_dict: dict[str, Any], drawdown: pd.Series[float]) -> None:
     """Drawdown duration."""
     # 最大回撤持续时间
     is_drawdown = drawdown < 0
@@ -162,7 +173,7 @@ def _drawdown_duration(metrics_dict, drawdown):
     metrics_dict["Max Drawdown Days"] = str(max_dd_days)
 
 
-def _return_distribution(metrics_dict, returns):
+def _return_distribution(metrics_dict: dict[str, Any], returns: pd.Series[float]) -> None:
     """Return distribution."""
     # 胜率
     win_rate = (returns > 0).sum() / len(returns)
@@ -206,11 +217,17 @@ def _return_distribution(metrics_dict, returns):
         metrics_dict["Payoff Ratio"] = "N/A"
 
     # 偏度和峰度
-    metrics_dict["Skewness"] = f"{returns.skew():.2f}"
-    metrics_dict["Kurtosis"] = f"{returns.kurtosis():.2f}"
+    metrics_dict["Skewness"] = f"{cast(float, returns.skew()):.2f}"
+    metrics_dict["Kurtosis"] = f"{cast(float, returns.kurtosis()):.2f}"
 
 
-def _benchmark_statistics(metrics_dict, returns, benchmark, years, cagr):
+def _benchmark_statistics(
+    metrics_dict: dict[str, Any],
+    returns: pd.Series[float],
+    benchmark: pd.Series[float] | None,
+    years: float,
+    cagr: float,
+) -> None:
     """Benchmark statistics."""
     # 基准相关指标
     if benchmark is None:
@@ -225,17 +242,19 @@ def _benchmark_statistics(metrics_dict, returns, benchmark, years, cagr):
     _relative_benchmark_statistics(aligned_benchmark, years, cagr, metrics_dict, aligned_returns)
 
 
-def _return_and_risk_statistics(metrics_dict, returns):
+def _return_and_risk_statistics(
+    metrics_dict: dict[str, Any], returns: pd.Series[float]
+) -> tuple[float, float]:
     """Return and risk statistics."""
     # 收益率指标
-    total_return = (1 + returns).prod() - 1
+    total_return = cast(float, (1 + returns).prod()) - 1
     metrics_dict["Total Return"] = f"{total_return:.2%}"
 
     # 年化收益率（假设252个交易日）
     years = len(returns) / 252
     cagr = 0.0
     if years > 0:
-        cagr = (1 + total_return) ** (1 / years) - 1
+        cagr = float((1 + total_return) ** (1 / years) - 1)
         metrics_dict["CAGR"] = f"{cagr:.2%}"
     else:
         metrics_dict["CAGR"] = "N/A"
@@ -261,7 +280,9 @@ def _return_and_risk_statistics(metrics_dict, returns):
     return years, cagr
 
 
-def _calculate_metrics(returns: pd.Series, benchmark: pd.Series | None = None) -> pd.DataFrame:
+def _calculate_metrics(
+    returns: pd.Series[float], benchmark: pd.Series[float] | None = None
+) -> pd.DataFrame:
     """计算各项绩效指标
 
     Args:
@@ -271,7 +292,7 @@ def _calculate_metrics(returns: pd.Series, benchmark: pd.Series | None = None) -
     Returns:
         包含各项指标的 DataFrame
     """
-    metrics_dict = {}
+    metrics_dict: dict[str, Any] = {}
 
     # 基础统计
     metrics_dict["Start Date"] = returns.index.min().strftime("%Y-%m-%d")

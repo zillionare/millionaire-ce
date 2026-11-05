@@ -1,11 +1,15 @@
 """实盘交易页面"""
 
-from typing import Any
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 from fasthtml.common import *
 from fasthtml.common import (
     A,
     Div,
+    P,
     Span,
     Tr,
 )
@@ -21,9 +25,11 @@ from monsterui.all import (
     Td,
     UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.core.enums import BrokerKind
 from quantide.data.models import Asset, Position
+from quantide.service.registry import BrokerRegistry
 from quantide.web.application import fast_app
 from quantide.web.components.account_positions import AccountPositionInfo
 from quantide.web.components.account_summary import AssetSummary as AssetSummary
@@ -32,16 +38,21 @@ from quantide.web.components.data_tables import AccountDetailTable
 from quantide.web.components.legacy_trade_panel import LegacyTradeInputs
 from quantide.web.layouts.main import MainLayout
 from quantide.web.services.trade_orders import submit_share_form
+from quantide.web.session_data import SessionData
 from quantide.web.theme import AppTheme
 
 live_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _get_registry(req) -> Any:
+class _LiveBroker(Protocol):
+    asset: Asset
+
+
+def _get_registry(req: Request) -> BrokerRegistry | None:
     return req.scope.get("registry")
 
 
-def _build_asset_overview(asset: Asset | None) -> dict:
+def _build_asset_overview(asset: Asset | None) -> dict[str, Any]:
     if asset is None:
         return {
             key: 0 for key in ("total", "cash", "frozen_cash", "market_value", "pnl", "pnl_pct")
@@ -49,7 +60,7 @@ def _build_asset_overview(asset: Asset | None) -> dict:
     return build_asset_overview(asset)
 
 
-def GatewayConnectionStatus(connected: bool = False):
+def GatewayConnectionStatus(connected: bool = False) -> Any:
     status_cls = "text-green-600" if connected else "text-red-600"
     status_text = "已连接" if connected else "未连接"
     icon = "check-circle" if connected else "x-circle"
@@ -64,11 +75,11 @@ def GatewayConnectionStatus(connected: bool = False):
     )
 
 
-def PositionInfo(positions: list[Position] | None = None, portfolio_id: str = ""):
+def PositionInfo(positions: list[Position] | None = None, portfolio_id: str = "") -> Any:
     return AccountPositionInfo(positions, refresh_url=f"/trade/live/{portfolio_id}/positions")
 
 
-def TradePanel(portfolio_id: str):
+def TradePanel(portfolio_id: str) -> Any:
     """实盘下单面板：白底、红色买入、绿色卖出。"""
     return Div(
         Form(
@@ -122,7 +133,7 @@ def TradePanel(portfolio_id: str):
     )
 
 
-def PortfolioList(portfolios: list[dict], gateway_connected: bool = False):
+def PortfolioList(portfolios: list[dict[str, Any]], gateway_connected: bool = False) -> Any:
     headers = ["账户ID", "账户名称", "初始资金", "总资产", "收益率", "状态", "操作"]
 
     rows = []
@@ -189,7 +200,7 @@ def PortfolioList(portfolios: list[dict], gateway_connected: bool = False):
     )
 
 
-def CreatePortfolioModal():
+def CreatePortfolioModal() -> Any:
     return Div(
         Div(
             H3("Gateway 接入说明", cls="text-lg font-bold mb-4"),
@@ -233,7 +244,7 @@ def CreatePortfolioModal():
 
 
 @rt("/")
-def live_list(req, session):
+def live_list(req: Request, session: SessionData) -> Any:
     layout = MainLayout(title="实盘交易", user=session.get("auth"))
     layout.sidebar_menu = [
         {
@@ -246,36 +257,33 @@ def live_list(req, session):
     ]
 
     reg = _get_registry(req)
-    portfolios = []
-    gateway_connected = False
-
     portfolios, gateway_connected = _live_portfolios(reg)
 
-    def main_block():
+    def main_block() -> Any:
         return Div(
             PortfolioList(portfolios, gateway_connected),
             Div(id="create-modal"),
             cls="p-4",
         )
 
-    layout.main_block = main_block
+    layout.set_main_block(main_block)
     return layout.render()
 
 
 @rt("/create")
-def show_create_modal():
+def show_create_modal() -> Any:
     return CreatePortfolioModal()
 
 
 @rt("/create", methods=["POST"])
-async def create_portfolio(req):
+async def create_portfolio(req: Request) -> Any:
     return Div(
         "主体工程已移除本地QMT账户创建，请通过 gateway 进行实盘接入。", cls="text-gray-500 p-4"
     )
 
 
 @rt("/{portfolio_id}")
-def portfolio_detail(req, session, portfolio_id: str):
+def portfolio_detail(req: Request, session: SessionData, portfolio_id: str) -> Any:
     layout = MainLayout(title="实盘账户详情", user=session.get("auth"))
     layout.sidebar_menu = [
         {
@@ -291,7 +299,7 @@ def portfolio_detail(req, session, portfolio_id: str):
     broker = reg.get(BrokerKind.QMT, portfolio_id) if reg else None
 
     asset_overview = None
-    positions = []
+    positions: list[Any] = []
     gateway_connected = False
 
     if broker:
@@ -306,7 +314,7 @@ def portfolio_detail(req, session, portfolio_id: str):
         if hasattr(broker, "is_connected"):
             gateway_connected = broker.is_connected
 
-    def main_block():
+    def main_block() -> Any:
         return Div(
             Div(
                 A(
@@ -332,12 +340,12 @@ def portfolio_detail(req, session, portfolio_id: str):
             cls="p-4",
         )
 
-    layout.main_block = main_block
+    layout.set_main_block(main_block)
     return layout.render()
 
 
 @rt("/{portfolio_id}/positions")
-def get_positions(req, portfolio_id: str):
+def get_positions(req: Request, portfolio_id: str) -> Any:
     reg = _get_registry(req)
     broker = reg.get(BrokerKind.QMT, portfolio_id) if reg else None
     positions = list(broker.positions.values()) if broker and hasattr(broker, "positions") else []
@@ -345,7 +353,7 @@ def get_positions(req, portfolio_id: str):
 
 
 @rt("/{portfolio_id}/order", methods=["POST"])
-async def place_order(req, portfolio_id: str):
+async def place_order(req: Request, portfolio_id: str) -> Any:
     reg = _get_registry(req)
     broker = reg.get(BrokerKind.QMT, portfolio_id) if reg else None
 
@@ -368,25 +376,28 @@ async def place_order(req, portfolio_id: str):
         return Div(f"下单失败: {str(e)}", cls="text-red-500 font-bold p-4 bg-red-100 rounded")
 
 
-def _live_portfolios(reg):
+def _live_portfolios(reg: BrokerRegistry | None) -> tuple[list[dict[str, Any]], bool]:
     """Read the gateway accounts and their latest connection status."""
-    portfolios, gateway_connected = [], False
+    portfolios: list[dict[str, Any]] = []
+    gateway_connected = False
     if reg:
         brokers = reg.list_by_kind(BrokerKind.QMT)
         for broker_info in brokers:
-            portfolio_id = broker_info.get("id")
+            portfolio_id = str(broker_info.get("id") or "")
             broker = reg.get(BrokerKind.QMT, portfolio_id)
             if broker:
                 portfolios.append(_live_account_summary(broker_info, portfolio_id, broker))
 
                 if hasattr(broker, "is_connected"):
-                    gateway_connected = broker.is_connected
+                    gateway_connected = bool(broker.is_connected)
     return portfolios, gateway_connected
 
 
-def _live_account_summary(broker_info, portfolio_id, broker):
+def _live_account_summary(
+    broker_info: Mapping[str, Any], portfolio_id: str, broker: _LiveBroker
+) -> dict[str, Any]:
     """Read one account capital snapshot."""
-    asset = broker.asset if hasattr(broker, "asset") else None
+    asset = getattr(broker, "asset", None)
     pnl_pct = 0
     total = 0
     principal = 0

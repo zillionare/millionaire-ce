@@ -263,14 +263,9 @@ show_error_codes = true
 warn_return_any = true
 
 [[tool.mypy.overrides]]
-module = "fire"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = [
-    "apscheduler", "apscheduler.*", "baostock", "baostock.*",
-    "fasthtml", "fasthtml.*", "fastlite", "fastlite.*",
-    "monsterui", "monsterui.*", "tushare", "tushare.*",
+    "apscheduler.*", "baostock", "fasthtml", "fasthtml.*",
+    "fastlite", "monsterui.*", "tushare",
 ]
 ignore_missing_imports = true
 

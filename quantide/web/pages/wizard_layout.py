@@ -1,12 +1,18 @@
 """Wizard layout."""
 
+from collections.abc import Callable
 from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
+    FT,
+    H4,
+    Button,
     Div,
     Hr,
     Link,
+    P,
+    Script,
 )
 from monsterui.all import *
 from monsterui.all import (
@@ -46,8 +52,8 @@ from quantide.web.pages.wizard_step_views import (
 )
 
 
-def _build_step_content(step: int, state_dict: dict[str, Any]):
-    step_content_builders = {
+def _build_step_content(step: int, state_dict: dict[str, Any]) -> Any:
+    step_content_builders: dict[int, Callable[[], Any]] = {
         1: Step1_Welcome,
         2: lambda: Step2_Runtime(state_dict),
         3: lambda: Step3_Admin(state_dict),
@@ -64,7 +70,7 @@ def _build_step_progress(state_dict: dict[str, Any]) -> list[dict[str, int | str
     return build_wizard_steps(current_step)
 
 
-def _render_wizard_header(step: int, error_message: str | None = None):
+def _render_wizard_header(step: int, error_message: str | None = None) -> Any:
     meta = _get_step_meta(step)
     children: list[Any] = [SectionTitle(meta["title"])]
     description = meta.get("description")
@@ -76,7 +82,7 @@ def _render_wizard_header(step: int, error_message: str | None = None):
     return Div(*children, id="wizard-header-region", cls="wizard-region")
 
 
-def _render_wizard_body(step_content: Any):
+def _render_wizard_body(step_content: Any) -> Any:
     return Div(
         Div(step_content, style=WIZARD_BODY_INNER_STYLE, cls="wizard-body-inner"),
         id="wizard-body-region",
@@ -84,7 +90,7 @@ def _render_wizard_body(step_content: Any):
     )
 
 
-def _render_wizard_footer(step: int, *, show_buttons: bool = True):
+def _render_wizard_footer(step: int, *, show_buttons: bool = True) -> Any:
     children: list[Any] = []
     if show_buttons:
         children.append(WizardButtons(step))
@@ -98,7 +104,7 @@ def _render_wizard_form(
     current_step_value: int | None = None,
     error_message: str | None = None,
     show_buttons: bool = True,
-):
+) -> Any:
     children: list[Any] = [
         Input(type="hidden", name="_current_step", value=str(current_step_value or step)),
         _render_wizard_header(step, error_message),
@@ -117,7 +123,7 @@ def _render_wizard_main_content(
     error_message: str | None = None,
     show_buttons: bool = True,
     extra_nodes: tuple[Any, ...] = (),
-):
+) -> FT:
     resolved_error_message = _get_download_error(step, error_message)
     form = _render_wizard_form(
         step,
@@ -143,7 +149,7 @@ def _render_wizard_main_content(
     )
 
 
-def _navigation_button(title, target, nav, primary=False):
+def _navigation_button(title: Any, target: Any, nav: Any, primary: Any = False) -> Any:
     return Button(
         title,
         type="submit",
@@ -161,7 +167,7 @@ def _navigation_button(title, target, nav, primary=False):
     )
 
 
-def WizardButtons(current_step: int, total_steps: int = WIZARD_TOTAL_STEPS):
+def WizardButtons(current_step: int, total_steps: int = WIZARD_TOTAL_STEPS) -> Any:
     """Keep configuration navigation separate from the explicit history download."""
     if current_step >= total_steps:
         state = init_wizard.get_state()
@@ -184,7 +190,7 @@ def WizardButtons(current_step: int, total_steps: int = WIZARD_TOTAL_STEPS):
     )
 
 
-def _download_buttons():
+def _download_buttons() -> Any:
     """Start history download only after the user confirms all configuration."""
     return Div(
         _navigation_button("上一步", "/init-wizard/step/5", "prev"),
@@ -193,7 +199,7 @@ def _download_buttons():
     )
 
 
-def InitWizardPage(step: int = 1, form_data: dict | None = None):
+def InitWizardPage(step: int = 1, form_data: dict[str, Any] | None = None) -> FT:
     """初始化向导主页面
 
     Args:
@@ -215,7 +221,7 @@ def InitWizardPage(step: int = 1, form_data: dict | None = None):
     )
 
 
-def SyncProgressDialog():
+def SyncProgressDialog() -> Any:
     """同步进度对话框"""
     return Div(
         # 遮罩层

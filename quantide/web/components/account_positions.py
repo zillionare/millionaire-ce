@@ -1,5 +1,7 @@
 """Shared position quantities, valuation and profit display for account pages."""
 
+from typing import Any
+
 from fasthtml.common import *
 from fasthtml.common import (
     Div,
@@ -18,7 +20,7 @@ from quantide.web.components.asset_label import resolve_asset_name
 from quantide.web.components.data_tables import AccountDetailTable
 
 
-def _position_row(p):
+def _position_row(p: Any) -> Any:
     pnl_pct = (p.profit / (p.mv - p.profit)) if (p.mv - p.profit) != 0 else 0
     current_price = p.mv / p.shares if p.shares > 0 else 0
 
@@ -39,7 +41,7 @@ def _position_row(p):
     )
 
 
-def AccountPositionInfo(positions: list[Position] | None = None, *, refresh_url: str):
+def AccountPositionInfo(positions: list[Position] | None = None, *, refresh_url: str) -> Any:
     # 持仓信息表格
     headers = [
         "证券代码",
@@ -54,7 +56,7 @@ def AccountPositionInfo(positions: list[Position] | None = None, *, refresh_url:
         "盈亏比例",
     ]
 
-    rows = []
+    rows: list[Any] = []
     if positions:
         rows.extend(_position_row(position) for position in positions)
     else:

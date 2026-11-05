@@ -2,10 +2,12 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
+    FT,
     Div,
     P,
     RedirectResponse,
@@ -15,6 +17,7 @@ from fasthtml.common import (
 )
 from loguru import logger
 from monsterui.all import *
+from starlette.applications import Starlette
 from starlette.responses import StreamingResponse
 
 from quantide.config.dev_stubs import (
@@ -26,6 +29,7 @@ from quantide.config.features import supports_live_trading
 from quantide.config.paths import normalize_data_home
 from quantide.config.realtime_source import configure_realtime_source, realtime_source
 from quantide.config.tencent_trial import configure_trial
+from quantide.data.models.app_state import AppState
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.stocks import stock_list
@@ -202,7 +206,7 @@ from quantide.web.pages.wizard_sync import (
 
 
 @rt("/")
-async def get(request: Request):
+async def get(request: Request) -> FT | RedirectResponse:
     """初始化向导主页"""
     session = getattr(request, "scope", {}).get("session")
     if isinstance(session, dict):
@@ -227,7 +231,7 @@ async def get(request: Request):
     return InitWizardPage(step=1, form_data=state.to_dict())
 
 
-async def _save_runtime_step(form_dict, step):
+async def _save_runtime_step(form_dict: Mapping[str, object], step: int) -> FT | None:
     """Validate and save wizard step 2, returning its error view when necessary."""
     state = init_wizard.get_state(force_refresh=True)
     state_dict = _merge_state(
@@ -260,9 +264,10 @@ async def _save_runtime_step(form_dict, step):
             current_step_value=2,
             error_message=str(e),
         )
+    return None
 
 
-async def _save_admin_step(form_dict, step):
+async def _save_admin_step(form_dict: Mapping[str, object], step: int) -> FT | None:
     """Validate and save wizard step 3, returning its error view when necessary."""
     password = str(form_dict.get(ADMIN_FORM_FIELDS["password"], "")).strip()
     confirm = str(form_dict.get(ADMIN_FORM_FIELDS["confirm"], "")).strip()
@@ -288,9 +293,10 @@ async def _save_admin_step(form_dict, step):
             current_step_value=3,
             error_message=str(e),
         )
+    return None
 
 
-async def _save_gateway_step(form_dict, step):
+async def _save_gateway_step(form_dict: Mapping[str, object], step: int) -> FT | None:
     """Apply the fixed demo window and the edition-specific gateway configuration."""
     try:
         _configure_wizard_realtime(form_dict)
@@ -304,7 +310,8 @@ async def _save_gateway_step(form_dict, step):
             error_message=str(exc),
         )
     if not supports_live_trading():
-        return _disable_ce_gateway()
+        _disable_ce_gateway()
+        return None
     if dev_stubs_enabled():
         return _save_stub_gateway()
     return _save_custom_gateway(form_dict)
@@ -319,7 +326,7 @@ def _disable_ce_gateway() -> None:
     init_wizard.save_state(state)
 
 
-def _save_stub_gateway():
+def _save_stub_gateway() -> FT | None:
     runtime = ensure_dev_stubs_started()
     if runtime is None:
         state = init_wizard.get_state(force_refresh=True)
@@ -349,9 +356,10 @@ def _save_stub_gateway():
             current_step_value=5,
             error_message=str(e),
         )
+    return None
 
 
-def _save_custom_gateway(form_dict):
+def _save_custom_gateway(form_dict: Mapping[str, object]) -> FT | None:
     state = init_wizard.get_state(force_refresh=True)
     state_dict = _merge_state(
         _gateway_form_state(state.to_dict()),
@@ -428,9 +436,10 @@ def _save_custom_gateway(form_dict):
             current_step_value=5,
             error_message=str(e),
         )
+    return None
 
 
-async def _save_history_step(form_dict, step):
+async def _save_history_step(form_dict: Mapping[str, object], step: int) -> FT | None:
     """Validate and save the historical source before any bulk download."""
     state = init_wizard.get_state(force_refresh=True)
     state_dict = _merge_state(
@@ -515,7 +524,7 @@ async def _save_history_step(form_dict, step):
     return await _check_configured_data_source(force=True)
 
 
-def _configure_wizard_realtime(form):
+def _configure_wizard_realtime(form: Mapping[str, object]) -> None:
     state = init_wizard.get_state(force_refresh=True)
     report = load_access_report(state)
     if not dev_stubs_enabled() and not supports_live_trading():
@@ -533,7 +542,7 @@ def _configure_wizard_realtime(form):
     configure_realtime_source("tencent" if demo else ("extension" if extension else "none"))
 
 
-def _source_check_error(state, message):
+def _source_check_error(state: AppState, message: str) -> FT:
     init_wizard.update_step(4)
     values = state.to_dict()
     return _render_wizard_main_content(
@@ -541,7 +550,7 @@ def _source_check_error(state, message):
     )
 
 
-async def _check_configured_data_source(*, force=False):
+async def _check_configured_data_source(*, force: bool = False) -> FT | None:
     state = init_wizard.get_state(force_refresh=True)
     try:
         report = await asyncio.to_thread(ensure_access_report, state, force=force)
@@ -560,7 +569,7 @@ async def _check_configured_data_source(*, force=False):
     return None
 
 
-async def _validate_download_source(state):
+async def _validate_download_source(state: AppState) -> FT | None:
     result = await _check_configured_data_source()
     report = load_access_report(state)
     if not report or not report.get("history_ready"):
@@ -578,14 +587,14 @@ async def _validate_download_source(state):
     return None
 
 
-def _download_progress_view(state):
+def _download_progress_view(state: AppState) -> FT:
     return _render_wizard_main_content(
         6, state.to_dict(), current_step_value=6, extra_nodes=(SyncProgressDialog(),)
     )
 
 
 @rt("/step/{step}")
-async def handle_step(request: Request, step: int):
+async def handle_step(request: Request, step: int) -> Any:
     """处理步骤导航"""
     _set_reconfigure_mode(_request_in_force_mode(request))
     form_data = await request.form()
@@ -618,7 +627,7 @@ async def handle_step(request: Request, step: int):
 
 
 @rt("/gateway-test")
-async def gateway_test(request: Request):
+async def gateway_test(request: Request) -> Any:
     """网关连通性测试"""
     _set_reconfigure_mode(_request_in_force_mode(request))
     if dev_stubs_enabled():
@@ -672,7 +681,7 @@ async def gateway_test(request: Request):
     )
 
 
-def _prepare_dev_stub_sample_data(state: Any) -> None:
+def _prepare_dev_stub_sample_data(state: AppState) -> None:
     """Import local fixture-backed sample data for dev-stub initialization."""
     from quantide.data import init_data
 
@@ -689,7 +698,7 @@ def _prepare_dev_stub_sample_data(state: Any) -> None:
     daily_bars.fetch_with_daily_progress(sync_start, sync_end)
 
 
-def _bootstrap_runtime_for_initialized_app(app: Any) -> None:
+def _bootstrap_runtime_for_initialized_app(app: Starlette) -> None:
     """Bootstrap the effective runtime into the current app after init completes."""
     from quantide.app_factory import _attach_runtime_to_app_states
     from quantide.config.settings import get_data_home
@@ -710,7 +719,7 @@ def _bootstrap_runtime_for_initialized_app(app: Any) -> None:
 
 
 @rt("/update-download-range")
-async def handle_update_download_range(request: Request):
+async def handle_update_download_range(request: Request) -> Any:
     """更新下载范围显示"""
     _set_reconfigure_mode(_request_in_force_mode(request))
     form_data = await request.form()
@@ -723,7 +732,7 @@ async def handle_update_download_range(request: Request):
 
 
 @rt("/download")
-async def handle_download(request: Request):
+async def handle_download(request: Request) -> Any:
     """开始下载初始化数据"""
     _set_reconfigure_mode(_request_in_force_mode(request))
     form_dict = dict(await request.form())
@@ -814,7 +823,7 @@ async def handle_download(request: Request):
 
 
 @rt("/complete")
-async def handle_complete(request: Request):
+async def handle_complete(request: Request) -> Any:
     """完成初始化并跳转目标菜单"""
     try:
         if not dev_stubs_enabled() and not init_wizard.get_state().init_completed:
@@ -840,10 +849,10 @@ async def handle_complete(request: Request):
 
 
 @rt("/sync-progress")
-async def sync_progress(request: Request):
+async def sync_progress(request: Request) -> Any:
     """SSE 端点：提供同步进度更新"""
 
-    async def event_generator():
+    async def event_generator() -> AsyncIterator[str]:
         while True:
             # 发送当前状态
             data = {
@@ -873,7 +882,7 @@ async def sync_progress(request: Request):
 
 
 @rt("/reset")
-async def reset_initialization():
+async def reset_initialization() -> Any:
     """重置初始化状态（调试用）"""
     init_wizard.reset_initialization()
     _set_download_error(None)

@@ -22,11 +22,14 @@ from __future__ import annotations
 import datetime
 import threading
 import time
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
 from loguru import logger
+
+if TYPE_CHECKING:
+    import requests
 
 from quantide.core.ports.data_fetcher import (
     STANDARD_INDEX_BAR_COLUMNS,
@@ -38,7 +41,9 @@ from quantide.core.ports.data_fetcher import (
 DEFAULT_QUOTE_BATCH = 100
 
 
-def _kline_source_rows(self, asset, period, count, adjust):
+def _kline_source_rows(
+    self: TencentDataFetcher, asset: str, period: str, count: int, adjust: str
+) -> list[list[object]] | None:
     """Kline source rows."""
     symbol = to_tencent_symbol(asset)
     period = self.PERIOD_MAP.get(str(period), str(period))
@@ -79,15 +84,15 @@ def from_tencent_symbol(symbol: str) -> str:
     return f"{text[2:]}.{text[:2].upper()}"
 
 
-def _to_float(value: Any) -> float | None:
+def _to_float(value: object) -> float | None:
     try:
-        number = float(value)
+        number = float(cast(float | int | str, value))
     except (TypeError, ValueError):
         return None
     return number
 
 
-def _parse_quote_time(value: Any) -> datetime.datetime | None:
+def _parse_quote_time(value: object) -> datetime.datetime | None:
     """解析腾讯行情时间（``20241022150000`` 或 ``2024/10/22 15:00:00``）。"""
     text = str(value or "").strip()
     if not text:
@@ -130,8 +135,8 @@ class TencentDataFetcher:
         max_retries: int = 2,
         quote_batch: int = DEFAULT_QUOTE_BATCH,
         min_interval: float = 5.0,
-        session: Any | None = None,
-        access_check=None,
+        session: requests.Session | None = None,
+        access_check: Callable[[], None] | None = None,
     ) -> None:
         """初始化适配器。
 
@@ -156,7 +161,7 @@ class TencentDataFetcher:
     # ------------------------------------------------------------------
     # HTTP 基础
     # ------------------------------------------------------------------
-    def _get_session(self) -> Any:
+    def _get_session(self) -> requests.Session:
         if self._session is not None:
             return self._session
         import requests
@@ -192,7 +197,7 @@ class TencentDataFetcher:
                     response.raise_for_status()
                 content = getattr(response, "content", None)
                 if content is not None:
-                    return content
+                    return cast(bytes, content)
                 return str(getattr(response, "text", "")).encode("utf-8")
             except Exception as exc:  # pragma: no cover - 网络异常
                 status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -213,7 +218,7 @@ class TencentDataFetcher:
         if start < 0 or end <= start:
             return {}
         try:
-            return json.loads(text[start : end + 1])
+            return cast(dict[str, Any], json.loads(text[start : end + 1]))
         except ValueError:
             return {}
 
@@ -253,11 +258,11 @@ class TencentDataFetcher:
             },
         )
 
-    def fetch_quote_snapshot(self, symbols: Iterable[str] | str) -> dict[str, dict]:
+    def fetch_quote_snapshot(self, symbols: Iterable[str] | str) -> dict[str, dict[str, Any]]:
         """获取实时快照（演示范围最多 100 个标的）。"""
         if isinstance(symbols, str):
             symbols = [symbols]
-        result: dict[str, dict] = {}
+        result: dict[str, dict[str, Any]] = {}
         unique = list(dict.fromkeys(str(s).strip().upper() for s in symbols if s))[:100]
         for start in range(0, len(unique), self._quote_batch):
             batch = unique[start : start + self._quote_batch]
@@ -403,7 +408,7 @@ class TencentDataFetcher:
     def fetch_bars_ext(
         self,
         dates: Iterable[datetime.date] | datetime.date,
-        phase_callback: Any = None,
+        phase_callback: Callable[[str], None] | None = None,
     ) -> tuple[pd.DataFrame, ErrorRecord]:
         return (
             pd.DataFrame(),

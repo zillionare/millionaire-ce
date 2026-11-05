@@ -5,9 +5,7 @@ from __future__ import annotations
 import datetime
 import math
 from collections.abc import Callable, Iterable
-from typing import TYPE_CHECKING, Any, cast
-
-import polars as pl
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from quantide.data.models.daily_bars import DailyBars
@@ -42,10 +40,7 @@ def historical_reference(
     if period == 0:
         return 0.0
     try:
-        bars = cast(
-            pl.DataFrame,
-            store.get_bars(period, end=end, assets=[asset], eager_mode=True, adjust=adjust),
-        )
+        bars = store.get_bars(period, end=end, assets=[asset], eager_mode=True, adjust=adjust)
         if bars.is_empty() or len(bars) < period:
             return 0.0
         closes = bars.sort("date").get_column("close").tail(period).to_list()

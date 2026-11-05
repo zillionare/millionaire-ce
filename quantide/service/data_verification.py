@@ -1,7 +1,7 @@
 """Offline daily-bar verification against calendar and security listing boundaries."""
 
 import datetime
-from typing import Any, cast
+from typing import Any
 
 import polars as pl
 
@@ -26,9 +26,7 @@ def verify_daily_history(
     assets = assets or list(lifespans)
     if not assets:
         raise ValueError("证券列表为空，无法校验覆盖")
-    frame = cast(
-        pl.DataFrame, daily_bars.get_bars_in_range(start, end, assets=assets, eager_mode=True)
-    )
+    frame = daily_bars.get_bars_in_range(start, end, assets=assets, eager_mode=True)
     coverage, invalid = _daily_coverage(frame)
     missing, examples = _missing_daily_sessions(assets, lifespans, coverage, start, end, calendar)
     return {"assets": len(assets), "missing": missing, "examples": examples, "invalid": invalid}

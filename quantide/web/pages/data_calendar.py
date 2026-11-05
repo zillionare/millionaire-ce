@@ -2,20 +2,34 @@
 
 import calendar as cal_lib
 import datetime
+from collections.abc import Collection
+from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
+    H3,
+    A,
+    Button,
+    Card,
     Div,
+    Form,
+    P,
+    Span,
+    Td,
     Thead,
     Tr,
 )
+from loguru import logger
 from monsterui.all import *
 from monsterui.all import (
     H4,
+    CardBody,
     Table,
     Tbody,
     Th,
+    UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.data.models.calendar import calendar
 from quantide.web.application import fast_app
@@ -26,11 +40,11 @@ from quantide.web.theme import AppTheme
 data_calendar_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _get_active_tab(req):
+def _get_active_tab(req: Request) -> str:
     return req.query_params.get("tab", "overview")
 
 
-def _TabNav(active_tab):
+def _TabNav(active_tab: str) -> Any:
     return DatasetTabs(
         "/data/calendar",
         active_tab,
@@ -38,7 +52,7 @@ def _TabNav(active_tab):
     )
 
 
-def _OverviewTab():
+def _OverviewTab() -> Any:
     """概要 Tab 内容"""
     try:
         start_date = calendar.epoch
@@ -63,7 +77,7 @@ def _OverviewTab():
     )
 
 
-def _CalendarGrid(year: int, month: int):
+def _CalendarGrid(year: int, month: int) -> Any:
     """构建单月日历网格"""
     month_days = cal_lib.monthcalendar(year, month)
     month_name = f"{year}年{month}月"
@@ -95,7 +109,7 @@ def _CalendarGrid(year: int, month: int):
     )
 
 
-def _CalendarTab(req):
+def _CalendarTab(req: Request) -> Any:
     """日历可视化 Tab 内容"""
     # 默认显示当前月和下个月
     today = datetime.date.today()
@@ -132,7 +146,7 @@ def _CalendarTab(req):
     )
 
 
-def _UpdateTab():
+def _UpdateTab() -> Any:
     """手动更新 Tab 内容"""
     return Div(
         H3("手动更新日历", cls="text-xl font-semibold mb-4"),
@@ -165,7 +179,7 @@ def _UpdateTab():
 
 
 @rt("/")
-async def index(req):
+async def index(req: Request) -> Any:
     active_tab = _get_active_tab(req)
 
     # 根据 Tab 选择内容
@@ -185,7 +199,7 @@ async def index(req):
 
 
 @rt("/do-update", methods="post")
-async def do_update():
+async def do_update() -> Any:
     """执行日历更新动作"""
     try:
         import asyncio
@@ -212,7 +226,7 @@ async def do_update():
         )
 
 
-def _month_day_cell(year, month, day, trade_dates):
+def _month_day_cell(year: int, month: int, day: int, trade_dates: Collection[datetime.date]) -> Any:
     """Render a calendar cell from explicit trading-day membership."""
     if day == 0:
         return Td("", cls="bg-gray-50 border h-24")

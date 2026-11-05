@@ -151,11 +151,11 @@ class MinuteBars:
                 (pl.col("down_limit") * ratio).alias("down_limit"),
             )
             if adjust == "qfq":
-                merged = cast(pl.DataFrame, qfq_adjustment(merged, eager_mode=True))
+                merged = qfq_adjustment(merged, eager_mode=True)
             else:
                 from quantide.data.helper import hfq_adjustment
 
-                merged = cast(pl.DataFrame, hfq_adjustment(merged, eager_mode=True))
+                merged = hfq_adjustment(merged, eager_mode=True)
             assert isinstance(merged, pl.DataFrame)
 
         result = merged.select(MINUTE_BAR_COLUMNS).sort(["date", "asset"])

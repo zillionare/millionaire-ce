@@ -1,6 +1,7 @@
 import datetime
 import math
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 import polars as pl
 from loguru import logger
@@ -23,7 +24,12 @@ from quantide.service.bar_views import HistBarView
 from quantide.service.datafeed import BarsFeedImpl
 
 
-def _adjust_held_position_factors(held, factors, prev_dt, new_dt):
+def _adjust_held_position_factors(
+    held: dict[str, Position],
+    factors: Mapping[str, Mapping[datetime.date, float]],
+    prev_dt: datetime.date,
+    new_dt: datetime.date,
+) -> None:
     """Apply factor changes to each held position across a session boundary."""
     for asset, pos in held.items():
         values = factors.get(asset, {})
@@ -53,19 +59,28 @@ class BacktestBroker(BacktestSnapshots, BacktestOrders, AbstractBroker):
         bt_end: datetime.date | datetime.datetime,
         portfolio_id: str,
         data_feed: BarsFeedImpl,
-        *legacy_options,
+        *legacy_options: object,
         options: BacktestOptions | None = None,
-        **overrides,
-    ):
+        **overrides: object,
+    ) -> None:
         """Create a backtest broker, accepting established positional and keyword options.
 
         ``BacktestOptions`` documents the fee, matching and risk settings. Existing
         keyword arguments and their established positional order remain supported.
         """
-        options = BacktestOptions.resolve(legacy_options, options, overrides)
+        options = BacktestOptions.resolve(
+            cast(Sequence[Any], legacy_options), options, cast(Mapping[str, Any], overrides)
+        )
         self._initialize_backtest(bt_start, bt_end, portfolio_id, data_feed, options)
 
-    def _initialize_backtest(self, bt_start, bt_end, portfolio_id, data_feed, options):
+    def _initialize_backtest(
+        self,
+        bt_start: datetime.date | datetime.datetime,
+        bt_end: datetime.date | datetime.datetime,
+        portfolio_id: str,
+        data_feed: BarsFeedImpl,
+        options: BacktestOptions,
+    ) -> None:
         """Initialize account, execution policy and snapshots from one named configuration."""
         super().__init__(
             portfolio_id=portfolio_id,
@@ -94,7 +109,7 @@ class BacktestBroker(BacktestSnapshots, BacktestOrders, AbstractBroker):
         if prev >= bt_start:
             frames = getattr(calendar, "day_frames", None)
             first_frame = frames[0] if frames is not None and len(frames) else None
-            if hasattr(first_frame, "as_py"):
+            if first_frame is not None and hasattr(first_frame, "as_py"):
                 first_frame = first_frame.as_py()
             has_earlier = bool(first_frame is not None and first_frame < bt_start)
             if has_earlier:
@@ -145,9 +160,17 @@ class BacktestBroker(BacktestSnapshots, BacktestOrders, AbstractBroker):
     def positions(self) -> dict[str, Position]:
         return self._positions
 
+    def get_prices(self, assets: list[str]) -> dict[str, float]:
+        """Risk overlays require a live/paper broker for current prices."""
+        raise NotImplementedError("backtest broker does not provide live prices")
+
+    def get_ticks(self, asset: str, count: int) -> pl.DataFrame:
+        """Risk overlays require a live/paper broker for tick data."""
+        raise NotImplementedError("backtest broker does not provide live ticks")
+
     @property
     def cash(self) -> float:
-        return self._cash
+        return float(self._cash)
 
     def init_backtest(self) -> None:
         """创建回测相关数据记录
@@ -249,7 +272,7 @@ class BacktestBroker(BacktestSnapshots, BacktestOrders, AbstractBroker):
             return None
         if frame is None or frame.is_empty():
             return None
-        return frame.sort("date").row(0, named=True)
+        return cast(dict[str, Any] | None, frame.sort("date").row(0, named=True))
 
     def _price_for_match(
         self,
@@ -280,9 +303,12 @@ class BacktestBroker(BacktestSnapshots, BacktestOrders, AbstractBroker):
             return None
         row = frame.tail(1)
         fill_col = "open" if fill_timing == "next_open" else "close"
-        return row.with_columns(
-            pl.col(fill_col).alias("price"),
-            pl.col("date").alias("tm"),
+        return cast(
+            pl.DataFrame,
+            row.with_columns(
+                pl.col(fill_col).alias("price"),
+                pl.col("date").alias("tm"),
+            ),
         )
 
     async def run_risk_overlay(self, tm: datetime.datetime) -> None:

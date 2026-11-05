@@ -1,13 +1,15 @@
 """Strategy selection."""
 
 import datetime
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
 import fasthtml.common as fh
 import polars as pl
 from fasthtml.common import *
 from fasthtml.common import (
+    Code,
     Div,
     Span,
     Thead,
@@ -24,7 +26,9 @@ from monsterui.all import (
     Td,
     Th,
 )
+from starlette.requests import Request
 
+from quantide.core.strategy import Strategy
 from quantide.data.models.daily_bars import daily_bars
 from quantide.service.discovery import strategy_loader
 from quantide.web.pages.strategy_backtest_config import (
@@ -46,7 +50,9 @@ from quantide.web.pages.strategy_routes import (
 )
 
 
-def _selection_result_metadata(model_engine, picks, resolved_date):
+def _selection_result_metadata(
+    model_engine: str, picks: list[dict[str, Any]], resolved_date: str
+) -> tuple[str, str]:
     """Read selection result metadata."""
     if picks:
         first = picks[0]
@@ -57,7 +63,11 @@ def _selection_result_metadata(model_engine, picks, resolved_date):
     return model_engine, resolved_date
 
 
-def _append_selection_table_rows(future_return_horizon, picks, table_rows):
+def _append_selection_table_rows(
+    future_return_horizon: int,
+    picks: list[dict[str, Any]],
+    table_rows: list[Any],
+) -> None:
     """Append selection table rows."""
     table_rows.extend(
         _selection_row(idx, row, future_return_horizon) for idx, row in enumerate(picks, 1)
@@ -110,7 +120,7 @@ def _resolve_selection_date_notice(
 
 
 def _normalize_selection_output(
-    raw_result: Any,
+    raw_result: object,
     default_date: str,
     merged_config: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str, str]:
@@ -118,7 +128,7 @@ def _normalize_selection_output(
     resolved_date = default_date
     use_lgb = bool(merged_config.get("use_lightgbm", True))
     model_engine = "LightGBM" if use_lgb else "Ridge-ICIR"
-    picks_raw: Any = raw_result
+    picks_raw: object = raw_result
 
     if isinstance(raw_result, dict):
         picks_raw = raw_result.get("picks", raw_result.get("items", raw_result.get("stocks", [])))
@@ -130,9 +140,9 @@ def _normalize_selection_output(
     picks: list[dict[str, Any]] = []
     if isinstance(picks_raw, pl.DataFrame):
         picks = [dict(row) for row in picks_raw.to_dicts()]
-    elif hasattr(picks_raw, "to_dict"):
+    elif callable(getattr(picks_raw, "to_dict", None)):
         try:
-            records = picks_raw.to_dict(orient="records")
+            records = getattr(picks_raw, "to_dict")(orient="records")  # noqa: B009
             if isinstance(records, list):
                 picks = [dict(r) for r in records if isinstance(r, dict)]
         except Exception:
@@ -147,7 +157,7 @@ def _normalize_selection_output(
 
 def _render_stock_selection_modal(
     name: str,
-    strategy_cls: Any,
+    strategy_cls: type[Strategy] | None,
     *,
     as_of_date: str | None = None,
     config: dict[str, Any] | None = None,
@@ -377,7 +387,7 @@ def _render_stock_selection_modal(
 
 
 @rt("/{name}/select/modal")
-def strategy_select_modal(name: str):
+def strategy_select_modal(name: str) -> Any:
     """打开策略个股筛选弹窗并默认执行一次选股。"""
     strategies = strategy_loader.load_from_cache()
     cls = strategies.get(name)
@@ -395,7 +405,7 @@ def strategy_select_modal(name: str):
 
 
 @rt("/{name}/select/run", methods=["POST"])
-async def run_strategy_select(req, name: str):
+async def run_strategy_select(req: Request, name: str) -> Any:
     """根据用户提交的参数重新运行个股筛选。"""
     strategies = strategy_loader.load_from_cache()
     cls = strategies.get(name)
@@ -413,7 +423,7 @@ async def run_strategy_select(req, name: str):
     )
 
 
-def _selection_row(idx, row, future_return_horizon):
+def _selection_row(idx: int, row: Mapping[str, Any], future_return_horizon: int) -> Any:
     """Render one ranked selection and its signed-return cells."""
     rank_val = row.get("rank", idx)
     asset_code = str(row.get("asset") or row.get("symbol") or "--")
@@ -456,12 +466,12 @@ def _selection_row(idx, row, future_return_horizon):
     )
 
 
-def _selection_percent_cell(value):
+def _selection_percent_cell(value: object) -> Any:
     text, color = _format_signed_pct(value)
     return Td(text, cls=f"px-3 py-2 font-mono {color}")
 
 
-def _selection_relative_cell(short, medium):
+def _selection_relative_cell(short: object, medium: object) -> Any:
     short_text, short_color = _format_signed_pct(short)
     medium_text, medium_color = _format_signed_pct(medium)
     return Td(
@@ -481,7 +491,7 @@ class _SelectionSizing:
     use_lightgbm: bool
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls, config: Mapping[str, Any]) -> Self:
         return cls(
             int(config.get("top_k", 10)),
             int(config.get("universe_size", 300)),
@@ -491,24 +501,36 @@ class _SelectionSizing:
         )
 
     @property
-    def engine(self):
+    def engine(self) -> str:
         return "LightGBM" if self.use_lightgbm else "Ridge-ICIR"
 
 
 @dataclass
 class _SelectionOutcome:
-    picks: list
+    picks: list[dict[str, Any]]
     date: str
     engine: str
     error: str
     notice: str
 
 
-def _selection_outcome(name, strategy_cls, config, requested, latest, auto_run, engine):
-    picks, date, error = [], requested, ""
+def _selection_outcome(
+    name: str,
+    strategy_cls: type[Strategy] | None,
+    config: dict[str, Any],
+    requested: str,
+    latest: str,
+    auto_run: bool,
+    engine: str,
+) -> _SelectionOutcome:
+    picks: list[dict[str, Any]] = []
+    date, error = requested, ""
+    if strategy_cls is None:
+        return _SelectionOutcome(picks, date, engine, "策略不存在", "")
     if auto_run:
         try:
-            raw = strategy_cls.select_stocks(as_of_date=date, config=config)
+            select_stocks = getattr(strategy_cls, "select_stocks")  # noqa: B009
+            raw = select_stocks(as_of_date=date, config=config)
             picks, date, engine = _normalize_selection_output(raw, date, config)
         except Exception as exc:
             logger.error(f"Failed to run stock selection for {name}: {exc}")

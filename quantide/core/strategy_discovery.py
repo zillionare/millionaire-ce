@@ -18,11 +18,17 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import inspect
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Literal
 
 from quantide.core.strategy_metadata import StrategyMetadata as StrategyMetadata
+
+if TYPE_CHECKING:
+    from quantide.core.strategy import Strategy
 
 
 class SkippedReason(StrEnum):
@@ -56,15 +62,22 @@ class EnumerationResult:
     def __len__(self) -> int:
         return len(self.strategies)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[StrategyMetadata]:
         return iter(self.strategies)
 
 
-def _file_diagnostic(path, reason, detail, class_name=None):
+def _file_diagnostic(
+    path: str | Path,
+    reason: SkippedReason,
+    detail: str,
+    class_name: str | None = None,
+) -> SkippedEntry:
     return SkippedEntry(path=str(path), class_name=class_name, reason=reason, detail=detail)
 
 
-def _import_strategy_source(path):
+def _import_strategy_source(
+    path: Path,
+) -> tuple[ModuleType | None, list[SkippedEntry]]:
     importlib.invalidate_caches()
     spec = importlib.util.spec_from_file_location(f"_strategy_{path.stem}_{id(path)}", path)
     if spec is None or spec.loader is None:
@@ -87,7 +100,9 @@ def _import_strategy_source(path):
     return module, []
 
 
-def _strategy_default_config(strategy, path, diagnostics):
+def _strategy_default_config(
+    strategy: type[Strategy], path: Path, diagnostics: list[SkippedEntry]
+) -> dict[str, Any]:
     try:
         config = strategy.default_config()
         if isinstance(config, dict):
@@ -101,11 +116,17 @@ def _strategy_default_config(strategy, path, diagnostics):
     return {}
 
 
-def _enumerate_module_strategies(module, path, base_cls, risk_cls):
+def _enumerate_module_strategies(
+    module: ModuleType,
+    path: Path,
+    base_cls: type[Strategy],
+    risk_cls: type[Strategy],
+) -> tuple[list[StrategyMetadata], list[SkippedEntry]]:
     strategies, diagnostics = [], []
     for _, strategy in inspect.getmembers(module, inspect.isclass):
         if strategy.__module__ != module.__name__ or strategy in (base_cls, risk_cls):
             continue
+        kind: Literal["risk", "independent"]
         if issubclass(strategy, risk_cls):
             kind = "risk"
         elif issubclass(strategy, base_cls):
@@ -195,7 +216,9 @@ class StrategyDiscovery:
         return EnumerationResult(strategies=strategies, diagnostics=diagnostics)
 
     @staticmethod
-    def _load_strategies_from_file(py_file: Path, base_cls, risk_cls):
+    def _load_strategies_from_file(
+        py_file: Path, base_cls: type[Strategy], risk_cls: type[Strategy]
+    ) -> tuple[list[StrategyMetadata], list[SkippedEntry]]:
         """Import one strategy source and classify only classes defined by that source."""
         module, diagnostics = _import_strategy_source(py_file)
         if module is None:

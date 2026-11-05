@@ -1,20 +1,30 @@
 """Sidebar 组件。"""
 
+from collections.abc import Mapping
+from typing import Any
+
 from fasthtml.common import *
 from fasthtml.common import (
+    A,
     Aside,
+    Details,
+    Div,
     Nav,
+    Span,
+    Summary,
+    Svg,
 )
 from fasthtml.svg import Path as SvgPath
 from monsterui.all import *
+from monsterui.all import UkIcon
 
 
 def sidebar_component(
-    menu_items: list[dict] | None = None,
+    menu_items: list[dict[str, Any]] | None = None,
     *,
     enable_fragment_navigation: bool = False,
     hx_swap_oob: bool = False,
-):
+) -> Any:
     """渲染侧边栏一级菜单。
 
     Args:
@@ -51,7 +61,7 @@ _HOVER = "hover:bg-gray-50"
 _ACTIVE = "text-[#e41815] font-medium"
 
 
-def _menu_icon(item, default, cls):
+def _menu_icon(item: Mapping[str, Any], default: str, cls: str) -> Any:
     path = item.get("icon_path")
     if path:
         return Svg(
@@ -68,11 +78,11 @@ def _menu_icon(item, default, cls):
     return UkIcon(item.get("icon", default), cls=cls)
 
 
-def _menu_text_class(active):
+def _menu_text_class(active: bool) -> Any:
     return f"bg-gray-50 {_ACTIVE}" if active else f"{_BASE_TEXT} {_HOVER}"
 
 
-def _child_item(child):
+def _child_item(child: Mapping[str, Any]) -> Any:
     return A(
         Div(
             _menu_icon(child, "file", "w-4 h-4 mr-2"),
@@ -85,7 +95,7 @@ def _child_item(child):
     )
 
 
-def _sidebar_item(item):
+def _sidebar_item(item: Mapping[str, Any]) -> Any:
     children = item.get("children", [])
     active = item.get("active", False)
     icon = _menu_icon(item, "folder" if children else "file", "w-5 h-5")

@@ -1,20 +1,27 @@
 """Shared session selection and date range controls for account history."""
 
 import datetime
+from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
     Div,
+    P,
     Span,
+    Th,
+    Thead,
+    Tr,
+    to_xml,
 )
 from monsterui.all import *
 from monsterui.all import (
     Button,
     Input,
 )
+from starlette.requests import Request
 
 
-def _get_active_account(req) -> tuple[str, str] | None:
+def _get_active_account(req: Request) -> tuple[str, str] | None:
     """获取当前活动账户"""
     session = req.scope.get("session", {})
     kind = session.get("active_account_kind")
@@ -24,7 +31,7 @@ def _get_active_account(req) -> tuple[str, str] | None:
     return None
 
 
-def DateRangePicker(start_date: str = "", end_date: str = ""):
+def DateRangePicker(start_date: str = "", end_date: str = "") -> Any:
     """日期范围选择器"""
     today = datetime.date.today().isoformat()
     if not start_date:
@@ -62,17 +69,17 @@ def DateRangePicker(start_date: str = "", end_date: str = ""):
     )
 
 
-def UnselectedHistory(layout):
+def UnselectedHistory(layout: Any) -> Any:
     """Render the common empty state before an account has been selected."""
     from starlette.responses import HTMLResponse
 
-    layout.main_block = lambda: Div(
-        P("请先选择活动账户", cls="text-gray-500 text-center py-8"), cls="p-6"
+    layout.set_main_block(
+        lambda: Div(P("请先选择活动账户", cls="text-gray-500 text-center py-8"), cls="p-6")
     )
     return HTMLResponse(to_xml(layout.render()))
 
 
-def HistoryTableHeader(labels, left_columns=4):
+def HistoryTableHeader(labels: Any, left_columns: Any = 4) -> Any:
     """Render account-history columns with consistent alignment."""
     return Thead(
         Tr(
@@ -88,5 +95,5 @@ def HistoryTableHeader(labels, left_columns=4):
     )
 
 
-def EmptyHistory(message):
+def EmptyHistory(message: Any) -> Any:
     return Div(P(message, cls="text-gray-500 text-center py-8"), cls="bg-white rounded-lg shadow")

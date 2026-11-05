@@ -9,6 +9,7 @@
 """
 
 import datetime
+from collections.abc import Callable
 from pathlib import Path
 
 import polars as pl
@@ -30,7 +31,7 @@ class MinuteBarsStore(BarStore):
     def __init__(self, path: str | Path, calendar: Calendar) -> None:
         super().__init__("MinuteBars", path, calendar, "asset")
 
-    def get(
+    def get(  # type: ignore[override]
         self,
         assets: list[str] | None = None,
         start: datetime.date | datetime.datetime | None = None,
@@ -50,12 +51,12 @@ class MinuteBarsStore(BarStore):
         """
         return self._read_bars(assets, start, end, eager_mode, full_day=True)
 
-    def fetch(
+    def fetch(  # type: ignore[override]
         self,
         asset: str,
         start: datetime.date,
         end: datetime.date,
-        progress_callback=None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> int:
         """获取并保存指数行情数据。
 

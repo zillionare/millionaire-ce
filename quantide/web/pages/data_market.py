@@ -2,20 +2,40 @@
 
 import asyncio
 import datetime
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 from fasthtml.common import *
 from fasthtml.common import (
+    H3,
+    A,
+    Button,
+    Card,
     Div,
+    Form,
+    Input,
     P,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
+    Tr,
 )
 
 # Use FastHTML's plain Label for form elements to avoid MonsterUI's uk-label styling
 from fasthtml.common import Label as _Label
 from loguru import logger
 from monsterui.all import *
+from monsterui.all import (
+    CardBody,
+    UkIcon,
+)
+from starlette.requests import Request
 
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
+from quantide.data.models.sync_task import DataSyncTask
 from quantide.service.background import run_blocking, start_background
 from quantide.web.application import fast_app
 from quantide.web.components.dataset_pages import (
@@ -34,11 +54,11 @@ data_market_app, rt = fast_app(hdrs=AppTheme.headers())
 _sync_status = new_sync_status(stage="")
 
 
-def _get_active_tab(req):
+def _get_active_tab(req: Request) -> str:
     return req.query_params.get("tab", "overview")
 
 
-def _TabNav(active_tab):
+def _TabNav(active_tab: str) -> Any:
     return DatasetTabs(
         "/data/market",
         active_tab,
@@ -46,7 +66,7 @@ def _TabNav(active_tab):
     )
 
 
-def _OverviewTab():
+def _OverviewTab() -> Any:
     """概要 Tab 内容"""
     try:
         start_date = daily_bars.start
@@ -101,7 +121,7 @@ def _OverviewTab():
     )
 
 
-def _VerifyTab():
+def _VerifyTab() -> Any:
     """数据校验 Tab 内容"""
     return Div(
         H3("数据一致性校验", cls="text-xl font-semibold mb-4"),
@@ -155,7 +175,7 @@ def _VerifyTab():
     )
 
 
-def _UpdateTab():
+def _UpdateTab() -> Any:
     """手动补全 Tab 内容"""
     today_str = datetime.date.today().strftime("%Y-%m-%d")
     return Div(
@@ -218,7 +238,7 @@ def _UpdateTab():
     )
 
 
-def _BrowseTab(req):
+def _BrowseTab(req: Request) -> Any:
     """数据浏览 Tab 内容"""
     asset = req.query_params.get("asset", "")
     start = req.query_params.get("start", "")
@@ -229,7 +249,11 @@ def _BrowseTab(req):
     if asset:
         try:
             # 简单解析日期
-            s_dt = datetime.datetime.strptime(start, "%Y-%m-%d").date() if start else None
+            s_dt = (
+                datetime.datetime.strptime(start, "%Y-%m-%d").date()
+                if start
+                else datetime.date(1900, 1, 1)
+            )
             e_dt = datetime.datetime.strptime(end, "%Y-%m-%d").date() if end else None
             df = daily_bars.get_bars_in_range(assets=[asset], start=s_dt, end=e_dt, eager_mode=True)
             if not df.is_empty():
@@ -300,7 +324,7 @@ def _BrowseTab(req):
 
 
 @rt("/")
-async def index(req):
+async def index(req: Request) -> Any:
     active_tab = _get_active_tab(req)
 
     if active_tab == "verify":
@@ -324,12 +348,12 @@ async def index(req):
 
 
 @rt("/do-verify", methods="post")
-async def do_verify(form: dict):
+async def do_verify(form: Mapping[str, object]) -> Any:
     from quantide.service.data_verification import verify_daily_history
 
     try:
-        start = datetime.date(int(form.get("start_year", 2024)), 1, 1)
-        end = datetime.date(int(form.get("end_year", 2024)), 12, 31)
+        start = datetime.date(int(cast(str | int, form.get("start_year", 2024))), 1, 1)
+        end = datetime.date(int(cast(str | int, form.get("end_year", 2024))), 12, 31)
         assets = [
             value.strip().upper()
             for value in str(form.get("assets") or "").split(",")
@@ -353,7 +377,11 @@ async def do_verify(form: dict):
 # ========== SSE 更新逻辑 (复用 init_wizard 模式) ==========
 
 
-async def _run_market_sync(start_date, end_date, index_codes=None):
+async def _run_market_sync(
+    start_date: datetime.date,
+    end_date: datetime.date,
+    index_codes: Sequence[str] | None = None,
+) -> Any:
     global _sync_status
     _sync_status["is_running"] = True
     _sync_status["completed"] = False
@@ -384,18 +412,20 @@ async def _run_market_sync(start_date, end_date, index_codes=None):
         _sync_status["is_running"] = False
 
 
-def _market_task_progress(task):
+def _market_task_progress(task: DataSyncTask | None) -> None:
     if task is not None:
         _sync_status.update(progress=min(99, task.progress), message=task.message)
 
 
 @rt("/do-update", methods="post")
-async def do_update(req):
+async def do_update(req: Request) -> Any:
     form = await req.form()
     start_date_str = form.get("start_date")
     end_date_str = form.get("end_date")
 
     try:
+        if not isinstance(start_date_str, str) or not isinstance(end_date_str, str):
+            raise ValueError("Invalid date")
         s_dt = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
         e_dt = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
     except Exception:
@@ -417,5 +447,5 @@ async def do_update(req):
 
 
 @rt("/sync-progress")
-async def sync_progress():
+async def sync_progress() -> Any:
     return dataset_progress_response(_sync_status)

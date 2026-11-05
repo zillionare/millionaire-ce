@@ -1,8 +1,17 @@
 import copy
 import inspect
+from typing import Any, TypedDict
 
 from fasthtml.common import *
+from fasthtml.common import (
+    H1,
+    Div,
+    Main,
+    P,
+    Title,
+)
 from monsterui.all import *
+from starlette.requests import Request
 
 from quantide.config.branding import get_branding
 from quantide.config.features import supports_live_trading
@@ -15,6 +24,14 @@ from quantide.web.services.trade_accounts import listed_account
 from ..components.header import header_component
 from ..components.sidebar import sidebar_component
 from .base import BaseLayout
+
+
+class AlertContext(TypedDict):
+    unread_count: int
+    risk_summary: dict[str, int]
+    recent_risk_events: list[dict[str, Any]]
+    runtime_summary: dict[str, int]
+
 
 HOME_MENU = [
     {
@@ -241,7 +258,7 @@ ANALYSIS_MENU = [
     },
 ]
 
-SIDEBAR_MENUS = {
+SIDEBAR_MENUS: dict[str, list[dict[str, Any]]] = {
     "首页": HOME_MENU,
     "系统维护": SYSTEM_MAINTENANCE_MENU,
     "数据管理": SYSTEM_MAINTENANCE_MENU,
@@ -267,7 +284,7 @@ def _build_paper_entry(req: object | None = None) -> dict[str, object]:
     - 1 账户：单按钮，跳 `/trade/paper/?account_id=<id>`
     - 2+ 账户：带 `children` 列表，浏览器原生 `<details>` 渲染下拉
     """
-    sims: list[dict] = []
+    sims: list[dict[str, Any]] = []
     reg = None
     if req is not None:
         reg = getattr(req, "scope", {}).get("registry")
@@ -328,11 +345,11 @@ def build_header_menu(trade_enabled: bool, req: object | None = None) -> list[di
 HEADER_MENU = STATIC_HEADER_ITEMS
 
 
-def _without_live_items(items: list[dict]) -> list[dict]:
+def _without_live_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Remove private-edition live entries from a copied menu tree."""
     if supports_live_trading():
         return items
-    filtered: list[dict] = []
+    filtered: list[dict[str, Any]] = []
     for item in items:
         if item.get("title") in {"实盘", "实盘运行", "交易网关"}:
             continue
@@ -365,12 +382,13 @@ class MainLayout(BaseLayout):
         super().__init__(page_title=resolved_title)
         self.title = resolved_title
         self.user = user
-        self.header_accounts: list[dict] = []
-        self.active_account: dict | None = None
+        self.header_accounts: list[dict[str, Any]] = []
+        self.active_account: dict[str, Any] | None = None
         self.header_active = ""
         self.header_menu = _without_live_items(copy.deepcopy(HEADER_MENU))
-        self.sidebar_menu: list[dict] | None = None
+        self.sidebar_menu: list[dict[str, Any]] | None = None
         self._sidebar_active_url: str = "/"
+        self._main_block_override: Any = None
 
     def set_sidebar_active(self, url: str) -> None:
         """设置当前高亮的 sidebar 菜单项。"""
@@ -408,7 +426,7 @@ class MainLayout(BaseLayout):
 
         return ""
 
-    def _get_sidebar_menu(self) -> list[dict]:
+    def _get_sidebar_menu(self) -> list[dict[str, Any]]:
         """根据当前选中的一级菜单获取对应的 sidebar 菜单。"""
         menu_source = self.sidebar_menu
         if menu_source is None:
@@ -431,7 +449,7 @@ class MainLayout(BaseLayout):
             return False
         return bool(status.get("simulation"))
 
-    def _build_alert_context(self) -> dict[str, object]:
+    def _build_alert_context(self) -> AlertContext:
         """构建 header 告警中心上下文。"""
         try:
             risk_summary = strategy_runtime_manager.risk_summary()
@@ -453,7 +471,7 @@ class MainLayout(BaseLayout):
             "runtime_summary": runtime_summary,
         }
 
-    def _resolve_accounts(self) -> tuple[list[dict], dict | None]:
+    def _resolve_accounts(self) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """解析 header 账户摘要。"""
         accounts = list(self.header_accounts)
         active_account = self.active_account
@@ -480,36 +498,44 @@ class MainLayout(BaseLayout):
                     active_account = account
         return accounts, active_account
 
-    def main_block(self):
-        """主内容块，子类需要重写此方法。"""
+    def set_main_block(self, block: Any) -> None:
+        """Replace the rendered page content for this layout instance."""
+        self._main_block_override = block
+
+    def main_block(self) -> Any:
+        """Render the default page body; subclasses may extend it via super()."""
         return Div(H1(self.title), P("这是页面的主要内容区域。"), cls="p-4")
 
     def _fragment_navigation_enabled(self) -> bool:
         return self._resolve_header_active() == "系统维护"
 
-    def _resolve_main_content(self):
-        override = self.__dict__.get("main_block")
+    def _resolve_main_content(self) -> Any:
+        override = self._main_block_override
+        if override is None:
+            override = self.__dict__.get("main_block")
         if override is None:
             return self.main_block()
         if inspect.isfunction(override) or inspect.ismethod(override):
             return override()
         return override
 
-    def _build_main_container(self):
+    def _build_main_container(self) -> Any:
         return Main(
             self._resolve_main_content(),
             id="layout-main-content",
             cls="flex-1 min-w-0 p-6 w-full",
         )
 
-    def _build_sidebar(self, *, fragment_navigation_enabled: bool, hx_swap_oob: bool = False):
+    def _build_sidebar(
+        self, *, fragment_navigation_enabled: bool, hx_swap_oob: bool = False
+    ) -> Any:
         return sidebar_component(
             self._get_sidebar_menu(),
             enable_fragment_navigation=fragment_navigation_enabled,
             hx_swap_oob=hx_swap_oob,
         )
 
-    def render(self, req=None):
+    def render(self, req: Request | None = None) -> Any:
         """渲染主页面。"""
         fragment_navigation_enabled = self._fragment_navigation_enabled()
         if _is_htmx_request(req) and fragment_navigation_enabled:

@@ -6,6 +6,7 @@ import json
 import time
 import urllib.parse
 from collections.abc import Awaitable
+from typing import Any, cast
 
 import httpx
 from loguru import logger
@@ -29,7 +30,7 @@ class DingTalkMessage:
     url = "https://oapi.dingtalk.com/robot/send"
 
     @classmethod
-    def _get_access_token(cls):
+    def _get_access_token(cls) -> str:
         """获取钉钉机器人的access_token"""
         token = get_dingtalk_access_token()
         if token:
@@ -43,12 +44,12 @@ class DingTalkMessage:
         raise ValueError("dingtalk_access_token not found")
 
     @classmethod
-    def _get_secret(cls):
+    def _get_secret(cls) -> str | None:
         """获取钉钉机器人的secret"""
         return get_dingtalk_secret() or None
 
     @classmethod
-    def _get_url(cls):
+    def _get_url(cls) -> str:
         """获取钉钉机器人的消息推送地址，将签名和时间戳拼接在url后面"""
         access_token = cls._get_access_token()
         url = f"{cls.url}?access_token={access_token}"
@@ -59,7 +60,7 @@ class DingTalkMessage:
         return url
 
     @classmethod
-    def _get_sign(cls, secret: str):
+    def _get_sign(cls, secret: str) -> tuple[str, str]:
         """获取签名发送给钉钉机器人"""
         timestamp = str(round(time.time() * 1000))
         secret_enc = secret.encode("utf-8")
@@ -70,7 +71,7 @@ class DingTalkMessage:
         return timestamp, sign
 
     @classmethod
-    def _send(cls, msg):
+    def _send(cls, msg: dict[str, Any]) -> str | None:
         """发送消息到钉钉机器人"""
         url = cls._get_url()
         response = httpx.post(url, json=msg, timeout=30)
@@ -81,7 +82,7 @@ class DingTalkMessage:
                 ", response from Dingtalk: "
                 f"{response.content.decode()}"
             )
-            return
+            return None
         rsp = json.loads(response.content)
         if rsp.get("errcode") != 0:
             logger.error(f"failed to send message, content: {msg}, response from Dingtalk: {rsp}")
@@ -89,7 +90,7 @@ class DingTalkMessage:
         return response.content.decode()
 
     @classmethod
-    async def _send_async(cls, msg):
+    async def _send_async(cls, msg: dict[str, Any]) -> str | None:
         """发送消息到钉钉机器人"""
         url = cls._get_url()
         async with httpx.AsyncClient() as client:
@@ -101,7 +102,7 @@ class DingTalkMessage:
                     ", response from Dingtalk: "
                     f"{r.content.decode()}"
                 )
-                return
+                return None
             rsp = json.loads(r.content)
             if rsp.get("errcode") != 0:
                 logger.error(
@@ -111,7 +112,9 @@ class DingTalkMessage:
             return r.content.decode()
 
 
-def ding(msg: str | dict, sync: bool = False, at_all: bool = False) -> Awaitable | str | None:
+def ding(
+    msg: str | dict[str, Any], sync: bool = False, at_all: bool = False
+) -> Awaitable[str | None] | str | None:
     """发送消息到钉钉机器人
 
     支持发送纯文本消息和markdown格式的文本消息。如果要发送markdown格式的消息，请通过字典传入，
@@ -140,7 +143,7 @@ def ding(msg: str | dict, sync: bool = False, at_all: bool = False) -> Awaitable
 
     logger.warning(msg)
     if sync:
-        return DingTalkMessage._send(msg_)
+        return cast(Awaitable[str | None] | str | None, DingTalkMessage._send(msg_))
 
     task = asyncio.create_task(DingTalkMessage._send_async(msg_))
     return task

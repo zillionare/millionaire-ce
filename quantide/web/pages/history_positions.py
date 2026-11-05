@@ -1,11 +1,14 @@
 """历史持仓页面"""
 
+from typing import Any
+
 from fasthtml.common import *
 from fasthtml.common import (
     Div,
     P,
     Thead,
     Tr,
+    to_xml,
 )
 from monsterui.all import *
 from monsterui.all import (
@@ -16,6 +19,7 @@ from monsterui.all import (
     Td,
     Th,
 )
+from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from quantide.core.enums import BrokerKind
@@ -38,11 +42,11 @@ from quantide.web.pages.history_common import (
 from quantide.web.semantic_styles import profit_text
 
 
-def _get_registry(req):
+def _get_registry(req: Request) -> Any:
     return req.scope.get("registry")
 
 
-def PositionTable(positions: list[dict]):
+def PositionTable(positions: list[dict[str, Any]]) -> Any:
     """持仓表格"""
     if not positions:
         return Div(
@@ -99,8 +103,8 @@ def PositionTable(positions: list[dict]):
 
 
 def HistoryPositionsPage(
-    positions: list[dict], start_date: str, end_date: str, account_name: str = ""
-):
+    positions: list[dict[str, Any]], start_date: str, end_date: str, account_name: str = ""
+) -> Any:
     """历史持仓页面内容"""
     return Div(
         Div(
@@ -122,7 +126,7 @@ def HistoryPositionsPage(
     )
 
 
-def history_positions_list(request):
+def history_positions_list(request: Request) -> Any:
     """历史持仓列表页面"""
     session = request.scope.get("session", {})
     layout = MainLayout(title="历史持仓", user=session.get("auth"))
@@ -157,11 +161,13 @@ def history_positions_list(request):
     except Exception as e:
         print(f"Failed to query positions: {e}")
 
-    layout.main_block = lambda: HistoryPositionsPage(positions, start_date, end_date, account_name)
+    layout.set_main_block(
+        lambda: HistoryPositionsPage(positions, start_date, end_date, account_name)
+    )
     return HTMLResponse(to_xml(layout.render()))
 
 
-def _history_position_row(row):
+def _history_position_row(row: Any) -> Any:
     """Build one historical cost and PnL read model."""
     shares = row.get("shares", 0)
     cost_price = row.get("price", 0)  # 成本价

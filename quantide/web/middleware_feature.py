@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Mapping
 from functools import wraps
+from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, JSONResponse, Response
 
 from quantide.config.branding import get_branding
 from quantide.config.features import (
@@ -15,7 +18,7 @@ from quantide.config.features import (
 from quantide.service.init_wizard import init_wizard
 
 
-def _request_feature_key(request):
+def _request_feature_key(request: Request) -> str | None:
     """Resolve the feature being requested, including HTMX target views."""
     feature_key = _match_feature_for_path(request.url.path)
     if feature_key is None and request.url.path.startswith("/broker"):
@@ -47,7 +50,7 @@ FEATURE_ROUTE_PREFIXES = {
 }
 
 
-def _edition_feature(feature_key):
+def _edition_feature(feature_key: str) -> dict[str, Any]:
     """Edition feature."""
     if feature_key == "live_settings":
         if not supports_live_trading():
@@ -73,7 +76,7 @@ def _match_feature_for_path(path: str) -> str | None:
     return None
 
 
-def _is_htmx_request(headers) -> bool:
+def _is_htmx_request(headers: Mapping[str, str]) -> bool:
     return str(headers.get("HX-Request", "")).lower() == "true"
 
 
@@ -128,7 +131,7 @@ def _disabled_page_html(feature_name: str) -> str:
     """
 
 
-def _feature_disabled_response(feature_name: str, *, htmx: bool = False):
+def _feature_disabled_response(feature_name: str, *, htmx: bool = False) -> Response:
     """AC-2: A 类降级直接 URL 访问返回 503 + 提示页 (interfaces.md GATEWAY_NOT_CONFIGURED)."""
     if htmx:
         return HTMLResponse(content=_disabled_fragment_html(feature_name), status_code=503)
@@ -141,7 +144,9 @@ class FeatureCheckMiddleware(BaseHTTPMiddleware):
     根据初始化后的功能状态收紧交易入口。
     """
 
-    async def dispatch(self, request, call_next):
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """处理请求"""
         feature_key = _request_feature_key(request)
         if feature_key is not None:
@@ -168,7 +173,7 @@ class FeatureCheckMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def require_qmt_configured(func):
+def require_qmt_configured(func: Any) -> Any:
     """装饰器：要求必须配置 gateway 才能访问
 
     用于在路由处理函数中手动检查 gateway 配置。
@@ -181,7 +186,7 @@ def require_qmt_configured(func):
     """
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         feature = get_feature_status().get("live_trading", {})
         if not feature.get("available", False):
             feature_name = str(feature.get("name") or "实盘交易")
@@ -191,7 +196,7 @@ def require_qmt_configured(func):
     return wrapper
 
 
-def get_feature_status() -> dict[str, dict]:
+def get_feature_status() -> dict[str, dict[str, Any]]:
     """获取功能状态信息
 
     Returns:

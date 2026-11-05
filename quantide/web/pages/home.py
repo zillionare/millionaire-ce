@@ -1,12 +1,25 @@
 from typing import Any
 
 from fasthtml.common import *
-from fasthtml.common import A, Div, Li, Nav, P, Span, Thead, Tr, Ul
+from fasthtml.common import (
+    A,
+    Div,
+    Form,
+    Input,
+    Li,
+    Nav,
+    P,
+    Span,
+    Thead,
+    Tr,
+    Ul,
+)
 
 # Use FastHTML's plain Label for form elements to avoid MonsterUI's uk-label styling
 from loguru import logger
 from monsterui.all import *
-from monsterui.all import H2, H3, Button, Table, Tbody, Td, Th
+from monsterui.all import H2, H3, Button, Table, Tbody, Td, Th, UkIcon
+from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
 from quantide.config.branding import get_branding
@@ -21,6 +34,7 @@ from quantide.web.components.account_positions import AccountPositionInfo
 from quantide.web.components.account_summary import AssetSummary as AssetSummary
 from quantide.web.components.legacy_trade_panel import LegacyTradeInputs
 from quantide.web.services.trade_orders import submit_share_form
+from quantide.web.session_data import SessionData
 from quantide.web.theme import AppTheme
 
 home_app, rt = fast_app(hdrs=AppTheme.headers())
@@ -94,15 +108,15 @@ def _build_broker_asset_overview(broker: Any) -> dict[str, Any] | None:
     }
 
 
-def AccountTabs():
+def AccountTabs() -> Any:
     return Div(Ul(Li(A("我的资产", cls="active", href="#")), cls="uk-tab"), cls="mb-4")
 
 
-def PositionInfo(positions: list[Position] | None = None):
+def PositionInfo(positions: list[Position] | None = None) -> Any:
     return AccountPositionInfo(positions, refresh_url="/home/positions")
 
 
-def TradePanel():
+def TradePanel() -> Any:
     # 交易操作面板 (中国红风格)
 
     return Div(
@@ -159,7 +173,7 @@ def TradePanel():
     )
 
 
-def BrokerList(items: list[dict]):
+def BrokerList(items: list[dict[str, Any]]) -> Any:
     links = []
     for it in items:
         href = f"/home?kind={it['kind']}&id={it['id']}"
@@ -229,7 +243,7 @@ def _position_tag(profit_pct: float) -> tuple[str, str]:
     return "正常", "bg-green-100 text-green-800"
 
 
-def OverviewCards(asset_overview: dict | None = None):
+def OverviewCards(asset_overview: dict[str, Any] | None = None) -> Any:
     """构建首页资产概览卡片。
 
     Args:
@@ -303,7 +317,7 @@ def OverviewCards(asset_overview: dict | None = None):
     )
 
 
-def PositionTable(positions: list[Position] | None = None):
+def PositionTable(positions: list[Position] | None = None) -> Any:
     """构建持仓明细表格。
 
     Args:
@@ -408,7 +422,7 @@ def _order_status_badge(status: OrderStatus) -> tuple[str, str]:
     return "待成交", "bg-gray-100 text-gray-700"
 
 
-def _home_order_row(order):
+def _home_order_row(order: Any) -> Any:
     """Render one row with its display values and available actions."""
     side = order.get("side", OrderSide.BUY)
     if isinstance(side, int):
@@ -453,7 +467,7 @@ def _home_order_row(order):
     )
 
 
-def OrderTable(orders: list[dict] | None = None):
+def OrderTable(orders: list[dict[str, Any]] | None = None) -> Any:
     """构建当日委托表格。
 
     Args:
@@ -462,7 +476,7 @@ def OrderTable(orders: list[dict] | None = None):
     Returns:
         Div: 当日委托区域
     """
-    rows = []
+    rows: list[Any] = []
     if orders:
         rows.extend(_home_order_row(order) for order in orders)
     else:
@@ -506,7 +520,7 @@ def OrderTable(orders: list[dict] | None = None):
     )
 
 
-def NoAccountDialog():
+def NoAccountDialog() -> Any:
     """无账户提示对话框"""
     branding = get_branding()
     return Div(
@@ -556,7 +570,7 @@ def NoAccountDialog():
     )
 
 
-def _should_show_no_account_dialog(accounts: list[dict]) -> bool:
+def _should_show_no_account_dialog(accounts: list[dict[str, Any]]) -> bool:
     """首页不主动弹出账号创建对话框。
 
     交易账号创建属于交易入口流程的一部分，不应在用户访问首页时抢占界面。
@@ -578,12 +592,12 @@ def _should_redirect_to_strategy() -> bool:
 
 
 def main_block(
-    asset_overview: dict | None = None,
-    brokers: list[dict] | None = None,
+    asset_overview: dict[str, Any] | None = None,
+    brokers: list[dict[str, Any]] | None = None,
     positions: list[Position] | None = None,
-    orders: list[dict] | None = None,
+    orders: list[dict[str, Any]] | None = None,
     show_no_account_dialog: bool = False,
-):
+) -> Any:
     if show_no_account_dialog:
         return NoAccountDialog()
 
@@ -604,7 +618,7 @@ def main_block(
     )
 
 
-def _get_broker(req):
+def _get_broker(req: Request) -> Any:
     reg = req.scope.get("registry")
     if not reg:
         return None
@@ -623,13 +637,13 @@ def _get_broker(req):
     return _home_account_broker(reg, *default) if default else None
 
 
-def _home_account_broker(reg, kind, account_id):
+def _home_account_broker(reg: Any, kind: Any, account_id: Any) -> Any:
     if str(kind).lower() in {"qmt", "live"} and not supports_live_trading():
         return None
     return reg.get(kind, account_id)
 
 
-def _auto_select_account(reg: BrokerRegistry, session: dict) -> tuple[str, str] | None:
+def _auto_select_account(reg: BrokerRegistry, session: dict[str, Any]) -> tuple[str, str] | None:
     """自动选择活动账户
 
     优先级：
@@ -664,21 +678,21 @@ def _auto_select_account(reg: BrokerRegistry, session: dict) -> tuple[str, str] 
 
 
 @rt("/", methods="get")
-def index(req, session):
+def index(req: Request, session: SessionData) -> Any:
     if _should_redirect_to_strategy():
         return RedirectResponse("/strategy/", status_code=303)
     return RedirectResponse("/trade/live/", status_code=303)
 
 
 @rt("/positions")
-async def get_positions(req):
+async def get_positions(req: Request) -> Any:
     broker = _get_broker(req)
     positions = _normalize_positions(_safe_broker_attr(broker, "positions", [])) if broker else []
     return PositionInfo(positions)
 
 
 @rt("/order", methods=["POST"])
-async def place_order(req):
+async def place_order(req: Request) -> Any:
     broker = _get_broker(req)
     if not broker:
         return "Broker not found"

@@ -2,6 +2,8 @@
 
 import asyncio
 import datetime
+from collections.abc import Mapping
+from typing import Any, cast
 
 from fasthtml.common import *
 from fasthtml.common import (
@@ -24,6 +26,7 @@ from monsterui.all import (
     Td,
     UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.stocks import stock_list
@@ -43,7 +46,7 @@ def _get_market_data(
     adjust: str = "none",
     page: int = 1,
     per_page: int = 20,
-):
+) -> tuple[list[dict[str, Any]], int]:
     """获取行情数据"""
     try:
         if not code and not start_date and not end_date:
@@ -57,7 +60,7 @@ def _get_market_data(
             if df is None or len(df) == 0:
                 return [], 0
 
-            data = df.sort("asset").to_pandas().to_dict("records")
+            data = cast(list[dict[str, Any]], df.sort("asset").to_pandas().to_dict("records"))
             total = len(data)
             start_idx = (page - 1) * per_page
             end_idx = min(start_idx + per_page, total)
@@ -87,7 +90,7 @@ def _get_market_data(
         if df is None or len(df) == 0:
             return [], 0
 
-        data = df.to_pandas().to_dict("records")
+        data = cast(list[dict[str, Any]], df.to_pandas().to_dict("records"))
         total = len(data)
 
         start_idx = (page - 1) * per_page
@@ -115,7 +118,7 @@ def _load_asset_names() -> dict[str, str]:
         return {}
 
 
-def _market_row(row, show_identity, asset_names):
+def _market_row(row: Mapping[str, Any], show_identity: bool, asset_names: Mapping[str, str]) -> Any:
     """Render one row with its display values and available actions."""
     trade_date = str(row.get("date", "")).split(" ")[0] if row.get("date") else "-"
     is_st = "是" if row.get("is_st") else "否"
@@ -162,7 +165,7 @@ def _market_row(row, show_identity, asset_names):
 
 
 def _build_market_table(
-    data: list,
+    data: list[dict[str, Any]],
     page: int = 1,
     per_page: int = 20,
     total: int = 0,
@@ -170,12 +173,12 @@ def _build_market_table(
     start_date: str = "",
     end_date: str = "",
     adjust: str = "none",
-):
+) -> Any:
     """构建行情数据表格"""
     show_identity = not str(code or "").strip()
     asset_names = _load_asset_names() if show_identity else {}
 
-    rows = []
+    rows: list[Any] = []
     if data:
         rows.extend(_market_row(row, show_identity, asset_names) for row in data)
     else:
@@ -196,7 +199,7 @@ def _build_market_table(
         else "暂无数据"
     )
 
-    def page_url(p):
+    def page_url(p: int) -> str:
         return (
             "/system/market/?code="
             f"{code}"
@@ -250,14 +253,14 @@ def _build_market_table(
 
 @rt("/")
 async def index(
-    req,
+    req: Request,
     code: str = "",
     start_date: str = "",
     end_date: str = "",
     adjust: str = "none",
     page: int = 1,
     per_page: int = 20,
-):
+) -> Any:
     """行情数据页面"""
     code = code or req.query_params.get("code", "")
     start_date = start_date or req.query_params.get("start_date", "")
@@ -369,12 +372,12 @@ async def index(
         cls="p-8",
     )
 
-    layout.main_block = page_content
+    layout.set_main_block(page_content)
     return layout.render(req)
 
 
 @rt("/sync", methods="post")
-async def sync_market(req):
+async def sync_market(req: Request) -> Any:
     """同步行情数据"""
     try:
         await asyncio.to_thread(daily_bars.store.update)
@@ -405,6 +408,6 @@ async def sync_market(req):
         )
 
 
-def _market_number(row, key, spec):
+def _market_number(row: Mapping[str, Any], key: str, spec: str) -> str:
     value = row.get(key)
     return format(value, spec) if value is not None else "-"

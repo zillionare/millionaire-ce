@@ -1,6 +1,7 @@
 """K线数据查询 API"""
 
 import datetime
+from typing import Any
 
 import polars as pl
 from fasthtml.common import *
@@ -21,12 +22,12 @@ def _feature_removed(message: str) -> JSONResponse:
     return JSONResponse({"code": 410, "message": message}, status_code=410)
 
 
-def bars_to_list(df) -> list[dict]:
+def bars_to_list(df: pl.DataFrame) -> list[dict[str, Any]]:
     """将 DataFrame 转换为列表"""
     if df.is_empty():
         return []
 
-    result = []
+    result: list[dict[str, Any]] = []
     for row in df.iter_rows(named=True):
         result.append(
             {
@@ -44,14 +45,14 @@ def bars_to_list(df) -> list[dict]:
     return result
 
 
-def add_ma_to_list(df, ma_periods: list[int]) -> list[dict]:
+def add_ma_to_list(df: pl.DataFrame, ma_periods: list[int]) -> list[dict[str, Any]]:
     """将 DataFrame 转换为列表，包含均线数据"""
     if df.is_empty():
         return []
 
-    result = []
+    result: list[dict[str, Any]] = []
     for row in df.iter_rows(named=True):
-        item = {
+        item: dict[str, Any] = {
             "dt": row["frame"].isoformat()
             if isinstance(row["frame"], (datetime.date, datetime.datetime))
             else row["frame"],
@@ -119,6 +120,7 @@ def _get_index_bars(
         end=end,
         eager_mode=True,
     )
+    assert isinstance(df, pl.DataFrame)
 
     if df.is_empty():
         return pl.DataFrame(
@@ -163,7 +165,7 @@ async def get_stock_kline(
     end: str | None = None,
     freq: str = "day",
     ma: str | None = None,
-):
+) -> Any:
     """获取个股K线数据"""
     # 解析日期
     try:
@@ -235,7 +237,7 @@ async def get_sector_kline(
     end: str | None = None,
     freq: str = "day",
     ma: str | None = None,
-):
+) -> Any:
     """获取板块K线数据"""
     _ = (request, sector_id, start, end, freq, ma)
     return _feature_removed("sector kline has been retired from the subject app")
@@ -249,7 +251,7 @@ async def get_index_kline(
     end: str | None = None,
     freq: str = "day",
     ma: str | None = None,
-):
+) -> Any:
     """获取指数K线数据"""
     # 解析日期
     try:
@@ -326,7 +328,7 @@ async def compare_kline(
     start: str | None = None,
     end: str | None = None,
     freq: str = "day",
-):
+) -> Any:
     """对比两个标的的K线数据"""
     # 解析日期
     try:

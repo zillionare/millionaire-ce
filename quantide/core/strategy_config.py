@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-def stored_strategy_config(info: Any) -> dict[str, Any]:
+def stored_strategy_config(info: object) -> dict[str, Any]:
     """Read direct dictionaries and legacy JSON config envelopes."""
     if isinstance(info, dict):
         return info

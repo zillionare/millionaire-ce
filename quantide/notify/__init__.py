@@ -1,7 +1,7 @@
 import datetime
 
 
-def get_stock_type(stock_code):
+def get_stock_type(stock_code: object) -> str:
     """判断股票ID对应的证券市场
     匹配规则
     ['50', '51', '60', '90', '110'] 为 sh
@@ -14,9 +14,10 @@ def get_stock_type(stock_code):
     Returns:
         'SH' or 'SZ' or 'BJ'
     """
-    stock_code = str(stock_code).upper()
-    if stock_code.startswith(("sh", "sz", "bj")):
-        return stock_code[:2].upper()
+    normalized: str = str(stock_code).upper()
+    stock_code = normalized
+    if normalized.startswith(("sh", "sz", "bj")):
+        return normalized[:2].upper()
     if stock_code.startswith(("50", "51", "60", "73", "90", "110", "113", "132", "204", "78")):
         return "SH"
     if stock_code.startswith(
@@ -70,7 +71,7 @@ def get_stock_id_hson(stock_code: str) -> str:
     return code
 
 
-def get_stock_id_jq(stock_code):
+def get_stock_id_jq(stock_code: str) -> str:
     code = stock_code
     idx = stock_code.find(".")
     if idx > 0:
@@ -80,14 +81,14 @@ def get_stock_id_jq(stock_code):
     return code
 
 
-def get_high_low_limit(symbol_code: str, preclose_px: float):
+def get_high_low_limit(symbol_code: str, preclose_px: float) -> tuple[float, float]:
     """计算涨跌停价格"""
     if symbol_code.startswith("300") or symbol_code.startswith("688"):
         return round(preclose_px * 1.2, 2), round(preclose_px * 0.8, 2)
     return round(preclose_px * 1.1, 2), round(preclose_px * 0.9, 2)
 
 
-def open_time_delta(dt: datetime.datetime):
+def open_time_delta(dt: datetime.datetime) -> int:
     """计算当前时间距离开盘时间的分钟数"""
     hour = dt.hour
     minute = dt.minute

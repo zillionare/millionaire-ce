@@ -1,14 +1,28 @@
 """Consistent navigation and download progress for dataset management pages."""
 
+from collections.abc import Callable, Sequence
+from typing import Any
+
 from fasthtml.common import *
+from fasthtml.common import (
+    H2,
+    H3,
+    A,
+    Button,
+    Div,
+    P,
+    Script,
+)
 from monsterui.all import *
+from monsterui.all import UkIcon
+from starlette.requests import Request
 
 from quantide.web.layouts.main import MainLayout
 from quantide.web.template_assets import render_asset
 from quantide.web.theme import PRIMARY_COLOR
 
 
-def DatasetTabs(base_path, active_tab, tabs):
+def DatasetTabs(base_path: str, active_tab: str, tabs: Sequence[tuple[str, str]]) -> Any:
     tab_items = []
     for tab_id, label in tabs:
         is_active = active_tab == tab_id
@@ -27,30 +41,40 @@ def DatasetTabs(base_path, active_tab, tabs):
     return Div(Div(*tab_items, cls="flex space-x-2"), cls="border-b border-gray-200 mb-6")
 
 
-def DatasetPage(request, base_path, title, icon, active_tab, tabs, content):
+def DatasetPage(
+    request: Request,
+    base_path: str,
+    title: str,
+    icon: str,
+    active_tab: str,
+    tabs: Sequence[tuple[str, str]],
+    content: Any,
+) -> Any:
     layout = MainLayout()
     layout.set_sidebar_active(base_path)
-    layout.main_block = Div(
+    layout.set_main_block(
         Div(
             Div(
-                UkIcon(icon, size=32, cls="mr-3", style=f"color: {PRIMARY_COLOR};"),
-                H2(title, cls="text-2xl font-bold"),
-                cls="flex items-center",
+                Div(
+                    UkIcon(icon, size=32, cls="mr-3", style=f"color: {PRIMARY_COLOR};"),
+                    H2(title, cls="text-2xl font-bold"),
+                    cls="flex items-center",
+                ),
+                cls="mb-8",
             ),
-            cls="mb-8",
-        ),
-        DatasetTabs(base_path, active_tab, tabs),
-        content,
-        cls="p-8",
+            DatasetTabs(base_path, active_tab, tabs),
+            content,
+            cls="p-8",
+        )
     )
     return layout.render(request)
 
 
-def new_sync_status(**extras):
+def new_sync_status(**extras: object) -> dict[str, Any]:
     return dict(is_running=False, progress=0, message="", completed=False, error=None, **extras)
 
 
-def DatasetProgressDialog(prefix, title, url, close_id=None):
+def DatasetProgressDialog(prefix: str, title: str, url: str, close_id: str | None = None) -> Any:
     bar_id, status_id = f"{prefix}-progress-bar", f"{prefix}-status"
     close_id = close_id or f"{prefix}-close-btn"
     return Div(
@@ -88,17 +112,22 @@ def DatasetProgressDialog(prefix, title, url, close_id=None):
     )
 
 
-def dataset_content(active_tab, overview, update, **tabs):
+def dataset_content(
+    active_tab: str,
+    overview: Callable[[], Any],
+    update: Callable[[], Any],
+    **tabs: Callable[[], Any],
+) -> Any:
     return tabs.get(active_tab, update if active_tab == "update" else overview)()
 
 
-def dataset_progress_response(status):
+def dataset_progress_response(status: dict[str, Any]) -> Any:
     import asyncio
     import json
 
     from starlette.responses import StreamingResponse
 
-    async def events():
+    async def events() -> Any:
         while True:
             yield f"data: {json.dumps(status)}\n\n"
             if status["completed"] or status["error"]:

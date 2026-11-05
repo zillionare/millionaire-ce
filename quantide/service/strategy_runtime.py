@@ -11,6 +11,7 @@ from quantide.config.paths import get_backtest_log_path
 from quantide.config.settings import get_cheat_on_close_time
 from quantide.core.enums import BrokerKind, FrameType
 from quantide.core.market_time import market_now
+from quantide.core.ports.broker import BrokerPort
 from quantide.core.runtime import RuntimeContext
 from quantide.core.runtime.registration import register_port_backed_broker
 from quantide.core.strategy import BaseStrategy, RiskStrategy, Strategy
@@ -340,7 +341,8 @@ class StrategyRuntimeManager(RuntimeRiskControls, RuntimeStatePersistence, Runti
         handle = register_port_backed_broker(
             registry=runtime.registry,
             adapters=runtime.adapters,
-            port=port,
+            # PaperBroker omits optional extension kwargs from the generic port.
+            port=cast(BrokerPort, port),
             portfolio_id=account_id,
             kind=BrokerKind.SIMULATION,
             portfolio_name=f"{run.strategy_name}-paper",

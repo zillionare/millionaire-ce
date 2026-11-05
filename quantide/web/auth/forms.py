@@ -1,21 +1,78 @@
 # auth/forms.py
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .models import User
+
 import fasthtml.common as fh
 from fasthtml.common import *
+from fasthtml.common import (
+    H1,
+    H2,
+    H3,
+    H4,
+    A,
+    Button,
+    Card,
+    CheckboxX,
+    Container,
+    Div,
+    Form,
+    Grid,
+    Hr,
+    Img,
+    Input,
+    Label,
+    Link,
+    P,
+    Span,
+)
 from monsterui.all import *
+from monsterui.all import (
+    Alert,
+    AlertT,
+    ButtonT,
+    CardBody,
+    CardHeader,
+    ContainerT,
+    DivCentered,
+    DivFullySpaced,
+    DivRAligned,
+    LabelInput,
+    Subtitle,
+)
+from starlette.datastructures import UploadFile
 
 from quantide.config.branding import get_branding
 
 
-def _login_error_message(error):
+def form_text(form: Mapping[str, str | UploadFile], key: str, default: str = "") -> str:
+    """Return a text form value without assuming every field is a string."""
+    value = form.get(key)
+    return value if isinstance(value, str) else default
+
+
+def _login_error_message(error: str | None) -> str | None:
     messages = {
         "invalid": "密码错误，请重新输入。",
         "inactive": "当前账号已停用，请联系管理员。",
         "system": "系统暂时不可用，请稍后再试。",
     }
-    return messages.get(error)
+    return messages.get(error or "")
 
 
-def _login_field(label_cn, label_en, field_id, name, placeholder, field_type="text"):
+def _login_field(
+    label_cn: str,
+    label_en: str,
+    field_id: str,
+    name: str,
+    placeholder: str,
+    field_type: str = "text",
+) -> Any:
     return Div(
         fh.Label(
             f"{label_cn}/{label_en}",
@@ -36,11 +93,13 @@ def _login_field(label_cn, label_en, field_id, name, placeholder, field_type="te
     )
 
 
-def _brand_emblem():
+def _brand_emblem() -> Any:
     return Div(Img(src="/static/logo.png", alt="Quantide"), cls="qt-emblem")
 
 
-def create_login_form(error=None, action="/auth/login", redirect_to="/"):
+def create_login_form(
+    error: str | None = None, action: str = "/auth/login", redirect_to: str = "/"
+) -> Any:
     """Create branded login form while preserving auth behavior."""
     error_message = _login_error_message(error)
     branding = get_branding()
@@ -99,7 +158,7 @@ def create_login_form(error=None, action="/auth/login", redirect_to="/"):
     )
 
 
-def create_register_form(error=None, action="/auth/register"):
+def create_register_form(error: str | None = None, action: str = "/auth/register") -> Any:
     """Create registration form component with same style as login"""
     error_message = None
     if error == "username_taken":
@@ -189,7 +248,9 @@ def create_register_form(error=None, action="/auth/register"):
     )
 
 
-def create_forgot_password_form(error=None, success=None, action="/auth/forgot"):
+def create_forgot_password_form(
+    error: str | None = None, success: str | None = None, action: str = "/auth/forgot"
+) -> Any:
     """Create password reset request form with same style"""
     error_message = None
     success_message = None
@@ -252,7 +313,9 @@ def create_forgot_password_form(error=None, success=None, action="/auth/forgot")
     )
 
 
-def create_reset_password_form(token, error=None, action="/auth/reset"):
+def create_reset_password_form(
+    token: str, error: str | None = None, action: str = "/auth/reset"
+) -> Any:
     """Create password reset form (after clicking email link)"""
     error_message = None
 
@@ -311,7 +374,9 @@ def create_reset_password_form(token, error=None, action="/auth/reset"):
     )
 
 
-def create_profile_form(user, success=None, error=None, action="/auth/profile"):
+def create_profile_form(
+    user: User, success: str | None = None, error: str | None = None, action: str = "/auth/profile"
+) -> Any:
     """Create profile edit form for logged-in users"""
     return Container(
         DivFullySpaced(
@@ -404,7 +469,7 @@ def create_profile_form(user, success=None, error=None, action="/auth/profile"):
     )
 
 
-def InfoRow(label, value):
+def InfoRow(label: str, value: object) -> Any:
     """Render info display in profile"""
     return DivFullySpaced(
         Span(label, cls="font-medium"), Span(str(value), cls="text-muted-foreground")
@@ -412,7 +477,7 @@ def InfoRow(label, value):
 
 
 # Utility function for consistent error/success messaging
-def create_message_alert(message, type="info"):
+def create_message_alert(message: str, type: str = "info") -> Any:
     """Create consistent alert messages"""
     alert_class = {
         "error": AlertT.error,
@@ -424,5 +489,5 @@ def create_message_alert(message, type="info"):
     return Alert(message, cls=alert_class)
 
 
-def user_email_input(user, label="邮箱"):
+def user_email_input(user: User, label: str = "邮箱") -> Any:
     return LabelInput(label, name="email", type="email", value=user.email, required=True)

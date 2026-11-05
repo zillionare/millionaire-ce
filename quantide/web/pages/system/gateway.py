@@ -8,6 +8,7 @@ from __future__ import annotations
 import time
 import urllib.request
 from typing import Any
+from urllib.error import URLError
 
 from fasthtml.common import *
 from fasthtml.common import (
@@ -30,6 +31,7 @@ from monsterui.all import (
     Input,
     UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.config.dev_stubs import dev_stubs_enabled
 from quantide.config.features import supports_live_trading
@@ -45,7 +47,7 @@ from quantide.web.theme import PRIMARY_COLOR, AppTheme
 system_gateway_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _live_settings_unavailable(req):
+def _live_settings_unavailable(req: Request) -> Any:
     """Return the same clear response used by the HTTP feature boundary."""
     from quantide.web.middleware_feature import _feature_disabled_response
 
@@ -158,7 +160,7 @@ def _test_gateway_connection(
             "latency_ms": latency_ms,
             "error": f"HTTP {e.code}",
         }
-    except urllib.request.URLError as e:
+    except URLError as e:
         latency_ms = int((time.time() - start) * 1000)
         return {"success": False, "latency_ms": latency_ms, "error": str(e.reason)}
     except Exception as e:
@@ -416,13 +418,13 @@ def _build_config_form(config: dict[str, Any]) -> Div:
 
 
 def _render_page(
-    req,
+    req: Request,
     config: dict[str, Any],
     *,
     test_result: dict[str, Any] | None = None,
     success_message: str | None = None,
     error_message: str | None = None,
-):
+) -> Any:
     layout = MainLayout(title="交易网关")
     layout.set_sidebar_active("/system/gateway")
 
@@ -471,7 +473,7 @@ def _render_page(
         cls="p-8",
     )
 
-    layout.main_block = page_content
+    layout.set_main_block(page_content)
     return layout.render(req)
 
 
@@ -479,7 +481,7 @@ def _render_page(
 
 
 @rt("/")
-async def index(req):
+async def index(req: Request) -> Any:
     """交易网关页面"""
     if not supports_live_trading():
         return _live_settings_unavailable(req)
@@ -488,7 +490,7 @@ async def index(req):
 
 
 @rt("/test", methods=["GET", "POST"])
-async def test_connection(req):
+async def test_connection(req: Request) -> Any:
     """测试网关连接"""
     if not supports_live_trading():
         return _live_settings_unavailable(req)
@@ -521,7 +523,7 @@ async def test_connection(req):
 
 
 @rt("/save", methods=["POST"])
-async def save_config(req):
+async def save_config(req: Request) -> Any:
     """保存网关配置"""
     if not supports_live_trading():
         return _live_settings_unavailable(req)

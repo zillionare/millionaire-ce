@@ -2,10 +2,14 @@
 
 import calendar as cal_lib
 import datetime
+from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
+    A,
     Div,
+    Form,
+    Option,
     Span,
 )
 
@@ -18,6 +22,7 @@ from monsterui.all import (
     Button,
     UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.data.models.calendar import calendar as trade_calendar
 from quantide.web.application import fast_app
@@ -28,7 +33,7 @@ from quantide.web.theme import PRIMARY_COLOR, AppTheme
 system_calendar_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _get_calendar_data(year: int, month: int) -> list[dict]:
+def _get_calendar_data(year: int, month: int) -> list[dict[str, Any]]:
     """获取指定年月的日历数据。交易日历表里没有的日期，按"周一到周五默认交易、周末默认休市"兜底。"""
     days_in_month = cal_lib.monthrange(year, month)[1]
 
@@ -69,7 +74,7 @@ def _is_calendar_data_stale(year: int, month: int) -> bool:
         return True
     last_date = table.column("date")[-1].as_py()
     last_day_of_month = datetime.date(year, month, cal_lib.monthrange(year, month)[1])
-    return last_day_of_month > last_date
+    return bool(last_day_of_month > last_date)
 
 
 def _build_calendar_grid(year: int, month: int) -> Div:
@@ -77,7 +82,7 @@ def _build_calendar_grid(year: int, month: int) -> Div:
     cal_data = _get_calendar_data(year, month)
 
     weeks = []
-    current_week = [None] * 7
+    current_week: list[dict[str, Any] | None] = [None] * 7
 
     for item in cal_data:
         day_of_week = item["day_of_week"]
@@ -109,7 +114,7 @@ def _build_calendar_grid(year: int, month: int) -> Div:
 
 
 @rt("/")
-async def index(req, year: int = None, month: int = None):
+async def index(req: Request, year: int | None = None, month: int | None = None) -> Any:
     """交易日历页面"""
     now = datetime.datetime.now()
     if year is None:
@@ -179,12 +184,12 @@ async def index(req, year: int = None, month: int = None):
         cls="p-8",
     )
 
-    layout.main_block = page_content
+    layout.set_main_block(page_content)
     return layout.render(req)
 
 
 @rt("/sync", methods="post")
-async def sync_calendar():
+async def sync_calendar() -> Any:
     """同步交易日历数据"""
     try:
         import asyncio
@@ -203,7 +208,7 @@ async def sync_calendar():
         )
 
 
-def _calendar_day_cell(item):
+def _calendar_day_cell(item: Any) -> Any:
     if item is None:
         return Div(cls="p-3 min-h-[70px] bg-gray-50")
     day = str(item["date"].day)
@@ -219,7 +224,7 @@ def _calendar_day_cell(item):
     )
 
 
-def _calendar_navigation(year, month):
+def _calendar_navigation(year: Any, month: Any) -> Any:
     """Render adjacent month/year links and the explicit date selectors."""
     prev_month = month - 1 if month > 1 else 12
     prev_month_year = year if month > 1 else year - 1

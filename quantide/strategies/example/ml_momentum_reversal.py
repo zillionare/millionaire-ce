@@ -5,11 +5,12 @@ from __future__ import annotations
 import datetime
 import hashlib
 import pickle
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 
 from quantide.core.enums import FrameType
+from quantide.core.ports.broker import StrategyBroker
 from quantide.core.strategy import BaseStrategy
 from quantide.data.models.calendar import calendar
 from quantide.data.models.daily_bars import daily_bars
@@ -122,7 +123,13 @@ from quantide.strategies.example._ml_support import (
 )
 
 
-def _cache_backtest_feature_panel(self, raw_panel, signal_date, fetch_end, panel_key):
+def _cache_backtest_feature_panel(
+    self: MLMomentumReversalStrategy,
+    raw_panel: pl.DataFrame,
+    signal_date: datetime.date,
+    fetch_end: datetime.date,
+    panel_key: tuple[Any, ...],
+) -> None:
     """Compute and cache the normalized feature panel for the backtest window."""
     stock_meta = stock_list.data if stock_list.size > 0 else None
     feat_panel = compute_alpha_features(raw_panel, stock_meta=stock_meta)
@@ -172,7 +179,7 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
         """Return default strategy parameters."""
         return dict(MLMomentumReversalStrategy.PARAMS)
 
-    def __init__(self, broker: Any, config: dict[str, Any] | None = None) -> None:
+    def __init__(self, broker: StrategyBroker, config: dict[str, Any] | None = None) -> None:
         merged = {**self.default_config(), **(config or {})}
         if config and "future_return_horizon" not in config and "horizon" in config:
             merged["future_return_horizon"] = config["horizon"]
@@ -198,7 +205,7 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
         #: dry-run 影子模式：只加载模型，不训练
         self._shadow_mode = bool(self.config.get("_shadow_mode", False))
 
-        self._model: Any = None
+        self._model: object | None = None
         self._model_engine: str = "LightGBM" if self.use_lightgbm else "Prior-Ridge"
         #: 模型持久化键（策略名 + 模型相关配置哈希），回测/仿真/实盘共用
         self._model_key = model_key(self.__class__.__name__, self.config)
@@ -281,7 +288,7 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
 
     def _save_model_artifact(
         self,
-        model: Any,
+        model: object | None,
         engine: str,
         training_frame: pl.DataFrame,
         *,
@@ -425,7 +432,7 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
             panel = panel.filter(pl.col("date") <= options.as_of)
         if panel.is_empty():
             return []
-        target_date = panel["date"].max()
+        target_date = cast(datetime.date, panel["date"].max())
         if options.custom_assets:
             candidates = sorted(panel["asset"].unique().to_list())
         else:
@@ -571,15 +578,18 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
         broker = self.broker
         if hasattr(broker, "get_bars_range"):
             try:
-                return broker.get_bars_range(
-                    assets,
-                    start,
-                    end,
-                    adjust=None,
-                    include_forming_bar=include_forming_bar,
+                return cast(
+                    pl.DataFrame,
+                    broker.get_bars_range(
+                        assets,
+                        start,
+                        end,
+                        adjust=None,
+                        include_forming_bar=include_forming_bar,
+                    ),
                 )
             except TypeError:  # 兼容未实现该参数的 broker
-                return broker.get_bars_range(assets, start, end, adjust=None)
+                return cast(pl.DataFrame, broker.get_bars_range(assets, start, end, adjust=None))
         return daily_bars.get_bars_in_range(start, end, assets=assets, adjust=None, eager_mode=True)
 
     def _ensure_backtest_panel(self, signal_date: datetime.date) -> None:
@@ -668,7 +678,7 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
 
     # ---------------- 精确归因：回放回测的选池/训练节奏 ----------------
 
-    def _pull_factor_frames(self, tm):
+    def _pull_factor_frames(self, tm: datetime.datetime) -> list[pl.DataFrame]:
         """Pull factor frames."""
         assets = self.custom_assets or [str(self.config.get("symbol", "000001.SZ"))]
         frames: list[pl.DataFrame] = []
@@ -684,7 +694,9 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
                 frames.append(hist)
         return frames
 
-    def _rank_small_universe(self, tm, is_live):
+    def _rank_small_universe(
+        self, tm: datetime.datetime, is_live: bool
+    ) -> tuple[list[dict[str, Any]], dict[str, float], dict[str, int]]:
         """Pull and rank a small explicitly configured stock universe."""
         # 轻量路径：不走 2000 只成分股的面板，直接按需拉取少量标的的日线，
         # 现场算因子并打分。适用两种情形：
@@ -740,7 +752,7 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
             cross_df, model, engine, feature_cols, target_date, self.top_k
         )
 
-    def _refresh_live_rank_model(self, signal_date):
+    def _refresh_live_rank_model(self, signal_date: datetime.date) -> bool:
         """Refresh the persisted model without retraining in a live decision callback."""
         # 后台任务可能已写入新模型；决策前重新解析一次最新 artifact。
         self._load_model_from_store(signal_date)
@@ -761,14 +773,16 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
             )
         return True
 
-    def _missing_rank_data(self, day, message, severity):
+    def _missing_rank_data(self, day: datetime.date, message: str, severity: str) -> bool:
         self._data_missing = True
         if self._last_data_missing_log != day:
             self._last_data_missing_log = day
             self.log(message, level=severity)
         return False
 
-    def _live_panel_ready(self, hist_slice, target_date, today):
+    def _live_panel_ready(
+        self, hist_slice: pl.DataFrame, target_date: datetime.date, today: datetime.date
+    ) -> bool:
         """Require today's bars for holdings and the configured universe coverage."""
         if target_date != today:
             return self._missing_rank_data(
@@ -816,7 +830,7 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
         if hist_slice.is_empty():
             return [], {}, {}
 
-        target_date = hist_slice["date"].max()  # type: ignore[assignment]
+        target_date = cast(datetime.date, hist_slice["date"].max())
         if is_live and not self._live_panel_ready(hist_slice, target_date, signal_date):
             return [], {}, {}
         if is_live and not self._refresh_live_rank_model(signal_date):
@@ -875,7 +889,7 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
         await self._buy_target_candidates(ranked, sold_assets, tm)
 
 
-def _load_selection_bars(options):
+def _load_selection_bars(options: SelectionOptions) -> pl.DataFrame:
     """Load only the lookback visible at the requested signal date."""
     if not _ensure_data_connected():
         return pl.DataFrame()
@@ -899,7 +913,12 @@ def _load_selection_bars(options):
     return frame
 
 
-def _rank_selection_panel(panel, target_date, options, selected_features):
+def _rank_selection_panel(
+    panel: pl.DataFrame,
+    target_date: datetime.date,
+    options: SelectionOptions,
+    selected_features: list[str] | None,
+) -> list[dict[str, Any]]:
     """Compute, fit and rank a fixed candidate panel."""
     stock_meta = stock_list.data if stock_list.size > 0 else None
     features = resolve_feature_selection(selected_features) or FEATURE_COLS

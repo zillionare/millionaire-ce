@@ -1,9 +1,14 @@
 """历史成交页面"""
 
+from typing import Any
+
 from fasthtml.common import *
 from fasthtml.common import (
+    H1,
     Div,
+    Form,
     Tr,
+    to_xml,
 )
 from monsterui.all import *
 from monsterui.all import (
@@ -11,6 +16,7 @@ from monsterui.all import (
     Tbody,
     Td,
 )
+from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from quantide.data.sqlite import db
@@ -34,7 +40,7 @@ from quantide.web.pages.history_common import (
 from quantide.web.semantic_styles import trade_side_text
 
 
-def TradesTable(trades: list[dict]):
+def TradesTable(trades: list[dict[str, Any]]) -> Any:
     """成交表格"""
     if not trades:
         return EmptyHistory("暂无成交数据")
@@ -71,7 +77,7 @@ def TradesTable(trades: list[dict]):
     )
 
 
-def history_trades_list(request):
+def history_trades_list(request: Request) -> Any:
     """历史成交列表页面"""
     session = request.scope.get("session", {})
     layout = MainLayout(title="历史成交", user=session.get("auth"))
@@ -100,7 +106,7 @@ def history_trades_list(request):
     except Exception as e:
         print(f"Failed to query trades: {e}")
 
-    def main_block():
+    def main_block() -> Any:
         return Div(
             Div(H1("历史成交", cls="text-2xl font-bold text-gray-900"), cls="mb-6"),
             Form(
@@ -113,5 +119,5 @@ def history_trades_list(request):
             cls="p-6",
         )
 
-    layout.main_block = main_block
+    layout.set_main_block(main_block)
     return HTMLResponse(to_xml(layout.render()))

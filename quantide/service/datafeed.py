@@ -221,15 +221,12 @@ class BarsFeedImpl:
             start_dt = self._to_datetime(start)
             end_dt = self._to_datetime(end) if end else None
 
-            df = cast(
-                pl.DataFrame,
-                self._daily_bars.get_bars_in_range(
-                    assets=[asset],
-                    start=start_dt,
-                    end=end_dt,
-                    adjust=adjust,
-                    eager_mode=True,
-                ),
+            df = self._daily_bars.get_bars_in_range(
+                assets=[asset],
+                start=start_dt,
+                end=end_dt,
+                adjust=adjust,
+                eager_mode=True,
             )
 
             if not df.is_empty():

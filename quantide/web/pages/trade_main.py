@@ -7,9 +7,13 @@
 4. 当日委托
 """
 
+from __future__ import annotations
+
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
+from typing import Any, cast
 
 from fasthtml.common import *
 from fasthtml.common import (
@@ -17,6 +21,7 @@ from fasthtml.common import (
     Div,
     P,
     Span,
+    to_xml,
 )
 from fasthtml.common import to_xml as _to_xml
 from loguru import logger
@@ -30,6 +35,7 @@ from monsterui.all import (
     Input,
     UkIcon,
 )
+from starlette.requests import Request
 from starlette.responses import (
     HTMLResponse,
     JSONResponse,
@@ -94,7 +100,11 @@ from quantide.web.services.trade_gateway_views import (
 from quantide.web.services.trade_gateway_views import (
     _parse_order_time_text as _parse_order_time_text,
 )
-from quantide.web.services.trade_orders import parse_manual_order, submit_manual_order
+from quantide.web.services.trade_orders import (
+    ManualOrder,
+    parse_manual_order,
+    submit_manual_order,
+)
 from quantide.web.services.trade_quote_view import (
     _build_asset_stats as _build_asset_stats,
 )
@@ -125,13 +135,14 @@ from quantide.web.services.trade_quote_view import (
 from quantide.web.services.trade_quote_view import (
     _resolve_trade_reference_dates as _resolve_trade_reference_dates,
 )
+from quantide.web.session_data import SessionData
 
 
-def _get_registry(req) -> BrokerRegistry:
-    return req.scope.get("registry")
+def _get_registry(req: Request) -> BrokerRegistry:
+    return cast(BrokerRegistry, req.scope.get("registry"))
 
 
-def _get_all_accounts(reg: BrokerRegistry) -> list[dict]:
+def _get_all_accounts(reg: BrokerRegistry) -> list[dict[str, Any]]:
     """获取所有账号列表"""
     accounts = []
     kinds = [BrokerKind.SIMULATION]
@@ -143,13 +154,17 @@ def _get_all_accounts(reg: BrokerRegistry) -> list[dict]:
     return accounts
 
 
-def _get_active_account(reg, session, query_params=None):
+def _get_active_account(
+    reg: BrokerRegistry | None,
+    session: SessionData,
+    query_params: Mapping[str, object] | None = None,
+) -> dict[str, Any] | None:
     """Return the selected account after applying the edition's account policy."""
     selected = resolve_active_account(reg, session, query_params, supports_live_trading())
     return account_details(*selected) if selected else None
 
 
-def _trade_result_has_order(result) -> bool:
+def _trade_result_has_order(result: object) -> bool:
     """Return whether a broker call produced an actual order.
 
     Args:
@@ -172,7 +187,7 @@ def _trade_result_has_order(result) -> bool:
 # HTMX 局部刷新的 swap 目标 id（同时用于 hx-select 过滤）
 
 
-def NoAccountView():
+def NoAccountView() -> Any:
     """无账号视图"""
     return Div(
         Div(
@@ -201,12 +216,12 @@ def NoAccountView():
     )
 
 
-def SelectAccountView(accounts: list[dict]):
+def SelectAccountView(accounts: list[dict[str, Any]]) -> Any:
     """选择账号视图"""
     live_accounts = [a for a in accounts if a["is_live"]]
     sim_accounts = [a for a in accounts if not a["is_live"]]
 
-    def AccountCard(account: dict):
+    def AccountCard(account: dict[str, Any]) -> Any:
         return Div(
             Div(
                 Div(
@@ -294,7 +309,66 @@ def SelectAccountView(accounts: list[dict]):
     )
 
 
-def trade_main_page(request):
+def _trade_account_snapshot(
+    reg: BrokerRegistry, active_account: dict[str, Any]
+) -> tuple[str, str, dict[str, Any], list[Position], list[Order]]:
+    """Load capital, positions and orders for the active trade account."""
+    portfolio_id = str(active_account["id"])
+    kind = str(active_account["kind"])
+    broker = reg.get(BrokerKind(kind), portfolio_id)
+    capital = _trade_capital(broker)
+    positions: list[Position] = []
+    orders: list[Order] = []
+    try:
+        positions, orders = _positions_orders_for_account(broker, kind)
+    except Exception as e:
+        logger.warning(f"加载持仓/委托失败: {e}")
+    return portfolio_id, kind, capital, positions, orders
+
+
+def _trade_account_content(
+    active_account: dict[str, Any],
+    portfolio_id: str,
+    kind: str,
+    capital: dict[str, Any],
+    positions: list[Position],
+    orders: list[Order],
+    active_tab: str,
+) -> Any:
+    """Build the account-scoped content shown inside the trade layout."""
+    return Div(
+        Div(
+            id="trade-toast-slot",
+            cls=("pointer-events-none absolute inset-x-6 top-0 z-50"),
+            aria_live="polite",
+        ),
+        Div(
+            Div(
+                Span("★", cls="text-[#e41815] mr-1"),
+                Span(f"当前账号: {active_account['name']}", cls="font-medium"),
+                Span(f"({active_account['label']})", cls="ml-2 text-sm text-gray-500"),
+                A(
+                    "对照 →",
+                    href=f"/tracking/{portfolio_id}",
+                    cls="ml-3 text-xs font-medium text-[#e41815] hover:text-[#c91412]",
+                ),
+                cls="flex items-center mb-4 px-6",
+            ),
+        ),
+        AssetInfoBar(**capital),
+        LightningTradePanel(
+            portfolio_id,
+            kind,
+            capital["cash"],
+            capital["total"],
+            is_live=bool(active_account.get("is_live")),
+        ),
+        PositionsOrdersTabs(positions, orders, active_tab),
+        cls="relative p-6",
+    )
+
+
+def trade_main_page(request: Request) -> Any:
     """交易主页面 - 符合 livetrade-default.html 原型"""
     session = request.scope.get("session", {})
     layout = MainLayout(title="交易", user=session.get("auth"))
@@ -311,10 +385,10 @@ def trade_main_page(request):
     # 如果没有配置任何账号
     if not accounts:
 
-        def main_block():
+        def no_account_block() -> Any:
             return Div(NoAccountView(), cls="p-6")
 
-        layout.main_block = main_block
+        layout.set_main_block(no_account_block)
         return HTMLResponse(to_xml(layout.render()))
 
     # 获取活动账号
@@ -323,70 +397,22 @@ def trade_main_page(request):
     # 如果没有活动账号，显示选择页面
     if not active_account:
 
-        def main_block():
+        def select_account_block() -> Any:
             return SelectAccountView(accounts)
 
-        layout.main_block = main_block
+        layout.set_main_block(select_account_block)
         return HTMLResponse(to_xml(layout.render()))
 
-    # 获取账号数据
-    portfolio_id = active_account["id"]
-    kind = active_account["kind"]
-
-    broker = reg.get(BrokerKind(kind), portfolio_id) if reg else None
-
-    # 获取资产信息
-    capital = _trade_capital(broker)
-    positions: list[Position] = []
-    orders: list[Order] = []
-
-    # 仿真账户直接读 broker（paper 的成交/委托在 broker 内），
-    # 实盘仍走 gateway JSON API。错误一律吞掉，留空表 + log warning。
-    try:
-        positions, orders = _positions_orders_for_account(broker, kind)
-    except Exception as e:
-        logger.warning(f"加载持仓/委托失败: {e}")
-
-    def main_block():
-        return Div(
-            Div(
-                id="trade-toast-slot",
-                cls=("pointer-events-none absolute inset-x-6 top-0 z-50"),
-                aria_live="polite",
-            ),
-            # 账号信息
-            Div(
-                Div(
-                    Span("★", cls="text-[#e41815] mr-1"),
-                    Span(f"当前账号: {active_account['name']}", cls="font-medium"),
-                    Span(f"({active_account['label']})", cls="ml-2 text-sm text-gray-500"),
-                    A(
-                        "对照 →",
-                        href=f"/tracking/{portfolio_id}",
-                        cls="ml-3 text-xs font-medium text-[#e41815] hover:text-[#c91412]",
-                    ),
-                    cls="flex items-center mb-4 px-6",
-                ),
-            ),
-            # 资产信息条
-            AssetInfoBar(**capital),
-            # 闪电交易面板
-            LightningTradePanel(
-                portfolio_id,
-                kind,
-                capital["cash"],
-                capital["total"],
-                is_live=bool(active_account.get("is_live")),
-            ),
-            PositionsOrdersTabs(positions, orders, active_tab),
-            cls="relative p-6",
+    portfolio_id, kind, capital, positions, orders = _trade_account_snapshot(reg, active_account)
+    layout.set_main_block(
+        lambda: _trade_account_content(
+            active_account, portfolio_id, kind, capital, positions, orders, active_tab
         )
-
-    layout.main_block = main_block
+    )
     return HTMLResponse(to_xml(layout.render()))
 
 
-async def place_order_trade(req):
+async def place_order_trade(req: Request) -> Any:
     """Validate the account and instruction before submitting a manual order."""
     form = await req.form()
     try:
@@ -410,7 +436,7 @@ async def place_order_trade(req):
         return _render_order_toast(f"下单失败: {exc}")
 
 
-async def cancel_order_trade(req):
+async def cancel_order_trade(req: Request) -> Any:
     """撤销委托（模拟盘走 broker，实盘走 gateway）。"""
     qtoid = str(req.path_params.get("qtoid") or "").strip()
     if not qtoid:
@@ -450,7 +476,7 @@ async def cancel_order_trade(req):
     )
 
 
-async def search_trade_assets(req):
+async def search_trade_assets(req: Request) -> Any:
     """搜索股票代码/名称/拼音，返回 HTMX 下拉列表 HTML。
 
     Args:
@@ -469,14 +495,14 @@ async def search_trade_assets(req):
     except Exception:
         return HTMLResponse(to_xml(Div(id="asset-search-dropdown", cls="hidden")))
 
-    if result_df is None or len(result_df) == 0:
+    if result_df is None or isinstance(result_df, list) or len(result_df) == 0:
         return HTMLResponse(to_xml(Div(id="asset-search-dropdown", cls="hidden")))
 
     # 只返回代码/名称/拼音，避免逐条查询行情阻塞事件循环。
     return AssetSearchResults(result_df, lightning=False)
 
 
-async def trade_asset_stats(req):
+async def trade_asset_stats(req: Request) -> Any:
     """Return reference price stats for the selected asset.
 
     Args:
@@ -489,7 +515,7 @@ async def trade_asset_stats(req):
     return JSONResponse(_build_asset_stats(asset) if asset else _build_asset_stats(""))
 
 
-async def trade_live_quote(req):
+async def trade_live_quote(req: Request) -> Any:
     """Return a lightweight live quote payload for trade-page polling.
 
     Args:
@@ -504,7 +530,7 @@ async def trade_live_quote(req):
     )
 
 
-async def set_active_account(req, session: dict | None = None):
+async def set_active_account(req: Request, session: dict[str, Any] | None = None) -> Any:
     """设置活动账号。
 
     Args:
@@ -535,7 +561,7 @@ async def set_active_account(req, session: dict | None = None):
     return RedirectResponse(url="/trade", status_code=303)
 
 
-def _resolve_broker_for_refresh(req):
+def _resolve_broker_for_refresh(req: Request) -> object | None:
     """Resolve a remembered account or a usable default for HTMX refresh."""
     reg = _get_registry(req)
     session = req.scope.get("session", {}) or {}
@@ -548,7 +574,7 @@ def _resolve_broker_for_refresh(req):
     return find_broker(reg, *default) if default else None
 
 
-def _safe_orders(broker) -> list[Order]:
+def _safe_orders(broker: object | None) -> list[Order]:
     """Try to fetch today's orders, returning ``[]`` on any failure."""
     if broker is None or not hasattr(broker, "orders"):
         return []
@@ -562,7 +588,7 @@ def _safe_orders(broker) -> list[Order]:
     return list(orders_dict) if orders_dict else []
 
 
-def _safe_positions(broker) -> list[Position]:
+def _safe_positions(broker: object | None) -> list[Position]:
     """Try to fetch current positions, returning ``[]`` on any failure."""
     if broker is None or not hasattr(broker, "positions"):
         return []
@@ -576,7 +602,9 @@ def _safe_positions(broker) -> list[Position]:
     return list(positions_dict) if positions_dict else []
 
 
-def _positions_orders_for_account(broker, kind: str | None) -> tuple[list[Position], list[Order]]:
+def _positions_orders_for_account(
+    broker: object | None, kind: str | None
+) -> tuple[list[Position], list[Order]]:
     """按账号类型加载持仓/委托：仿真走 broker，实盘走 gateway."""
     if broker is not None and str(kind) == BrokerKind.SIMULATION.value:
         return _safe_positions(broker), _safe_orders(broker)
@@ -587,7 +615,7 @@ def _fetch_positions_orders_via_gateway(
     base_url: str = "",
     api_key: str = "",
     timeout: float = 5.0,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """直接通过 gateway JSON API 拉取持仓和委托.
 
     Issue #31 复盘 + 用户架构要求：让 /trade 页面成为「gateway htmx 渲染层」，
@@ -602,12 +630,12 @@ def _fetch_positions_orders_via_gateway(
     ``/api/trade/{positions,orders}`` 会正常返回 JSON（不再 500），本函数
     在 dev-stub / production 两种模式下表现完全一致。
     """
-    empty: tuple[list[dict], list[dict]] = ([], [])
+    empty: tuple[list[dict[str, Any]], list[dict[str, Any]]] = ([], [])
     if not base_url or not api_key:
         return empty
 
-    positions: list[dict] = []
-    orders: list[dict] = []
+    positions: list[dict[str, Any]] = []
+    orders: list[dict[str, Any]] = []
 
     positions = _gateway_json_collection(
         base_url, "/api/trade/positions", api_key, timeout, "positions"
@@ -633,7 +661,7 @@ def _resolve_positions_orders_from_settings() -> tuple[list[Position], list[Orde
     return positions, orders
 
 
-async def trade_positions_refresh(req):
+async def trade_positions_refresh(req: Request) -> Any:
     """Htmx 刷新按钮的 handler：仅返回 ``PositionTable`` 片段.
 
     Issue #29 复盘：原页面 ``hx_get="/trade/positions"`` 按钮没有对应路由，
@@ -643,7 +671,7 @@ async def trade_positions_refresh(req):
     Issue #31 + 用户架构要求：数据从 broker 包装层切到直接 gateway JSON API。
     """
     reg = _get_registry(req)
-    session = req.scope.get("session", {}) or {}
+    session = cast(SessionData, req.scope.get("session", {}) or {})
     account = _get_active_account(reg, session, req.query_params) if reg else None
     broker = None
     if reg and account:
@@ -655,7 +683,7 @@ async def trade_positions_refresh(req):
     return HTMLResponse(_to_xml(PositionTable(positions)))
 
 
-async def trade_orders_refresh(req):
+async def trade_orders_refresh(req: Request) -> Any:
     """Htmx 刷新按钮的 handler：仅返回 ``TodayOrdersTable`` 片段.
 
     Issue #29 复盘：原页面 ``hx_get="/trade/orders"`` 按钮没有对应路由。
@@ -663,7 +691,7 @@ async def trade_orders_refresh(req):
     Issue #31 + 用户架构要求：数据从 broker 包装层切到直接 gateway JSON API。
     """
     reg = _get_registry(req)
-    session = req.scope.get("session", {}) or {}
+    session = cast(SessionData, req.scope.get("session", {}) or {})
     account = _get_active_account(reg, session, req.query_params) if reg else None
     broker = None
     if reg and account:
@@ -675,11 +703,11 @@ async def trade_orders_refresh(req):
     return HTMLResponse(_to_xml(TodayOrdersTable(orders)))
 
 
-def _render_order_toast(message):
+def _render_order_toast(message: str) -> Any:
     return HTMLResponse(to_xml(_trade_toast(message)))
 
 
-def _submitted_order_response(broker, kind, order):
+def _submitted_order_response(broker: object | None, kind: str, order: ManualOrder) -> Any:
     try:
         positions, orders = _positions_orders_for_account(broker, kind)
     except Exception:
@@ -696,7 +724,9 @@ def _submitted_order_response(broker, kind, order):
     )
 
 
-def _gateway_json_collection(base_url, path, api_key, timeout, sink):
+def _gateway_json_collection(
+    base_url: str, path: str, api_key: str, timeout: float, sink: str
+) -> list[dict[str, Any]]:
     """Read one gateway JSON collection; protocol and transport failures return empty."""
     url = base_url.rstrip("/") + path
     req_obj = urllib.request.Request(
@@ -732,28 +762,29 @@ def _gateway_json_collection(base_url, path, api_key, timeout, sink):
         return []
     if not isinstance(data, list):
         return []
-    return data
+    return [item for item in data if isinstance(item, dict)]
 
 
-def _trade_capital(broker):
+def _trade_capital(broker: object | None) -> dict[str, float]:
     """Read account balances without allowing a failed gateway to break the page."""
-    total = cash = market_value = principal = 0
+    total = cash = market_value = principal = 0.0
     if broker:
         # Issue #29 复盘：每条 gateway 调用都包 try/except，
         # 避免网关 500 把整页渲染炸掉、留下空表让人摸不着头脑。
         # 资产/持仓/委托里任何一条失败都不应影响其它两条的展示。
         try:
-            if hasattr(broker, "asset") and broker.asset:
-                total = broker.asset.total
-                cash = broker.asset.cash
-                market_value = broker.asset.market_value
-                principal = broker.asset.principal
+            asset = getattr(broker, "asset", None)
+            if asset:
+                total = float(getattr(asset, "total", 0) or 0)
+                cash = float(getattr(asset, "cash", 0) or 0)
+                market_value = float(getattr(asset, "market_value", 0) or 0)
+                principal = float(getattr(asset, "principal", 0) or 0)
             elif hasattr(broker, "total_assets"):
                 # SimulationBroker 等没有 asset 属性
-                total = broker.total_assets
-                cash = broker.cash if hasattr(broker, "cash") else 0
+                total = float(getattr(broker, "total_assets", 0) or 0)
+                cash = float(getattr(broker, "cash", 0) or 0)
                 market_value = total - cash
-                principal = getattr(broker, "principal", 0)
+                principal = float(getattr(broker, "principal", 0) or 0)
         except Exception as e:
             logger.warning(f"获取资产信息失败: {e}")
     return {"total": total, "cash": cash, "market_value": market_value, "principal": principal}

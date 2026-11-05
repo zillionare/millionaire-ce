@@ -1,10 +1,15 @@
 """系统维护 - 股票列表模块"""
 
 import asyncio
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
     Div,
+    Span,
+    Td,
+    Tr,
 )
 from loguru import logger
 from monsterui.all import *
@@ -14,6 +19,7 @@ from monsterui.all import (
     Input,
     UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.data.models.stocks import stock_list
 from quantide.web.application import fast_app
@@ -25,7 +31,7 @@ from quantide.web.theme import PRIMARY_COLOR, AppTheme
 system_stocks_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _append_security_table_rows(data, rows):
+def _append_security_table_rows(data: Sequence[Mapping[Any, Any]], rows: list[Any]) -> None:
     """Append security table rows."""
     if data:
         for row in data:
@@ -58,10 +64,14 @@ def _append_security_table_rows(data, rows):
 
 
 def _build_stock_table(
-    data: list, page: int = 1, per_page: int = 20, total: int = 0, query: str = ""
-):
+    data: Sequence[Mapping[Any, Any]],
+    page: int = 1,
+    per_page: int = 20,
+    total: int = 0,
+    query: str = "",
+) -> Any:
     """构建股票列表表格"""
-    rows = []
+    rows: list[Any] = []
     _append_security_table_rows(data, rows)
 
     total_pages = max(1, (total + per_page - 1) // per_page) if total > 0 else 1
@@ -71,7 +81,7 @@ def _build_stock_table(
         else "暂无数据"
     )
 
-    def page_url(p, pp=per_page):
+    def page_url(p: int, pp: int = per_page) -> str:
         return f"/system/stocks/?page={p}&per_page={pp}&q={query}"
 
     return Div(
@@ -89,7 +99,7 @@ def _build_stock_table(
 
 
 @rt("/")
-async def index(req, page: int = 1, per_page: int = 20, q: str = ""):
+async def index(req: Request, page: int = 1, per_page: int = 20, q: str = "") -> Any:
     """股票列表页面"""
     query = q or req.query_params.get("q", "")
     page = int(req.query_params.get("page", page))
@@ -100,9 +110,11 @@ async def index(req, page: int = 1, per_page: int = 20, q: str = ""):
     try:
         if query:
             result_df = stock_list.fuzzy_search(query, id_only=False)
+            if isinstance(result_df, list):
+                raise TypeError("Expected stock search dataframe")
             total = len(result_df)
             if total > 0:
-                data = result_df.to_pandas().to_dict("records")
+                data = result_df.to_dict("records")
             else:
                 data = []
         else:
@@ -163,12 +175,12 @@ async def index(req, page: int = 1, per_page: int = 20, q: str = ""):
         cls="p-8",
     )
 
-    layout.main_block = page_content
+    layout.set_main_block(page_content)
     return layout.render(req)
 
 
 @rt("/sync", methods="post")
-async def sync_stocks():
+async def sync_stocks() -> Any:
     """同步股票列表数据"""
     try:
         await asyncio.to_thread(stock_list.update)
@@ -193,7 +205,7 @@ async def sync_stocks():
 
 
 @rt("/search")
-async def search(req, q: str = "", per_page: int = 20):
+async def search(req: Request, q: str = "", per_page: int = 20) -> Any:
     """HTMX 搜索 API，返回表格内容。
 
     用于防抖自动搜索，仅返回表格部分。
@@ -207,6 +219,8 @@ async def search(req, q: str = "", per_page: int = 20):
     try:
         if query:
             result_df = stock_list.fuzzy_search(query, id_only=False)
+            if isinstance(result_df, list):
+                raise TypeError("Expected stock search dataframe")
             total = len(result_df)
             if total > 0:
                 # 搜索结果分页

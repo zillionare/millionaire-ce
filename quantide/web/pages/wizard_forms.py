@@ -81,7 +81,7 @@ def _normalize_form_values(
 
 
 def _extract_form_updates(
-    source: dict[str, Any] | None,
+    source: Mapping[str, object] | None,
     aliases: Mapping[str, tuple[str, ...]],
 ) -> dict[str, Any]:
     if source is None:

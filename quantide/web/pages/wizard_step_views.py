@@ -5,7 +5,10 @@ from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
+    H3,
     Div,
+    Li,
+    Ol,
     Option,
     P,
     Script,
@@ -47,7 +50,7 @@ from quantide.web.pages.wizard_state import (
 )
 
 
-def Step1_Welcome():
+def Step1_Welcome() -> Any:
     """步骤1：欢迎页"""
     gateway_text = "配置实时行情数据源，按需选择一次 30 天演示"
     data_text = "配置数据源并检查账号权限；确认全部配置后再开始下载。"
@@ -91,7 +94,7 @@ def _check_password_strength(password: str) -> tuple[str, str]:
         return ("weak", "弱密码：建议使用字母大小写、数字、特殊符号组合")
 
 
-def Step3_Admin(state: dict | None = None):
+def Step3_Admin(state: dict[str, Any] | None = None) -> Any:
     """步骤3：管理员密码设置"""
     state = state or {}
     password = state.get(ADMIN_FORM_FIELDS["password"], "")
@@ -183,7 +186,7 @@ def Step3_Admin(state: dict | None = None):
     )
 
 
-def Step2_Runtime(state: dict | None = None):
+def Step2_Runtime(state: dict[str, Any] | None = None) -> Any:
     """步骤2：运行环境配置"""
     values = _runtime_form_state(state)
 
@@ -246,7 +249,7 @@ def Step2_Runtime(state: dict | None = None):
     )
 
 
-def Step4_Gateway(state: dict | None = None):
+def Step4_Gateway(state: dict[str, Any] | None = None) -> Any:
     """Realtime setup, retaining the shared pro-edition gateway form."""
     if not supports_live_trading():
         from quantide.web.pages.wizard_data_views import RealtimeSetup
@@ -359,7 +362,7 @@ def _render_download_range_info(years: int) -> Any:
     )
 
 
-def Step5_DataSetup(state: dict | None = None):
+def Step5_DataSetup(state: dict[str, Any] | None = None) -> Any:
     """Configure and check the historical source, now displayed as step four."""
     if dev_stubs_enabled():
         state = state or {}
@@ -489,7 +492,7 @@ def Step5_DataSetup(state: dict | None = None):
     )
 
 
-def Step6_Complete(state: dict | None = None):
+def Step6_Complete(state: dict[str, Any] | None = None) -> Any:
     """步骤6：完成页面"""
     state = state or {}
     if not state.get("init_completed") and not dev_stubs_enabled():
@@ -520,7 +523,7 @@ def Step6_Complete(state: dict | None = None):
     )
 
 
-def _stub_gateway_step():
+def _stub_gateway_step() -> Any:
     """Render connection facts from the locally running demonstration gateway."""
     runtime = ensure_dev_stubs_started()
     gateway_url = getattr(runtime, "gateway_base_url", "") if runtime is not None else ""
@@ -577,7 +580,7 @@ def _stub_gateway_step():
     )
 
 
-def _access_report_view():
+def _access_report_view() -> Any:
     from quantide.web.pages.wizard_data_views import AccessReport
 
     return Div(

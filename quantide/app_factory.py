@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from fasthtml import core as _fasthtml_core
 from fasthtml.common import Mount, Route
+from fasthtml.core import FastHTML
 from loguru import logger
 
 # fasthtml 默认注入 htmx@2.0.7；AppTheme.headers() 又显式注入了 htmx@1.9.12。
@@ -20,6 +22,7 @@ from loguru import logger
 _fasthtml_core.htmxsrc = _fasthtml_core.Script(src="https://unpkg.com/htmx.org@1.9.12")
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
@@ -99,6 +102,7 @@ from quantide.web.pages.trade_main import (
     trade_orders_refresh,
     trade_positions_refresh,
 )
+from quantide.web.session_data import SessionData
 from quantide.web.theme import AppTheme
 
 
@@ -120,7 +124,7 @@ def _initialize_app_database() -> Path:
     return db_path
 
 
-def _health_response(request):
+def _health_response(request: Request) -> JSONResponse:
     failed = bool(getattr(request.app.state, "startup_error", ""))
     return JSONResponse(
         {"status": "degraded" if failed else "ok", "pid": os.getpid(), "edition": "millionaire-ce"},
@@ -128,7 +132,7 @@ def _health_response(request):
     )
 
 
-def _bind_session_key(app, secret, visited=None):
+def _bind_session_key(app: FastHTML, secret: str, visited: set[int] | None = None) -> None:
     """Use the root profile's session key across its mounted page applications."""
     visited = set() if visited is None else visited
     if id(app) in visited:
@@ -144,7 +148,7 @@ def _bind_session_key(app, secret, visited=None):
             _bind_session_key(route.app, secret, visited)
 
 
-def _attach_runtime_to_app_states(runtime) -> None:
+def _attach_runtime_to_app_states(runtime: RuntimeBootstrap) -> None:
     """Attach the effective runtime to all mounted app states."""
     for mounted_app in (
         broker_api_app,
@@ -171,7 +175,7 @@ def _attach_runtime_to_app_states(runtime) -> None:
         mounted_app.state.runtime = runtime
 
 
-def _attach_root_app_to_app_states(root_app) -> None:
+def _attach_root_app_to_app_states(root_app: FastHTML) -> None:
     """Expose the root app to mounted sub-apps for post-init runtime refresh."""
     for mounted_app in (
         broker_api_app,
@@ -198,7 +202,7 @@ def _attach_root_app_to_app_states(root_app) -> None:
         mounted_app.state.root_app = root_app
 
 
-def _redirect_preserving_query(req, target: str) -> RedirectResponse:
+def _redirect_preserving_query(req: Request, target: str) -> RedirectResponse:
     """重定向并保留 query string（避免丢失 account_id）。"""
     query = getattr(getattr(req, "url", None), "query", "") or ""
     destination = f"{target}?{query}" if query else target
@@ -208,7 +212,7 @@ def _redirect_preserving_query(req, target: str) -> RedirectResponse:
 def create_app(
     app_config_dir: str | Path | None = None,
     enforce_single_instance: bool = True,
-):
+) -> FastHTML:
     """Create a Quantide web application.
 
     Args:
@@ -534,7 +538,7 @@ def create_app(
     _attach_runtime_to_app_states(runtime)
 
     @rt("/trade/set-active", methods=["POST"])
-    async def trade_set_active(req, session):
+    async def trade_set_active(req: Request, session: SessionData) -> Any:
         return set_active_account(req)
 
     return app

@@ -7,6 +7,7 @@ from fasthtml.common import (
     Div,
 )
 from monsterui.all import *
+from starlette.requests import Request
 
 from quantide.config.features import (
     live_trading_unavailable_message,
@@ -17,7 +18,7 @@ from quantide.service.discovery import strategy_loader
 from quantide.service.strategy_runtime import strategy_runtime_manager
 
 
-def _get_runtime(req):
+def _get_runtime(req: Request) -> Any:
     if req is None:
         return None
     app = getattr(req, "app", None)
@@ -25,21 +26,21 @@ def _get_runtime(req):
     return getattr(state, "runtime", None)
 
 
-def _get_registry(req):
+def _get_registry(req: Request) -> Any:
     runtime = _get_runtime(req)
     if runtime is None:
         return None
     return runtime.registry
 
 
-def _get_market_data(req):
+def _get_market_data(req: Request) -> Any:
     runtime = _get_runtime(req)
     if runtime is None:
         return None
     return runtime.market_data
 
 
-def _get_paper_deploy_availability(req) -> tuple[bool, str]:
+def _get_paper_deploy_availability(req: Request) -> tuple[bool, str]:
     """返回转入仿真的可用性。"""
     runtime = _get_runtime(req)
     if runtime is None:
@@ -49,7 +50,7 @@ def _get_paper_deploy_availability(req) -> tuple[bool, str]:
     return True, ""
 
 
-def _get_live_deploy_availability(req) -> tuple[bool, str]:
+def _get_live_deploy_availability(req: Request) -> tuple[bool, str]:
     """返回转入实盘的可用性。"""
     if not supports_live_trading():
         return False, live_trading_unavailable_message()
@@ -61,7 +62,7 @@ def _get_live_deploy_availability(req) -> tuple[bool, str]:
     return True, ""
 
 
-def _get_backtest_deploy_capabilities(req) -> dict[str, Any]:
+def _get_backtest_deploy_capabilities(req: Request) -> dict[str, Any]:
     """返回回测投放按钮的可用性上下文。"""
     paper_available, paper_unavailable_reason = _get_paper_deploy_availability(req)
     live_available, live_unavailable_reason = _get_live_deploy_availability(req)
@@ -73,7 +74,7 @@ def _get_backtest_deploy_capabilities(req) -> dict[str, Any]:
     }
 
 
-def _get_live_accounts(req) -> list[dict[str, Any]]:
+def _get_live_accounts(req: Request) -> list[dict[str, Any]]:
     live_available, _ = _get_live_deploy_availability(req)
     if not live_available:
         return []

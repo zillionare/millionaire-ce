@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from fasthtml.common import *
+from fasthtml.common import (
+    H2,
+    A,
+    Button,
+    Div,
+    Form,
+    Script,
+    Span,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
+    Tr,
+    to_xml,
+)
+from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 
 from quantide.service.strategy_tracking import tracking_store
@@ -17,7 +35,12 @@ from quantide.web.theme import AppTheme
 tracking_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _append_tracking_table_rows(actual, dates, shadow, table_rows):
+def _append_tracking_table_rows(
+    actual: Mapping[str, float],
+    dates: Sequence[str],
+    shadow: Mapping[str, float],
+    table_rows: list[Any],
+) -> None:
     """Append tracking table rows."""
     for day in dates:
         table_rows.append(
@@ -49,7 +72,7 @@ def _drawdown(values: list[float]) -> float:
     return worst
 
 
-def tracking_page(req):
+def tracking_page(req: Request) -> Any:
     portfolio_id = str(req.path_params.get("portfolio_id") or "")
     runs = [run for run in tracking_store.list_runs() if run.get("portfolio_id") == portfolio_id]
     run = runs[0] if runs else None
@@ -64,7 +87,7 @@ def tracking_page(req):
 
     chart_script = _tracking_chart(portfolio_id, series)
 
-    table_rows = []
+    table_rows: list[Any] = []
     _append_tracking_table_rows(series.actual, series.dates, series.shadow, table_rows)
     if not table_rows:
         table_rows.append(
@@ -154,11 +177,11 @@ def tracking_page(req):
         ),
         cls="mx-auto w-full max-w-[1200px] p-6",
     )
-    layout.main_block = content
+    layout.set_main_block(content)
     return HTMLResponse(to_xml(layout.render()))
 
 
-async def toggle_tracking(req):
+async def toggle_tracking(req: Request) -> Any:
     """切换 dry-run 开关；模型维护任务不受影响。"""
     portfolio_id = str(req.path_params.get("portfolio_id") or "")
     runs = [run for run in tracking_store.list_runs() if run.get("portfolio_id") == portfolio_id]
@@ -176,15 +199,15 @@ __all__ = ["tracking_app", "tracking_page", "toggle_tracking", "rt"]
 
 @dataclass
 class _TrackingSeries:
-    shadow: dict
-    actual: dict
-    dates: list
-    shadow_values: list
-    actual_values: list
-    diffs: list
+    shadow: dict[str, float]
+    actual: dict[str, float]
+    dates: list[str]
+    shadow_values: list[float | None]
+    actual_values: list[float | None]
+    diffs: list[float]
 
 
-def _tracking_series(rows):
+def _tracking_series(rows: list[dict[str, Any]]) -> _TrackingSeries:
     """Align actual and shadow equity on the union of their observation dates."""
     shadow = _series(rows, "dry_run")
     actual = _series(rows, "actual")
@@ -199,7 +222,7 @@ def _tracking_series(rows):
     return _TrackingSeries(shadow, actual, dates, shadow_values, actual_values, diffs)
 
 
-def _tracking_chart(portfolio_id, series):
+def _tracking_chart(portfolio_id: str, series: _TrackingSeries) -> Any:
     """Render the two aligned account-equity series."""
     chart_id = f"tracking_chart_{portfolio_id}"
     chart_script = Script(
@@ -228,5 +251,5 @@ def _tracking_chart(portfolio_id, series):
     return chart_script
 
 
-def _tracking_drawdown(values):
+def _tracking_drawdown(values: Sequence[float | None]) -> str:
     return f"{_drawdown([value for value in values if value is not None]) * 100:.2f}"

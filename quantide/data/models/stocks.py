@@ -1,6 +1,7 @@
 import datetime
 import random
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import polars as pl
@@ -105,7 +106,7 @@ class StockList:
         if isinstance(list_date, datetime.datetime):
             list_date = list_date.date()
 
-        return max(0, (date - list_date).days)
+        return max(0, (date - cast(datetime.date, list_date)).days)
 
     def get_delist_date(self, asset: str) -> datetime.date | None:
         """获取股票的退市日期
@@ -115,7 +116,9 @@ class StockList:
         Returns:
             datetime.date: 退市日期
         """
-        return self.data.filter(pl.col("asset") == asset).item(0, "delist_date")
+        return cast(
+            datetime.date | None, self.data.filter(pl.col("asset") == asset).item(0, "delist_date")
+        )
 
     def fuzzy_search(self, query: str, id_only: bool = True) -> pd.DataFrame | list[str]:
         """根据输入模式进行模糊搜索。
@@ -174,7 +177,7 @@ class StockList:
         Returns:
             str: 股票名称
         """
-        return self.data.filter(pl.col("asset") == asset).item(0, "name")
+        return cast(str, self.data.filter(pl.col("asset") == asset).item(0, "name"))
 
     def get_pinyin(self, asset: str) -> str:
         """获取股票拼音
@@ -184,13 +187,15 @@ class StockList:
         Returns:
             str: 股票拼音
         """
-        return self.data.filter(pl.col("asset") == asset).item(0, "pinyin")
+        return cast(str, self.data.filter(pl.col("asset") == asset).item(0, "pinyin"))
 
     def is_st(self, asset: str | list[str], date: datetime.date) -> bool:
         """在指定日期个股是否为 st。"""
         from quantide.data.models.daily_bars import daily_bars
 
-        record = daily_bars.get_bars_in_range(date, date, asset)
+        record = daily_bars.get_bars_in_range(
+            date, date, [asset] if isinstance(asset, str) else asset
+        )
         if len(record):
             return bool(record.item(0, "is_st"))
 

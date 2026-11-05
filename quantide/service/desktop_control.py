@@ -1,16 +1,23 @@
 """Small foreground controller, independent of the web service's lifetime."""
 
+from __future__ import annotations
+
 import ctypes
 import os
 import subprocess
 import sys
 import threading
 import webbrowser
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import tkinter as tk
 
 from quantide.config.paths import get_app_config_dir
 
 
-def _controller_buttons(window, action):
+def _controller_buttons(window: tk.Tk, action: Callable[[str], None]) -> None:
     """Build service actions and schedule controller status refreshes."""
     import tkinter as tk
     from tkinter import messagebox
@@ -18,9 +25,11 @@ def _controller_buttons(window, action):
     controls = tk.Frame(window)
     controls.pack(pady=8)
     for title, command in (("启动", "start"), ("停止", "stop"), ("状态", "status")):
-        tk.Button(controls, text=title, command=lambda name=command: action(name)).pack(
-            side="left", padx=5
-        )
+
+        def run_action(name: str = command) -> None:
+            action(name)
+
+        tk.Button(controls, text=title, command=run_action).pack(side="left", padx=5)
     from quantide.config.server_address import controller_url
 
     tk.Button(window, text="打开网页界面", command=lambda: webbrowser.open(controller_url())).pack(
@@ -40,7 +49,7 @@ def _controller_buttons(window, action):
     ).pack()
 
 
-def create_controller():
+def create_controller() -> tk.Tk:
     """Build the native controls without transferring service process ownership."""
     import tkinter as tk
 
@@ -51,7 +60,7 @@ def create_controller():
     action_lock = threading.Lock()
     tk.Label(window, textvariable=status, wraplength=410).pack(pady=18)
 
-    def action(command):
+    def action(command: str) -> None:
         def work() -> None:
             with action_lock:
                 try:
@@ -81,7 +90,7 @@ def create_controller():
     return window
 
 
-def main(*, install=False, uninstall=False, system=False):
+def main(*, install: bool = False, uninstall: bool = False, system: bool = False) -> int:
     """Open service controls; closing this window leaves the background service running."""
     if sys.platform == "win32" and not (install or uninstall or system):
         from quantide.service.host_service import install_root

@@ -6,13 +6,16 @@
 
 import datetime
 import math
+from collections.abc import Collection, Mapping
+from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
-    Any,
+    H2,
     Div,
     P,
     Span,
+    Td,
     Thead,
     Tr,
 )
@@ -28,7 +31,9 @@ from monsterui.all import (
     Table,
     Tbody,
     Th,
+    UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.factors import FEATURE_COLS, FEATURE_GROUPS
 from quantide.factors.alphatest import (
@@ -49,10 +54,10 @@ DEFAULT_HOLDINGS = (1, 3, 5)
 HOLDING_CHOICES = (1, 2, 3, 5, 10, 20)
 
 #: 台账结果缓存（键：区间 + 持有期 + 因子集）
-_LEDGER_CACHE: dict[tuple, list[SingleFactorResult]] = {}
+_LEDGER_CACHE: dict[tuple[object, ...], list[SingleFactorResult]] = {}
 
 
-def _append_annual_result_cells(base, cells):
+def _append_annual_result_cells(base: SingleFactorResult, cells: list[Any]) -> None:
     """Append annual result cells."""
     for year in (2023, 2024, 2025, 2026):
         summary = base.by_year.get(year)
@@ -235,7 +240,7 @@ def _build_form(
 
 
 @rt("/")
-async def index(req):
+async def index(req: Request) -> Any:
     """因子台账页面。"""
     query = req.query_params
     start = query.get("start") or DEFAULT_START
@@ -288,11 +293,15 @@ async def index(req):
         cls="p-8",
     )
 
-    layout.main_block = result_block
+    layout.set_main_block(result_block)
     return layout.render(req)
 
 
-def _factor_result_row(factor, by_factor, holdings):
+def _factor_result_row(
+    factor: str,
+    by_factor: Mapping[str, dict[int, SingleFactorResult]],
+    holdings: Collection[int],
+) -> Any:
     """Render the IC and spread summaries for a single factor."""
     per_holding = by_factor.get(factor) or {}
     if not per_holding:
@@ -313,7 +322,7 @@ def _factor_result_row(factor, by_factor, holdings):
             )
         )
     base = per_holding.get(3) or next(iter(per_holding.values()))
-    spread = ""
+    spread: float | str = ""
     buckets = {item.bucket: item.mean_forward for item in base.deciles}
     if all(index in buckets and math.isfinite(buckets[index]) for index in (1, 10)):
         spread = (buckets[1] - buckets[10]) * 100

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any
+
+import polars as pl
+
 from quantide.core.enums import OrderSide, OrderStatus
 from quantide.core.order_values import coerce_order_status
 from quantide.web.components.asset_label import resolve_asset_name
@@ -21,16 +26,16 @@ _STATUS_LABELS = {
 }
 
 
-def coerce_status(value) -> OrderStatus:
+def coerce_status(value: object) -> OrderStatus:
     return coerce_order_status(value)
 
 
-def status_label(value) -> str:
+def status_label(value: object) -> str:
     """返回中文委托状态。"""
     return _STATUS_LABELS.get(coerce_status(value), "未知")
 
 
-def side_label(value) -> str:
+def side_label(value: object) -> str:
     """返回中文买卖方向。"""
     if isinstance(value, OrderSide):
         return "买入" if value == OrderSide.BUY else ("卖出" if value == OrderSide.SELL else "未知")
@@ -52,7 +57,7 @@ def display_name(asset: str, fallback: str = "") -> str:
         return asset
 
 
-def history_date_range(query_params):
+def history_date_range(query_params: Mapping[str, str]) -> tuple[str, str]:
     """Default history filters to the most recent thirty exchange-local days."""
     import datetime
 
@@ -65,7 +70,12 @@ def history_date_range(query_params):
     )
 
 
-def history_rows(query, account_id, start_date, end_date):
+def history_rows(
+    query: Callable[..., pl.DataFrame],
+    account_id: str,
+    start_date: str,
+    end_date: str,
+) -> Iterator[dict[str, Any]]:
     """Query one account history using a consistently parsed date range."""
     import datetime
 
@@ -77,7 +87,7 @@ def history_rows(query, account_id, start_date, end_date):
     return frame.iter_rows(named=True)
 
 
-def history_trade_identity(row):
+def history_trade_identity(row: Mapping[str, Any]) -> dict[str, object]:
     """Resolve shared order/trade display fields once."""
     asset = str(row.get("asset", "") or "")
     return {

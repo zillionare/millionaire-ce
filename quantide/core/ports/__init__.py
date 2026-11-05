@@ -10,6 +10,7 @@ from quantide.core.ports.broker import (
     OrderStyle,
     OrderView,
     PositionView,
+    StrategyBroker,
 )
 from quantide.core.ports.clock import ClockPort
 from quantide.core.ports.data_fetcher import DataFetcherPort, HistoricalDataFetcherPort
@@ -25,6 +26,7 @@ __all__ = [
     "ExecutionResult",
     "CancelAck",
     "BrokerPort",
+    "StrategyBroker",
     "DataFetcherPort",
     "HistoricalDataFetcherPort",
     "MarketDataPort",

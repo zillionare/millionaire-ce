@@ -1,6 +1,7 @@
 """Strategy metrics."""
 
 import datetime
+from collections.abc import Mapping
 from typing import Any
 
 import arrow
@@ -23,7 +24,12 @@ from quantide.web.pages.strategy_routes import (
 )
 
 
-def _append_benchmark_series(benchmark_df, total_series, date_axis, benchmark_series):
+def _append_benchmark_series(
+    benchmark_df: pl.DataFrame,
+    total_series: list[float | None],
+    date_axis: list[str],
+    benchmark_series: list[float | None],
+) -> list[float | None]:
     """Align benchmark equity with the portfolio date axis."""
     if not benchmark_df.is_empty():
         benchmark_df = benchmark_df.sort("date")
@@ -50,8 +56,13 @@ def _append_benchmark_series(benchmark_df, total_series, date_axis, benchmark_se
 
 
 def _append_equity_after_history(
-    daily_pnl_series, dt, last_date, prev_total, total_by_date, total_series
-):
+    daily_pnl_series: list[float | None],
+    dt: str,
+    last_date: str | None,
+    prev_total: float | None,
+    total_by_date: Mapping[str, float | None],
+    total_series: list[float | None],
+) -> float | None:
     """Append equity after history."""
     if last_date is not None and dt > last_date:
         total_series.append(None)
@@ -91,7 +102,7 @@ def _build_date_axis(portfolio_id: str) -> list[str]:
     return [arrow.get(dt).format("YYYY-MM-DD") for dt in dates]
 
 
-def _build_series_payload(portfolio_id: str, date_axis: list[str]) -> dict:
+def _build_series_payload(portfolio_id: str, date_axis: list[str]) -> dict[str, Any]:
     """构建曲线及日度序列。
 
     Args:
@@ -120,8 +131,8 @@ def _build_series_payload(portfolio_id: str, date_axis: list[str]) -> dict:
 
     trade_count_by_date = _trade_counts_by_date(portfolio_id)
 
-    total_series = []
-    daily_pnl_series = []
+    total_series: list[float | None] = []
+    daily_pnl_series: list[float | None] = []
     trade_count_series = []
     prev_total = None
     for dt in date_axis:
@@ -130,7 +141,7 @@ def _build_series_payload(portfolio_id: str, date_axis: list[str]) -> dict:
         )
         trade_count_series.append(trade_count_by_date.get(dt, 0))
 
-    benchmark_series = [None for _ in date_axis]
+    benchmark_series: list[float | None] = [None for _ in date_axis]
     try:
         start_date = arrow.get(date_axis[0]).date()
         end_date = arrow.get(date_axis[-1]).date()
@@ -223,7 +234,7 @@ METRIC_ALIASES = {
 }
 
 
-def _build_metrics_payload(portfolio_id: str) -> dict:
+def _build_metrics_payload(portfolio_id: str) -> dict[str, Any]:
     """构建指标数据。
 
     Args:
@@ -237,7 +248,7 @@ def _build_metrics_payload(portfolio_id: str) -> dict:
     return {key: _metric_value(stats_dict, *aliases) for key, aliases in METRIC_ALIASES.items()}
 
 
-def _is_stale_backtest_run(portfolio_id: str, portfolio: Any) -> bool:
+def _is_stale_backtest_run(portfolio_id: str, portfolio: object | None) -> bool:
     """判断"运行中"是否已失效。
 
     回测总是跑在本进程内，进程内没有运行记录时不可能还在运行；若组合的
@@ -293,7 +304,7 @@ def _resolve_backtest_status(portfolio_id: str) -> tuple[str, str]:
     return ("running" if portfolio.status else "finished"), ""
 
 
-def _build_trade_rows(portfolio_id: str, limit: int = 200) -> list[dict]:
+def _build_trade_rows(portfolio_id: str, limit: int = 200) -> list[dict[str, Any]]:
     """构建交易明细行。
 
     Args:
@@ -332,7 +343,7 @@ def _build_trade_rows(portfolio_id: str, limit: int = 200) -> list[dict]:
     return rows
 
 
-def _build_daily_positions(portfolio_id: str) -> list[dict]:
+def _build_daily_positions(portfolio_id: str) -> list[dict[str, Any]]:
     """构建每日持仓明细。
 
     Args:
@@ -361,7 +372,7 @@ def _build_daily_positions(portfolio_id: str) -> list[dict]:
     return rows
 
 
-def _build_daily_summary(portfolio_id: str) -> list[dict]:
+def _build_daily_summary(portfolio_id: str) -> list[dict[str, Any]]:
     """构建每日收益概览。
 
     Args:
@@ -379,7 +390,7 @@ def _build_daily_summary(portfolio_id: str) -> list[dict]:
     for row in assets_df.iter_rows(named=True):
         total = float(row.get("total") or 0)
         daily_pnl = 0.0 if prev_total is None else total - prev_total
-        daily_return = 0.0 if prev_total in (None, 0) else daily_pnl / prev_total
+        daily_return = 0.0 if prev_total is None or prev_total == 0 else daily_pnl / prev_total
         rows.append(
             {
                 "dt": str(row.get("dt", "")),
@@ -394,7 +405,7 @@ def _build_daily_summary(portfolio_id: str) -> list[dict]:
     return rows
 
 
-def _trade_counts_by_date(portfolio_id):
+def _trade_counts_by_date(portfolio_id: str) -> dict[str, int]:
     """Count committed fills by date for the report timeline."""
     trade_count_by_date: dict[str, int] = {}
     trades_df = db.trades_all(portfolio_id)

@@ -1,5 +1,7 @@
 """Position and order tables shared by trading views."""
 
+from typing import Any
+
 from fasthtml.common import *
 from fasthtml.common import (
     A,
@@ -23,7 +25,7 @@ from quantide.data.models import Order, Position
 from quantide.web.components.asset_label import resolve_asset_name
 
 
-def _position_row(p):
+def _position_row(p: Any) -> Any:
     """Render one row with its display values and available actions."""
     pnl_pct = (p.profit / (p.mv - p.profit) * 100) if (p.mv - p.profit) != 0 else 0
     current_price = p.mv / p.shares if p.shares > 0 else 0
@@ -57,7 +59,7 @@ def _position_row(p):
     )
 
 
-def PositionTable(positions: list[Position], hx_swap_oob: bool = False):
+def PositionTable(positions: list[Position], hx_swap_oob: bool = False) -> Any:
     """持仓明细表格"""
     headers = [
         "证券代码",
@@ -72,7 +74,7 @@ def PositionTable(positions: list[Position], hx_swap_oob: bool = False):
         "操作",
     ]
 
-    rows = []
+    rows: list[Any] = []
     if positions:
         rows.extend(_position_row(p) for p in positions)
     else:
@@ -106,7 +108,7 @@ def PositionTable(positions: list[Position], hx_swap_oob: bool = False):
     )
 
 
-def _today_order_row(o):
+def _today_order_row(o: Any) -> Any:
     """Render one row with its display values and available actions."""
     if o.side == OrderSide.BUY:
         side_color = "text-red-600"
@@ -162,11 +164,11 @@ def _today_order_row(o):
     )
 
 
-def TodayOrdersTable(orders: list[Order], hx_swap_oob: bool = False):
+def TodayOrdersTable(orders: list[Order], hx_swap_oob: bool = False) -> Any:
     """当日委托表格"""
     headers = ["时间", "代码", "名称", "方向", "委托价", "委托量", "成交量", "状态", "操作"]
 
-    rows = []
+    rows: list[Any] = []
     if orders:
         rows.extend(_today_order_row(o) for o in orders)
     else:
@@ -211,7 +213,7 @@ DEFAULT_POSITIONS_TAB = "positions"
 POSITIONS_TABS_PANEL_ID = "positions-orders-tab-panel"
 
 
-def _normalize_positions_tab(value) -> str:
+def _normalize_positions_tab(value: Any) -> str:
     """规范化持仓/委托 tab 参数.
 
     Args:
@@ -227,7 +229,7 @@ def _normalize_positions_tab(value) -> str:
     return key if key in POSITIONS_TABS else DEFAULT_POSITIONS_TAB
 
 
-def PositionsOrdersTabs(positions: list[Position], orders: list[Order], active_tab: str):
+def PositionsOrdersTabs(positions: list[Position], orders: list[Order], active_tab: str) -> Any:
     """持仓/委托 tab 容器 (Issue #30, #41).
 
     服务端只渲染当前 tab 对应内容；tab 链接走 HTMX 局部刷新（参

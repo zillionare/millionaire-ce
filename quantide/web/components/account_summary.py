@@ -1,13 +1,19 @@
 """Account total cards shared by the dashboard and live account page."""
 
+from collections.abc import Mapping
+from typing import Any
+
 from fasthtml.common import *
 from fasthtml.common import (
     Div,
+    P,
 )
 from monsterui.all import *
 
+from quantide.data.models import Asset
 
-def AssetSummary(asset_overview: dict | None = None, **kwargs):
+
+def AssetSummary(asset_overview: dict[str, Any] | None = None, **kwargs: Any) -> Any:
     """Render totals with a single formatting rule and consistent profit colours."""
     values = asset_overview or {}
     pnl = values.get("pnl") or 0
@@ -31,7 +37,7 @@ def AssetSummary(asset_overview: dict | None = None, **kwargs):
     )
 
 
-def _account_stat(key, label, values, colour):
+def _account_stat(key: str, label: str, values: Mapping[str, Any], colour: str) -> Any:
     value = values.get(key) or 0
     text = f"{value * 100:.2f}%" if key == "pnl_pct" else f"{value:,.2f}"
     colour = colour if key in {"pnl", "pnl_pct"} else "text-gray-900"
@@ -42,7 +48,7 @@ def _account_stat(key, label, values, colour):
     )
 
 
-def build_asset_overview(asset) -> dict:
+def build_asset_overview(asset: Asset) -> dict[str, Any]:
     pnl = asset.total - asset.principal
     ppnl = pnl / asset.principal if asset.principal else 0.0
     return {

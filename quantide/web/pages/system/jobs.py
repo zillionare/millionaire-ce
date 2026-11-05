@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from apscheduler.triggers.cron import CronTrigger
 from fasthtml.common import *
 from fasthtml.common import (
+    H2,
     A,
     Div,
     P,
@@ -31,7 +34,9 @@ from monsterui.all import (
     Tbody,
     Td,
     Th,
+    UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.core.scheduler import scheduler
 from quantide.data.sqlite import db
@@ -45,7 +50,7 @@ system_jobs_app, rt = fast_app(hdrs=AppTheme.headers())
 
 # ========== 预置任务定义 ==========
 
-PREDEFINED_JOBS = {
+PREDEFINED_JOBS: dict[str, dict[str, Any]] = {
     "daily_bars_sync": {
         "name": "每日数据维护",
         "cron": "35 17,18 * * 1-5",  # 收盘后 17:35/18:35，周一到周五
@@ -102,7 +107,7 @@ class JobHistoryRecord:
     duration_ms: int = 0
 
     @classmethod
-    def from_dict(cls, data: dict) -> JobHistoryRecord:
+    def from_dict(cls, data: dict[str, Any]) -> JobHistoryRecord:
         """从字典创建实例"""
         executed_at = data.get("executed_at", datetime.datetime.now())
         if isinstance(executed_at, str):
@@ -117,7 +122,7 @@ class JobHistoryRecord:
             duration_ms=data.get("duration_ms", 0),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "id": self.id,
@@ -269,7 +274,7 @@ def _run_calendar_sync() -> None:
         _save_job_history("calendar_sync", "交易日历同步", "error", str(e))
 
 
-def _run_snapshot(job_id, label, operation):
+def _run_snapshot(job_id: str, label: str, operation: Callable[[], str]) -> None:
     try:
         message = operation()
         _save_job_history(job_id, label, "success", message)
@@ -401,7 +406,7 @@ def _run_job_now(job_id: str) -> None:
             raise
 
 
-def _get_job_status(job_id: str) -> dict:
+def _get_job_status(job_id: str) -> dict[str, Any]:
     """获取任务状态"""
     job = scheduler.scheduler.get_job(job_id)
     job_def = PREDEFINED_JOBS.get(job_id, {})
@@ -495,7 +500,7 @@ def _build_history_table(history: list[JobHistoryRecord]) -> Table:
     )
 
 
-def _build_jobs_table(jobs_status: list[dict]) -> Table:
+def _build_jobs_table(jobs_status: list[dict[str, Any]]) -> Table:
     """构建任务列表表格"""
     rows = []
     for job in jobs_status:
@@ -598,7 +603,7 @@ def _build_detail_panel(job_id: str) -> Div:
 
 
 @rt("/")
-async def index(req):
+async def index(req: Request) -> Any:
     """任务列表页面"""
     _init_scheduler_jobs()
 
@@ -630,12 +635,12 @@ async def index(req):
         cls="p-8",
     )
 
-    layout.main_block = page_content
+    layout.set_main_block(page_content)
     return layout.render(req)
 
 
 @rt("/toggle/{job_id}")
-async def toggle_job(job_id: str):
+async def toggle_job(job_id: str) -> Any:
     """启用/禁用任务"""
     job_def = PREDEFINED_JOBS.get(job_id)
     if not job_def:
@@ -649,7 +654,7 @@ async def toggle_job(job_id: str):
 
 
 @rt("/run/{job_id}")
-async def run_job(job_id: str):
+async def run_job(job_id: str) -> Any:
     """手动执行任务"""
     job_def = PREDEFINED_JOBS.get(job_id)
     if not job_def:
@@ -665,7 +670,7 @@ async def run_job(job_id: str):
 
 
 @rt("/detail/{job_id}")
-async def job_detail(job_id: str):
+async def job_detail(job_id: str) -> Any:
     """任务详情（HTMX 局部更新）"""
     job_def = PREDEFINED_JOBS.get(job_id)
     if not job_def:

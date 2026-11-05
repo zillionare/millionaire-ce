@@ -16,7 +16,7 @@ import hashlib
 import json
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, overload
 
 import pandas as pd
 import polars as pl
@@ -510,6 +510,37 @@ class ParquetStorage(PartitionOperations):
         """获取数据最后更新时间"""
         return self._last_update_time
 
+    @overload
+    def get(
+        self,
+        assets: list[str] | str | None = None,
+        start: datetime.date | None = None,
+        end: datetime.date | None = None,
+        cols: list[str] | None = None,
+        eager_mode: Literal[True] = True,
+    ) -> pl.DataFrame: ...
+
+    @overload
+    def get(
+        self,
+        assets: list[str] | str | None = None,
+        start: datetime.date | None = None,
+        end: datetime.date | None = None,
+        cols: list[str] | None = None,
+        *,
+        eager_mode: Literal[False],
+    ) -> pl.LazyFrame: ...
+
+    @overload
+    def get(
+        self,
+        assets: list[str] | str | None = None,
+        start: datetime.date | None = None,
+        end: datetime.date | None = None,
+        cols: list[str] | None = None,
+        eager_mode: bool = True,
+    ) -> pl.LazyFrame | pl.DataFrame: ...
+
     def get(
         self,
         assets: list[str] | str | None = None,
@@ -562,6 +593,19 @@ class ParquetStorage(PartitionOperations):
             return lf.collect()
         else:
             return lf
+
+    @overload
+    def get_by_date(
+        self, date: datetime.date, eager_mode: Literal[True] = True
+    ) -> pl.DataFrame: ...
+
+    @overload
+    def get_by_date(self, date: datetime.date, *, eager_mode: Literal[False]) -> pl.LazyFrame: ...
+
+    @overload
+    def get_by_date(
+        self, date: datetime.date, eager_mode: bool = True
+    ) -> pl.DataFrame | pl.LazyFrame: ...
 
     def get_by_date(
         self, date: datetime.date, eager_mode: bool = True

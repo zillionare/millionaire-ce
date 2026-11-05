@@ -1,12 +1,16 @@
 import datetime
+from collections.abc import Callable
 from pathlib import Path
+from typing import Literal, overload
 
+import pandas as pd
 import polars as pl
 from loguru import logger
 
 from quantide.config.settings import get_timezone
 from quantide.core.enums import FrameType
 from quantide.core.ports import HistoricalDataFetcherPort
+from quantide.core.ports.data_fetcher import ErrorRecord
 from quantide.core.singleton import singleton
 from quantide.data.fetchers.registry import get_data_fetcher
 from quantide.data.helper import hfq_adjustment, qfq_adjustment
@@ -31,7 +35,6 @@ class DailyBars(ParquetStorage):
             calendar=Calendar(),
             fetch_data_func=None,
         )
-        self._calendar: Calendar | None = None
         self._data_fetcher: HistoricalDataFetcherPort | None = None
         self._initialized = False
 
@@ -97,10 +100,11 @@ class DailyBars(ParquetStorage):
     def _fetch_bars_ext(
         self,
         dates: list[datetime.date] | datetime.date,
-        phase_callback=None,
-    ):
+        phase_callback: Callable[[str], None] | None = None,
+    ) -> tuple[pd.DataFrame, ErrorRecord]:
         from quantide.data.coverage import require_date_coverage
 
+        assert self._data_fetcher is not None
         frame, errors = self._data_fetcher.fetch_bars_ext(dates, phase_callback=phase_callback)
         if errors:
             raise RuntimeError(f"日线源同步失败: {errors}")
@@ -108,7 +112,9 @@ class DailyBars(ParquetStorage):
         require_date_coverage(frame, requested, "daily_bars")
         return frame, errors
 
-    def rec_counts_per_date(self, start=None, end=None):
+    def rec_counts_per_date(
+        self, start: datetime.date | None = None, end: datetime.date | None = None
+    ) -> dict[datetime.date, int]:
         """Expose shared date counting through the singleton factory's public API."""
         return super().rec_counts_per_date(start, end)
 
@@ -135,6 +141,37 @@ class DailyBars(ParquetStorage):
             frame = frame.with_columns(exprs)
         return frame
 
+    @overload
+    def get_bars_in_range(
+        self,
+        start: datetime.date | datetime.datetime,
+        end: datetime.date | datetime.datetime | None = None,
+        assets: list[str] | None = None,
+        adjust: str | None = "qfq",
+        eager_mode: Literal[True] = True,
+    ) -> pl.DataFrame: ...
+
+    @overload
+    def get_bars_in_range(
+        self,
+        start: datetime.date | datetime.datetime,
+        end: datetime.date | datetime.datetime | None = None,
+        assets: list[str] | None = None,
+        adjust: str | None = "qfq",
+        *,
+        eager_mode: Literal[False],
+    ) -> pl.LazyFrame: ...
+
+    @overload
+    def get_bars_in_range(
+        self,
+        start: datetime.date | datetime.datetime,
+        end: datetime.date | datetime.datetime | None = None,
+        assets: list[str] | None = None,
+        adjust: str | None = "qfq",
+        eager_mode: bool = True,
+    ) -> pl.DataFrame | pl.LazyFrame: ...
+
     def get_bars_in_range(
         self,
         start: datetime.date | datetime.datetime,
@@ -159,6 +196,37 @@ class DailyBars(ParquetStorage):
             return qfq_adjustment(lf, eager_mode=eager_mode)
         else:
             return hfq_adjustment(lf, eager_mode=eager_mode)
+
+    @overload
+    def get_bars(
+        self,
+        n: int,
+        end: datetime.date | datetime.datetime | None = None,
+        assets: list[str] | None = None,
+        adjust: str | None = "qfq",
+        eager_mode: Literal[True] = True,
+    ) -> pl.DataFrame: ...
+
+    @overload
+    def get_bars(
+        self,
+        n: int,
+        end: datetime.date | datetime.datetime | None = None,
+        assets: list[str] | None = None,
+        adjust: str | None = "qfq",
+        *,
+        eager_mode: Literal[False],
+    ) -> pl.LazyFrame: ...
+
+    @overload
+    def get_bars(
+        self,
+        n: int,
+        end: datetime.date | datetime.datetime | None = None,
+        assets: list[str] | None = None,
+        adjust: str | None = "qfq",
+        eager_mode: bool = True,
+    ) -> pl.DataFrame | pl.LazyFrame: ...
 
     def get_bars(
         self,

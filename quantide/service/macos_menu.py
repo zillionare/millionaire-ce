@@ -5,28 +5,29 @@ import os
 import plistlib
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from quantide.config.output_paths import external_runtime_path
 from quantide.core.atomic_files import atomic_path
 from quantide.service.host_service import LABEL, _launchd_path, _run, install_root
 
 
-def bundle_path():
+def bundle_path() -> Path:
     """Return the menu application shipped alongside the bundled Python."""
     return install_root() / "Millionaire CE.app"
 
 
-def _agent_path():
+def _agent_path() -> Path:
     return Path.home() / "Library/LaunchAgents" / f"{LABEL}.controller.plist"
 
 
-def _application_link(system):
+def _application_link(system: bool) -> Path:
     directory = os.environ.get("MILLIONAIRE_APPLICATIONS_DIR", "").strip()
     base = Path("/Applications") if system else Path.home() / "Applications"
     return external_runtime_path(Path(directory) if directory else base) / "Millionaire CE.app"
 
 
-def _profile(system):
+def _profile(system: bool) -> dict[str, Any]:
     service = plistlib.loads(_launchd_path(system).read_bytes())
     return {
         "launcher": str(install_root() / "millionaire-ce"),
@@ -38,7 +39,7 @@ def _profile(system):
     }
 
 
-def _write_profile(app, profile):
+def _write_profile(app: Path, profile: dict[str, Any]) -> None:
     with atomic_path(app.parent / "controller.json") as temporary:
         temporary.write_text(json.dumps(profile), encoding="utf-8")
     info = app / "Contents/Info.plist"
@@ -49,7 +50,7 @@ def _write_profile(app, profile):
     _run(["/usr/bin/codesign", "--force", "--sign", "-", str(app)])
 
 
-def _link_application(app, system):
+def _link_application(app: Path, system: bool) -> None:
     link = _application_link(system)
     link.parent.mkdir(parents=True, exist_ok=True)
     if link.is_symlink():
@@ -64,7 +65,7 @@ def _link_application(app, system):
     link.symlink_to(app, target_is_directory=True)
 
 
-def install_menu(system=False):
+def install_menu(system: bool = False) -> int:
     """Register the menu for login; system servers only get an Applications entry."""
     app = bundle_path()
     profile = _profile(system)
@@ -90,13 +91,13 @@ def install_menu(system=False):
     return 0
 
 
-def _quit_menu(app):
+def _quit_menu(app: Path) -> None:
     executable = app / "Contents/MacOS/MillionaireMenu"
     if executable.exists():
         subprocess.run([str(executable), "--quit"], check=True, timeout=10)
 
 
-def uninstall_menu(system=False):
+def uninstall_menu(system: bool = False) -> int:
     """Remove the login menu and its owned shortcut; retain application data."""
     if not system:
         _run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}.controller"], check=False)
@@ -109,7 +110,7 @@ def uninstall_menu(system=False):
     return 0
 
 
-def open_menu():
+def open_menu() -> int:
     """Reopen the app after the user has quit its menu."""
     _run(["open", str(bundle_path())])
     return 0

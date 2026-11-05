@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+from collections.abc import Iterable, Mapping
 
 from quantide.config.paths import get_app_config_dir
 from quantide.config.settings import get_settings
@@ -32,7 +33,10 @@ def maintain_data() -> str:
     return f"完整数据维护完成，task={task.task_id}"
 
 
-def maintenance_start(history, checkpoints):
+def maintenance_start(
+    history: datetime.date,
+    checkpoints: Iterable[datetime.date | datetime.datetime | None],
+) -> datetime.date:
     """Retain the configured history floor and the earliest incomplete dataset."""
     normalized = [
         value.date() if isinstance(value, datetime.datetime) else value for value in checkpoints
@@ -40,14 +44,18 @@ def maintenance_start(history, checkpoints):
     return max(history, min(value or history for value in normalized))
 
 
-def _first_missing_session(history, end, available):
+def _first_missing_session(
+    history: datetime.date, end: datetime.date, available: Iterable[datetime.date]
+) -> datetime.date:
     from quantide.data.models.calendar import calendar
 
     missing = set(trading_sessions(calendar, history, end)) - set(available)
     return min(missing) if missing else end
 
 
-def _maintenance_checkpoints(history, end):
+def _maintenance_checkpoints(
+    history: datetime.date, end: datetime.date
+) -> list[datetime.date | None]:
     from quantide.data import get_index_bars_store, get_index_weight_store, get_minute_bars_store
     from quantide.data.models.daily_bars import daily_bars
     from quantide.data.models.daily_basic import daily_basic
@@ -75,7 +83,9 @@ def _maintenance_checkpoints(history, end):
     ]
 
 
-def _oldest_minute_checkpoint(last_dates, history, end):
+def _oldest_minute_checkpoint(
+    last_dates: Mapping[str, datetime.date | None], history: datetime.date, end: datetime.date
+) -> datetime.date:
     from quantide.data.fetchers.capabilities import SOURCE_CAPABILITIES
     from quantide.data.models.stocks import stock_list
     from quantide.service.minute_backfill import MINUTE_HISTORY_START, _date_value
@@ -102,8 +112,9 @@ def snapshot_accounts() -> str:
     count = 0
     for item in registry.list():
         broker = registry.get(item["kind"], item["id"])
-        if hasattr(broker, "on_day_close"):
-            asyncio.run(broker.on_day_close())
+        on_day_close = getattr(broker, "on_day_close", None)
+        if callable(on_day_close):
+            asyncio.run(on_day_close())
             count += 1
     return f"已保存 {count} 个账户的日终快照"
 

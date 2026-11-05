@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 import arrow
 import fasthtml.common as fh
@@ -16,9 +17,12 @@ from fasthtml.common import (
     A,
     Button,
     Div,
+    Form,
+    Input,
     P,
     RedirectResponse,
     Script,
+    Span,
     Table,
     Tbody,
     Td,
@@ -27,6 +31,7 @@ from fasthtml.common import (
     Tr,
 )
 from loguru import logger
+from starlette.requests import Request
 
 from quantide.service.optimization_tasks import (
     STATUS_CANCELLED,
@@ -61,13 +66,21 @@ from quantide.web.services.optimization_forms import (
     form_number,
     optimization_parameters,
 )
+from quantide.web.session_data import SessionData
 
 from .strategy import rt
 
 OPTIMIZE_POLL_SECONDS = 2
 
 
-def _append_optimization_result_rows(ordered, param_keys, task, rows, is_risk, name):
+def _append_optimization_result_rows(
+    ordered: list[dict[str, Any]],
+    param_keys: list[str],
+    task: dict[str, Any],
+    rows: list[Any],
+    is_risk: bool,
+    name: str,
+) -> None:
     """Append optimization result rows."""
     for index, row in enumerate(ordered, start=1):
         params = row.get("params") or {}
@@ -111,7 +124,9 @@ def _append_optimization_result_rows(ordered, param_keys, task, rows, is_risk, n
         )
 
 
-def _optimization_form_and_task(strategy_params, req, name):
+def _optimization_form_and_task(
+    strategy_params: dict[str, Any], req: Request, name: str
+) -> tuple[Any, Any]:
     """Optimization form and task."""
     param_inputs = []
     for key, value in strategy_params.items():
@@ -294,7 +309,9 @@ def _optimization_form_and_task(strategy_params, req, name):
     return form, task_panel
 
 
-def _optimization_progress(done, running, status, task, total):
+def _optimization_progress(
+    done: int, running: bool, status: str | None, task: dict[str, Any], total: int
+) -> Any:
     """Optimization progress."""
     if running:
         percent = int(done * 100 / total) if total else 0
@@ -318,7 +335,7 @@ def _optimization_progress(done, running, status, task, total):
                 STATUS_DONE: f"已完成，共 {len(task.get('results') or [])} 个组合。",
                 STATUS_CANCELLED: "任务已中断。",
                 STATUS_FAILED: f"任务失败：{task.get('error') or '未知错误'}",
-            }.get(status, f"状态：{status}"),
+            }.get(status or "", f"状态：{status}"),
             cls="text-sm text-gray-600 mb-3",
         )
     return progress
@@ -332,7 +349,7 @@ def _encode_prefill(payload: dict[str, Any]) -> str:
 
 def _build_spec(
     name: str,
-    form: Any,
+    form: Mapping[str, object],
 ) -> OptimizationSpec:
     """由表单构造优化配置。"""
     from quantide.service.discovery import strategy_loader
@@ -349,35 +366,35 @@ def _build_spec(
         strategy_name=name,
         base_config=base_config,
         param_grid=param_grid,
-        start_date=arrow.get(form.get("start_date")).date(),
-        end_date=arrow.get(form.get("end_date")).date(),
+        start_date=arrow.get(str(form.get("start_date"))).date(),
+        end_date=arrow.get(str(form.get("end_date"))).date(),
         objective=form_choice(form, "objective", OBJECTIVES, "sharpe"),
         mode=form_choice(form, "mode", MODES, "grid"),
         in_sample_ratio=form_number(form, "in_sample_ratio", 0.7, float),
         n_random=form_number(form, "n_random", 20, int),
         max_workers=max(1, form_number(form, "max_workers", 4, int)),
-        initial_cash=form_number(form, "initial_cash", 1_000_000, float),
+        initial_cash=form_number(form, "initial_cash", 1_000_000.0, float),
         time_budget_minutes=form_number(form, "time_budget_minutes", 0.0, float),
     )
 
 
-def _format_pct(value: Any) -> str:
+def _format_pct(value: object) -> str:
     """格式化百分比。"""
     try:
-        return f"{float(value):.2%}"
+        return f"{float(cast(float | int | str, value)):.2%}"
     except (TypeError, ValueError):
         return "-"
 
 
-def _format_num(value: Any) -> str:
+def _format_num(value: object) -> str:
     """格式化数值。"""
     try:
-        return f"{float(value):.2f}"
+        return f"{float(cast(float | int | str, value)):.2f}"
     except (TypeError, ValueError):
         return "-"
 
 
-def _objective_cell(value: Any, is_risk: bool) -> str:
+def _objective_cell(value: object, is_risk: bool) -> str:
     """目标值展示（回撤类按百分比，其余按数值）。"""
     if is_risk:
         return _format_pct(value)
@@ -473,6 +490,8 @@ def _row_sort_value(row: dict[str, Any], key: str) -> float:
         value = parse_metric(in_sample.get("Max Drawdown"))
     else:
         value = None
+    if value is None:
+        return float("inf")
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -710,7 +729,7 @@ def _render_history(name: str) -> Any:
 
 
 @rt("/{name}/optimize")
-def optimize_page(req, session, name: str):
+def optimize_page(req: Request, session: SessionData, name: str) -> Any:
     """参数优化页面。"""
     from quantide.service.discovery import strategy_loader
 
@@ -729,33 +748,34 @@ def optimize_page(req, session, name: str):
 
     form, task_panel = _optimization_form_and_task(strategy_params, req, name)
 
-    layout.main_block = lambda: Div(
-        Div(
+    layout.set_main_block(
+        lambda: Div(
             Div(
-                A(
-                    "← 返回策略",
-                    href=f"/strategy/{name}",
-                    cls="text-gray-500 hover:text-gray-800 mb-4 inline-block",
+                Div(
+                    A(
+                        "← 返回策略",
+                        href=f"/strategy/{name}",
+                        cls="text-gray-500 hover:text-gray-800 mb-4 inline-block",
+                    ),
+                    H1(f"参数优化 · {name}", cls="text-2xl font-bold mb-1"),
+                    P(
+                        "搜索策略参数，按样本内指标挑选，并用样本外区间检验是否过拟合。",
+                        cls="text-sm text-gray-600 mb-5",
+                    ),
                 ),
-                H1(f"参数优化 · {name}", cls="text-2xl font-bold mb-1"),
-                P(
-                    "搜索策略参数，按样本内指标挑选，并用样本外区间检验是否过拟合。",
-                    cls="text-sm text-gray-600 mb-5",
+                form,
+                Div(
+                    H3("本次任务", cls="text-base font-semibold mb-2"),
+                    task_panel,
+                    cls="mt-6",
                 ),
-            ),
-            form,
-            Div(
-                H3("本次任务", cls="text-base font-semibold mb-2"),
-                task_panel,
-                cls="mt-6",
-            ),
-            Div(
-                H3("历史任务", cls="text-base font-semibold mb-2"),
-                _render_history(name),
-                cls="mt-6",
-            ),
-            Script(
-                """
+                Div(
+                    H3("历史任务", cls="text-base font-semibold mb-2"),
+                    _render_history(name),
+                    cls="mt-6",
+                ),
+                Script(
+                    """
                 (function(){
                     const form = document.querySelector('form');
                     if (!form) return;
@@ -776,15 +796,16 @@ def optimize_page(req, session, name: str):
                     end.addEventListener('change', apply);
                 })();
                 """
-            ),
-            cls="max-w-5xl mx-auto py-8",
+                ),
+                cls="max-w-5xl mx-auto py-8",
+            )
         )
     )
     return layout.render()
 
 
 @rt("/{name}/optimize/run", methods=["POST"])
-async def run_optimize(req, name: str):
+async def run_optimize(req: Request, name: str) -> Any:
     """启动参数优化任务。"""
     form = await req.form()
     try:
@@ -808,7 +829,7 @@ async def run_optimize(req, name: str):
 
 
 @rt("/{name}/optimize/status/{task_id}")
-def optimize_status(name: str, task_id: str, sort: str = "", dir: str = "desc"):
+def optimize_status(name: str, task_id: str, sort: str = "", dir: str = "desc") -> Any:
     """查询任务状态（前端轮询 / 排序切换）。"""
     return _render_task_panel(
         name,
@@ -819,7 +840,7 @@ def optimize_status(name: str, task_id: str, sort: str = "", dir: str = "desc"):
 
 
 @rt("/{name}/optimize/cancel/{task_id}", methods=["POST"])
-def optimize_cancel(name: str, task_id: str, sort: str = "", dir: str = "desc"):
+def optimize_cancel(name: str, task_id: str, sort: str = "", dir: str = "desc") -> Any:
     """中断运行中的优化任务。"""
     cancel_optimization(task_id)
     return _render_task_panel(
@@ -830,8 +851,8 @@ def optimize_cancel(name: str, task_id: str, sort: str = "", dir: str = "desc"):
     )
 
 
-def _best_monthly_returns(results):
-    best_by_month = {}
+def _best_monthly_returns(results: list[dict[str, Any]]) -> dict[str, float]:
+    best_by_month: dict[str, float] = {}
     for row in results:
         for item in row.get("monthly") or []:
             month = str(item.get("month") or "")
@@ -841,7 +862,12 @@ def _best_monthly_returns(results):
     return best_by_month
 
 
-def _monthly_result_row(row, months, best_by_month, result_count):
+def _monthly_result_row(
+    row: dict[str, Any],
+    months: Sequence[str],
+    best_by_month: Mapping[str, float],
+    result_count: int,
+) -> Any:
     params = row.get("params") or {}
     param_text = ", ".join(f"{key}={params.get(key)}" for key in sorted(params.keys())) or "-"
     by_month = {str(item.get("month") or ""): item for item in row.get("monthly") or []}
@@ -870,7 +896,12 @@ def _monthly_result_row(row, months, best_by_month, result_count):
     return Tr(*cells)
 
 
-def _monthly_return_cell(month, by_month, best_by_month, result_count):
+def _monthly_return_cell(
+    month: str,
+    by_month: Mapping[str, dict[str, Any]],
+    best_by_month: Mapping[str, float],
+    result_count: int,
+) -> Any:
     item = by_month.get(month)
     if item is None:
         return Td("-", cls="text-xs text-gray-300")

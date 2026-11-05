@@ -1,6 +1,7 @@
 """Backtest portfolio history and snapshot maintenance."""
 
 import datetime
+from typing import TYPE_CHECKING
 
 import polars as pl
 
@@ -10,7 +11,9 @@ from quantide.data.models.calendar import calendar
 from quantide.data.sqlite import db
 
 
-def _position_snapshot_frame(self, latest_pos, fill_dates):
+def _position_snapshot_frame(
+    self: "BacktestSnapshots", latest_pos: pl.DataFrame, fill_dates: list[datetime.date]
+) -> pl.DataFrame:
     """Position snapshot frame."""
     assets = latest_pos["asset"].unique().to_list()
     start, end = fill_dates[0], fill_dates[-1]
@@ -58,6 +61,14 @@ def _position_snapshot_frame(self, latest_pos, fill_dates):
 
 class BacktestSnapshots:
     """Backtest portfolio history and snapshot maintenance."""
+
+    if TYPE_CHECKING:
+        _portfolio_id: str
+        _positions: dict[str, Position]
+
+        def _get_close_adjust_factors(
+            self, assets: list[str], start: datetime.date, end: datetime.date
+        ) -> pl.DataFrame: ...
 
     def _fill_history_gaps(self, end_fill: datetime.date) -> None:
         """填补历史数据缺失，确保资产记录和持仓记录完整

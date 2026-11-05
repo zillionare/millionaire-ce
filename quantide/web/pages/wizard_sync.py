@@ -2,10 +2,12 @@
 
 import asyncio
 import datetime
+from typing import cast
 
 from loguru import logger
 
 from quantide.data.models.calendar import calendar
+from quantide.data.models.sync_task import DataSyncTask
 from quantide.service.background import run_blocking
 from quantide.service.data_sync import SyncParams, data_sync_service
 from quantide.service.init_wizard import init_wizard
@@ -14,10 +16,10 @@ from quantide.service.sync_jobs import wait_for_sync
 from quantide.web.pages import wizard_state
 from quantide.web.pages.wizard_state import _set_download_error, _update_sync_status
 
-_background_tasks: set[asyncio.Task] = set()
+_background_tasks: set[asyncio.Task[None]] = set()
 
 
-def start_wizard_sync(start_date):
+def start_wizard_sync(start_date: datetime.date | None) -> None:
     """Retain ownership of downloads until completion or ASGI shutdown."""
     task = asyncio.create_task(_run_data_sync(start_date))
     if task is not None:
@@ -34,15 +36,18 @@ async def stop_wizard_sync() -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-def _show_failure(error):
+def _show_failure(error: object) -> None:
     text = str(error)
     _set_download_error(f"下载失败：{text}")
     _update_sync_status(
-        wizard_state._sync_status["progress"], "同步失败", f"同步失败: {text}", error=text
+        cast(int, wizard_state._sync_status["progress"]),
+        "同步失败",
+        f"同步失败: {text}",
+        error=text,
     )
 
 
-def _apply_task_progress(task):
+def _apply_task_progress(task: DataSyncTask | None) -> None:
     """Display persisted progress without treating a stage event as completion."""
     if task is None:
         return
@@ -52,7 +57,7 @@ def _apply_task_progress(task):
     _update_sync_status(min(99, task.progress), "正在同步数据", task.message or "正在同步数据")
 
 
-async def _wait_for_pipeline(task_id):
+async def _wait_for_pipeline(task_id: str) -> None:
     await wait_for_sync(task_id, _apply_task_progress, data_sync_service)
 
 

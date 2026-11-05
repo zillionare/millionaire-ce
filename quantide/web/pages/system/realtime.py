@@ -21,6 +21,7 @@ from fasthtml.common import (
     Thead,
     Tr,
 )
+from starlette.requests import Request
 
 from quantide.data.models.calendar import calendar
 from quantide.data.models.stocks import stock_list
@@ -28,6 +29,7 @@ from quantide.service.quote_monitor import quote_monitor
 from quantide.web.application import fast_app
 from quantide.web.components.navigation import SystemBreadcrumb
 from quantide.web.layouts.main import MainLayout
+from quantide.web.session_data import SessionData
 from quantide.web.theme import AppTheme
 
 system_realtime_app, rt = fast_app(hdrs=AppTheme.headers())
@@ -84,7 +86,7 @@ def _change_cls(change_pct: float | None) -> str:
     return "text-red-500" if change_pct > 0 else "text-green-600"
 
 
-def _quote_row(row, now):
+def _quote_row(row: Any, now: Any) -> Any:
     """Render one row with its display values and available actions."""
     prev_close = row.get("prev_close")
     change_pct = None
@@ -322,25 +324,27 @@ def _render_content(now: datetime.datetime, query: str) -> Div:
 
 
 @rt("/")
-def index(req, session):
+def index(req: Request, session: SessionData) -> Any:
     layout = MainLayout(title="实时行情", user=session.get("auth"))
     layout.set_sidebar_active("/system/realtime")
-    layout.main_block = lambda: Div(
-        _breadcrumb(),
-        Div(
-            _render_content(
-                datetime.datetime.now(),
-                req.query_params.get("q", ""),
+    layout.set_main_block(
+        lambda: Div(
+            _breadcrumb(),
+            Div(
+                _render_content(
+                    datetime.datetime.now(),
+                    req.query_params.get("q", ""),
+                ),
+                cls="max-w-[1400px] mx-auto w-full",
             ),
-            cls="max-w-[1400px] mx-auto w-full",
-        ),
-        cls="space-y-6 max-w-[1400px] mx-auto w-full",
+            cls="space-y-6 max-w-[1400px] mx-auto w-full",
+        )
     )
     return layout.render(req)
 
 
 @rt("/panel")
-def panel(req):
+def panel(req: Request) -> Any:
     return _render_content(
         datetime.datetime.now(),
         req.query_params.get("q", ""),

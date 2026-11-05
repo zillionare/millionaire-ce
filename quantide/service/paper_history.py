@@ -121,9 +121,7 @@ class PaperHistory:
         identity = [date_column, "asset"] if "asset" in merged.columns else [date_column]
         merged = merged.unique(subset=identity, keep="last").sort(date_column).tail(count)
         if "adjust" in merged.columns:
-            merged = cast(
-                pl.DataFrame, qfq_adjustment(merged, adj_factor_col="adjust", eager_mode=True)
-            )
+            merged = qfq_adjustment(merged, adj_factor_col="adjust", eager_mode=True)
         return merged
 
     def _resolve_history_end_date(self, end_dt: datetime.datetime | None) -> datetime.date | None:

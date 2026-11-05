@@ -1,10 +1,32 @@
 """股票列表管理页面"""
 
 import asyncio
+from typing import Any
 
 from fasthtml.common import *
+from fasthtml.common import (
+    H3,
+    Button,
+    Card,
+    Div,
+    Form,
+    Input,
+    P,
+    Span,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
+    Tr,
+)
 from loguru import logger
 from monsterui.all import *
+from monsterui.all import (
+    CardBody,
+    UkIcon,
+)
+from starlette.requests import Request
 
 from quantide.data.models.stocks import stock_list
 from quantide.service.background import run_blocking, start_background
@@ -26,11 +48,11 @@ data_stocks_app, rt = fast_app(hdrs=AppTheme.headers())
 _sync_status = new_sync_status()
 
 
-def _get_active_tab(req):
+def _get_active_tab(req: Request) -> str:
     return req.query_params.get("tab", "overview")
 
 
-def _TabNav(active_tab):
+def _TabNav(active_tab: str) -> Any:
     return DatasetTabs(
         "/data/stocks",
         active_tab,
@@ -38,7 +60,7 @@ def _TabNav(active_tab):
     )
 
 
-def _OverviewTab():
+def _OverviewTab() -> Any:
     """概要 Tab 内容"""
     try:
         total_stocks = stock_list.size
@@ -63,7 +85,7 @@ def _OverviewTab():
     )
 
 
-def _SearchTab(req):
+def _SearchTab(req: Request) -> Any:
     """查询 Tab 内容"""
     q = req.query_params.get("q", "").strip()
 
@@ -75,6 +97,8 @@ def _SearchTab(req):
         try:
             # 使用 fuzzy_search 获取结果
             df = stock_list.fuzzy_search(q, id_only=False)
+            if isinstance(df, list):
+                raise TypeError("Expected stock search dataframe")
             if not df.empty:
                 headers = ["股票代码", "公司名称", "拼音", "上市日期", "退市日期"]
                 header_row = Tr(*[Th(h) for h in headers])
@@ -134,7 +158,7 @@ def _SearchTab(req):
     )
 
 
-def _UpdateTab():
+def _UpdateTab() -> Any:
     """手动更新 Tab 内容"""
     return Div(
         H3("手动更新股票列表", cls="text-xl font-semibold mb-4"),
@@ -155,7 +179,7 @@ def _UpdateTab():
 
 
 @rt("/")
-async def index(req):
+async def index(req: Request) -> Any:
     active_tab = _get_active_tab(req)
 
     content = dataset_content(active_tab, _OverviewTab, _UpdateTab, search=lambda: _SearchTab(req))
@@ -199,7 +223,7 @@ async def _run_stocks_sync() -> None:
 
 
 @rt("/do-update", methods="post")
-async def do_update():
+async def do_update() -> Any:
     if not _sync_status["is_running"]:
         _sync_status["is_running"] = True
         start_background(_run_stocks_sync())
@@ -208,5 +232,5 @@ async def do_update():
 
 
 @rt("/sync-progress")
-async def sync_progress():
+async def sync_progress() -> Any:
     return dataset_progress_response(_sync_status)

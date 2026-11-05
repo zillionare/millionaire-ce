@@ -1,6 +1,7 @@
 """Reference prices and account statistics for the trading page."""
 
 import datetime
+from typing import Any
 
 import polars as pl
 from fasthtml.common import *
@@ -27,7 +28,7 @@ def _format_trade_metric(value: float | None) -> str:
 
 
 def _extract_recent_trade_dates(
-    calendar_frame, end: datetime.date, periods: int
+    calendar_frame: Any, end: datetime.date, periods: int
 ) -> list[datetime.date]:
     """Extract recent open trade dates from a fetcher calendar response.
 
@@ -60,7 +61,7 @@ def _extract_recent_trade_dates(
 
 
 def _resolve_trade_reference_dates(
-    fetcher, end: datetime.date, periods: int
+    fetcher: Any, end: datetime.date, periods: int
 ) -> list[datetime.date]:
     """Resolve fallback trade dates for the trade panel.
 

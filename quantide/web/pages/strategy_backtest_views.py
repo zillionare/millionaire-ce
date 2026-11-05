@@ -1,5 +1,6 @@
 """Strategy backtest views."""
 
+from collections.abc import Mapping
 from typing import Any
 
 import arrow
@@ -25,11 +26,13 @@ from monsterui.all import (
     Td,
     UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.config.features import (
     supports_live_trading,
 )
 from quantide.core.enums import BrokerKind
+from quantide.core.strategy import Strategy
 from quantide.data.sqlite import db
 from quantide.factors import FEATURE_DOCS, FEATURE_GROUPS
 from quantide.service.backtest_params import (
@@ -71,7 +74,9 @@ from quantide.web.pages.strategy_routes import (
 )
 
 
-def _backtest_parameters_text(info_params, strategy_cls):
+def _backtest_parameters_text(
+    info_params: dict[str, Any] | None, strategy_cls: type[Strategy] | None
+) -> str:
     """Backtest parameters text."""
     if info_params:
         # 只展示与默认不同的参数（用户改过的）
@@ -203,7 +208,7 @@ def _build_backtest_action_cell(
     return Td(Div(*controls, cls="flex flex-wrap items-center gap-2"), **attrs)
 
 
-def _build_strategy_rows(strategies: dict) -> list:
+def _build_strategy_rows(strategies: dict[str, Any]) -> list[Any]:
     """构建策略列表行。
 
     Args:
@@ -283,13 +288,13 @@ def _build_strategy_rows(strategies: dict) -> list:
 
 
 def _build_backtest_rows(
-    strategies: dict,
+    strategies: dict[str, Any],
     *,
     paper_available: bool = True,
     paper_unavailable_reason: str = "",
     live_available: bool = True,
     live_unavailable_reason: str = "",
-) -> list:
+) -> list[Any]:
     """构建回测报告列表行。
 
     Args:
@@ -302,7 +307,7 @@ def _build_backtest_rows(
     Returns:
         list: 行数据
     """
-    rows = []
+    rows: list[Any] = []
     portfolios = db.portfolios_all()
     if portfolios.is_empty():
         return rows
@@ -472,7 +477,7 @@ def _build_risk_selection_panel(
 
 
 @rt("/{name}/backtest/modal")
-def backtest_modal(name: str, req=None):
+def backtest_modal(name: str, req: Request | None = None) -> Any:
     """运行回测向导：参数、因子和显式风控程序选择。
 
     Args:
@@ -645,7 +650,11 @@ def backtest_modal(name: str, req=None):
     )
 
 
-def _backtest_report_row(row, strategies, capabilities):
+def _backtest_report_row(
+    row: Mapping[str, Any],
+    strategies: Mapping[str, type[Strategy]],
+    capabilities: Mapping[str, Any],
+) -> Any:
     """Render one backtest report after validating its portfolio kind."""
     kind = row.get("kind")
     if isinstance(kind, str):
@@ -655,8 +664,10 @@ def _backtest_report_row(row, strategies, capabilities):
             return None
     if kind != BrokerKind.BACKTEST:
         return None
-    portfolio_id = row.get("portfolio_id")
-    name = row.get("name") or "--"
+    portfolio_id = str(row.get("portfolio_id") or "")
+    if not portfolio_id:
+        return None
+    name = str(row.get("name") or "--")
     strategy_cls = strategies.get(name)
     params_text = _backtest_parameters_text(
         _extract_params_from_info(row.get("info")), strategy_cls

@@ -1,11 +1,13 @@
 """Strategy format."""
 
 import datetime
-from typing import Any
+from typing import Any, cast
 
 import fasthtml.common as fh
+import pandas as pd
 from fasthtml.common import *
 from fasthtml.common import (
+    Button,
     Div,
     Script,
     Span,
@@ -25,24 +27,22 @@ from quantide.web.pages.strategy_routes import (
 )
 
 
-def _coerce_parameter_text(v):
+def _coerce_parameter_text(v: str) -> str | bool | int | float:
     """Coerce parameter text."""
+    value: str | bool | int | float = v
     if v.lower() == "true":
-        v = True
+        value = True
     elif v.lower() == "false":
-        v = False
+        value = False
     else:
         try:
-            if "." in v:
-                v = float(v)
-            else:
-                v = int(v)
+            value = float(v) if "." in v else int(v)
         except (TypeError, ValueError):
             pass
-    return v
+    return value
 
 
-def _metric_value_class(value):
+def _metric_value_class(value: float | None) -> str:
     """Metric value class."""
     if value is not None and value > 0:
         value_cls = "text-red-600"
@@ -95,7 +95,7 @@ def _strategy_dialog_modal(
     )
 
 
-def _normalize_stats(stats):
+def _normalize_stats(stats: pd.DataFrame | None) -> dict[str, Any]:
     """规范化 quantstats 指标名称并返回字典。
 
     Args:
@@ -110,10 +110,10 @@ def _normalize_stats(stats):
     index = series.index.astype(str)
     normalized = index.str.lower().str.replace(r"[^a-z0-9]+", "_", regex=True).str.strip("_")
     series.index = normalized
-    return series.to_dict()
+    return {str(key): value for key, value in series.to_dict().items()}
 
 
-def _to_number(value) -> float | None:
+def _to_number(value: object) -> float | None:
     """将指标值转换为 float。
 
     Args:
@@ -134,7 +134,7 @@ def _to_number(value) -> float | None:
             cleaned = cleaned[:-1].strip()
         value = cleaned
     try:
-        number = float(value)
+        number = float(cast(float | int | str, value))
     except (TypeError, ValueError):
         return None
     return number / 100 if is_percent else number
@@ -159,12 +159,12 @@ def _metric_value(stats_dict: dict[str, Any], *keys: str) -> float | None:
     return None
 
 
-def _parse_checkbox(value: Any) -> bool:
+def _parse_checkbox(value: object) -> bool:
     """解析 checkbox/form 布尔值。"""
     return str(value or "").strip().lower() in {"1", "true", "on", "yes"}
 
 
-def _format_date(value) -> str:
+def _format_date(value: object) -> str:
     """格式化日期。
 
     Args:
@@ -180,7 +180,7 @@ def _format_date(value) -> str:
     return str(value)
 
 
-def _format_range(start, end) -> str:
+def _format_range(start: object, end: object) -> str:
     """格式化回测区间。
 
     Args:
@@ -195,7 +195,7 @@ def _format_range(start, end) -> str:
     return f"{_format_date(start)} ~ {_format_date(end)}"
 
 
-def _format_percent(value) -> str:
+def _format_percent(value: object) -> str:
     """格式化百分比值。
 
     Args:
@@ -205,13 +205,13 @@ def _format_percent(value) -> str:
         str: 百分比文本
     """
     try:
-        number = float(value)
+        number = float(cast(float | int | str, value))
     except (TypeError, ValueError):
         return "--"
     return f"{number * 100:.1f}%"
 
 
-def _format_number(value) -> str:
+def _format_number(value: object) -> str:
     """格式化数值。
 
     Args:
@@ -221,13 +221,13 @@ def _format_number(value) -> str:
         str: 格式化后的数字文本
     """
     try:
-        number = float(value)
+        number = float(cast(float | int | str, value))
     except (TypeError, ValueError):
         return "--"
     return f"{number:.2f}"
 
 
-def _params_to_text(params: dict) -> str:
+def _params_to_text(params: dict[str, Any]) -> str:
     """格式化参数显示文本。
 
     Args:
@@ -277,11 +277,11 @@ def _foldable_cell(text: str, *, limit: int = 90) -> Any:
     )
 
 
-def _extract_params_from_info(info):
+def _extract_params_from_info(info: object) -> dict[str, Any]:
     return stored_strategy_config(info)
 
 
-def _strategy_version(strategy_cls) -> str:
+def _strategy_version(strategy_cls: object | None) -> str:
     """获取策略版本。
 
     Args:
@@ -295,7 +295,7 @@ def _strategy_version(strategy_cls) -> str:
     return getattr(strategy_cls, "VERSION", getattr(strategy_cls, "__version__", "v1.0.0"))
 
 
-def _get_strategy_default_params(strategy_cls: Any) -> dict[str, Any]:
+def _get_strategy_default_params(strategy_cls: object | None) -> dict[str, Any]:
     """获取策略默认参数字典，兼容 PARAMS 属性与 default_config() 方法。"""
     if strategy_cls is None:
         return {}
@@ -313,27 +313,27 @@ def _get_strategy_default_params(strategy_cls: Any) -> dict[str, Any]:
     return {}
 
 
-def _supports_stock_selection(strategy_cls: Any) -> bool:
+def _supports_stock_selection(strategy_cls: object | None) -> bool:
     """检查策略类是否支持个股筛选接口 select_stocks。"""
     if strategy_cls is None:
         return False
     return callable(getattr(strategy_cls, "select_stocks", None))
 
 
-def _format_signed_pct(value: Any) -> tuple[str, str]:
+def _format_signed_pct(value: object) -> tuple[str, str]:
     """格式化带正负号的涨跌幅文本及 A 股红涨绿跌样式。"""
     try:
-        num = float(value)
+        num = float(cast(float | int | str, value))
     except (TypeError, ValueError):
         return "--", "text-gray-500"
     cls = "text-red-600 font-medium" if num >= 0 else "text-green-600 font-medium"
     return f"{num:+.2%}", cls
 
 
-def _format_score(value: Any) -> str:
+def _format_score(value: object) -> str:
     """格式化机器学习打分 (3 位小数)。"""
     try:
-        return f"{float(value):.3f}"
+        return f"{float(cast(float | int | str, value)):.3f}"
     except (TypeError, ValueError):
         return "--"
 
@@ -365,7 +365,7 @@ def _global_loading_overlay() -> Any:
     )
 
 
-def _coerce_form_value(raw: Any) -> Any:
+def _coerce_form_value(raw: object) -> str | bool | int | float | None:
     """把 form 字符串值转回原始类型 (int / float / bool / str)."""
     if raw is None:
         return None
@@ -382,11 +382,11 @@ def _coerce_form_value(raw: Any) -> Any:
         return text
 
 
-def strategy_close_button(label="关闭", **attrs):
+def strategy_close_button(label: str = "关闭", **attrs: object) -> Any:
     return Button(
         label, type="button", cls="btn btn-ghost", onclick=STRATEGY_MODAL_CLOSE_JS, **attrs
     )
 
 
-def strategy_close_footer():
+def strategy_close_footer() -> Any:
     return Div(strategy_close_button(), cls="flex justify-end gap-2")

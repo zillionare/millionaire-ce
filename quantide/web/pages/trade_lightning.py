@@ -20,6 +20,7 @@ from monsterui.all import (
     H3,
     Button,
 )
+from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from quantide.config.features import supports_live_trading
@@ -151,7 +152,7 @@ def _resolve_asset_input(asset_query: str) -> str | None:
         matches = stock_list.fuzzy_search(asset_query, id_only=True)
     except Exception:
         return None
-    return matches[0] if len(matches) == 1 else None
+    return matches[0] if isinstance(matches, list) and len(matches) == 1 else None
 
 
 def _parse_amount_wan(raw_value: str) -> float | None:
@@ -376,7 +377,7 @@ def _panel_with_toast(
     )
 
 
-async def trade_lightning_search(req):
+async def trade_lightning_search(req: Request) -> Any:
     """搜索闪电买入单中的股票候选项。"""
     query = req.query_params.get("asset_query", "").strip()
     if not query:
@@ -387,13 +388,13 @@ async def trade_lightning_search(req):
     except Exception:
         return HTMLResponse(to_xml(Div(id="lightning-asset-search-dropdown", cls="hidden")))
 
-    if result_df is None or len(result_df) == 0:
+    if result_df is None or isinstance(result_df, list) or len(result_df) == 0:
         return HTMLResponse(to_xml(Div(id="lightning-asset-search-dropdown", cls="hidden")))
 
     return AssetSearchResults(result_df, lightning=True)
 
 
-async def trade_lightning_edit_modal(req):
+async def trade_lightning_edit_modal(req: Request) -> Any:
     """返回编辑弹窗。"""
     portfolio_id = req.path_params["portfolio_id"]
     asset = req.path_params["asset"]
@@ -406,7 +407,7 @@ async def trade_lightning_edit_modal(req):
     return HTMLResponse(to_xml(_edit_modal(portfolio_id, entry)))
 
 
-async def trade_lightning_delete_modal(req):
+async def trade_lightning_delete_modal(req: Request) -> Any:
     """返回删除确认弹窗。"""
     portfolio_id = req.path_params["portfolio_id"]
     asset = req.path_params["asset"]
@@ -419,13 +420,13 @@ async def trade_lightning_delete_modal(req):
     return HTMLResponse(to_xml(_delete_modal(portfolio_id, entry)))
 
 
-async def trade_lightning_create_modal(req):
+async def trade_lightning_create_modal(req: Request) -> Any:
     """返回新建弹窗。"""
     portfolio_id = req.path_params["portfolio_id"]
     return HTMLResponse(to_xml(_create_modal(portfolio_id)))
 
 
-async def trade_lightning_create(req):
+async def trade_lightning_create(req: Request) -> Any:
     """创建新的闪电单条目。"""
     portfolio_id = req.path_params["portfolio_id"]
     form = await req.form()
@@ -479,13 +480,13 @@ async def trade_lightning_create(req):
     )
 
 
-async def trade_lightning_clear_modal(req):
+async def trade_lightning_clear_modal(req: Request) -> Any:
     """返回清空确认弹窗。"""
     portfolio_id = req.path_params["portfolio_id"]
     return HTMLResponse(to_xml(_clear_modal(portfolio_id)))
 
 
-async def trade_lightning_clear(req):
+async def trade_lightning_clear(req: Request) -> Any:
     """清空当前账户下的全部闪电单。"""
     portfolio_id = req.path_params["portfolio_id"]
     removed_count = clear_trade_lightning_entries(portfolio_id)
@@ -505,7 +506,7 @@ async def trade_lightning_clear(req):
     )
 
 
-async def trade_lightning_update(req):
+async def trade_lightning_update(req: Request) -> Any:
     """更新闪电买入单。"""
     portfolio_id = req.path_params["portfolio_id"]
     asset = req.path_params["asset"]
@@ -548,7 +549,7 @@ async def trade_lightning_update(req):
     )
 
 
-async def trade_lightning_delete(req):
+async def trade_lightning_delete(req: Request) -> Any:
     """删除闪电单条目。"""
     portfolio_id = req.path_params["portfolio_id"]
     asset = req.path_params["asset"]
@@ -576,7 +577,7 @@ def _resolve_lightning_price(asset: str, price_ref: str) -> float:
     return historical_reference(daily_bars, asset, price_ref, end=market_today(), adjust=None)
 
 
-def _resolve_lightning_broker(req, portfolio_id: str):
+def _resolve_lightning_broker(req: Request, portfolio_id: str) -> Any:
     """从 request scope 中拿到闪电单对应账号的 broker.
 
     Args:
@@ -598,7 +599,7 @@ def _resolve_lightning_broker(req, portfolio_id: str):
         except Exception:
             return None
     try:
-        kinds = (BrokerKind.SIMULATION,)
+        kinds: tuple[BrokerKind, ...] = (BrokerKind.SIMULATION,)
         if supports_live_trading():
             kinds = (BrokerKind.QMT, BrokerKind.SIMULATION)
         for kind in kinds:
@@ -610,7 +611,7 @@ def _resolve_lightning_broker(req, portfolio_id: str):
     return None
 
 
-async def trade_lightning_execute(req):
+async def trade_lightning_execute(req: Request) -> Any:
     """双击闪电单：按预存的金额/价格立即提交买入委托（Issue #38）.
 
     Args:
@@ -682,8 +683,13 @@ async def trade_lightning_execute(req):
 
 
 def _lightning_create_error(
-    portfolio_id, asset_query, amount_raw, price_ref, message, level="error"
-):
+    portfolio_id: str,
+    asset_query: str,
+    amount_raw: str,
+    price_ref: str,
+    message: str,
+    level: str = "error",
+) -> Any:
     return _render_response(
         _create_modal(
             portfolio_id,
@@ -695,5 +701,5 @@ def _lightning_create_error(
     )
 
 
-def _lightning_toast(message, level="error", *, hx_swap_oob=False):
+def _lightning_toast(message: str, level: str = "error", *, hx_swap_oob: bool = False) -> Any:
     return TradeToast(message, level, hx_swap_oob=hx_swap_oob, container=True)

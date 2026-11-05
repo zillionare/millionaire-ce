@@ -1,16 +1,36 @@
 """数据库管理页面"""
 
 import math
+from collections.abc import Sequence
+from typing import Any
 
 import fasthtml.common as fh
 from fasthtml.common import *
 from fasthtml.common import (
+    H4,
     A,
+    Button,
+    Card,
     Div,
+    Form,
+    Input,
+    P,
     Span,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
+    Tr,
 )
 from loguru import logger
 from monsterui.all import *
+from monsterui.all import (
+    CardBody,
+    CardHeader,
+    UkIcon,
+)
+from starlette.requests import Request
 
 from quantide.data.sqlite import db
 from quantide.web.application import fast_app
@@ -21,7 +41,14 @@ from quantide.web.theme import AppTheme
 data_db_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _database_rows_table(col, columns, header_row, page, rows, selected_table, total_pages):
+def _database_rows_table(
+    columns: Sequence[str],
+    header_row: Any,
+    page: int,
+    rows: list[dict[str, Any]],
+    selected_table: str,
+    total_pages: int,
+) -> Any:
     """Database rows table."""
     if rows:
         table_rows = []
@@ -50,18 +77,18 @@ def _database_rows_table(col, columns, header_row, page, rows, selected_table, t
         )
     else:
         table_content = P("表中无数据", cls="text-gray-500 text-center py-12")
-    return col, table_content
+    return table_content
 
 
-def _get_active_tab(req):
+def _get_active_tab(req: Request) -> str:
     return req.query_params.get("tab", "data")
 
 
-def _TabNav(active_tab):
+def _TabNav(active_tab: str) -> Any:
     return DatasetTabs("/data/db", active_tab, [("data", "数据视图"), ("schema", "元数据视图")])
 
 
-def _DataTab(req):
+def _DataTab(req: Request) -> Any:
     """数据视图 Tab 内容"""
     tables = db.db.table_names()
 
@@ -91,8 +118,8 @@ def _DataTab(req):
             # 获取数据行
             rows = list(db.db[selected_table].rows_where(limit=per_page, offset=offset))
 
-            col, table_content = _database_rows_table(
-                col, columns, header_row, page, rows, selected_table, total_pages
+            table_content = _database_rows_table(
+                columns, header_row, page, rows, selected_table, total_pages
             )
 
         except Exception as e:
@@ -131,7 +158,7 @@ def _DataTab(req):
     )
 
 
-def _build_pagination(table: str, current_page: int, total_pages: int):
+def _build_pagination(table: str, current_page: int, total_pages: int) -> Any:
     """构建分页控件"""
     if total_pages <= 1:
         return Div()
@@ -166,7 +193,7 @@ def _build_pagination(table: str, current_page: int, total_pages: int):
     return Div(*items, cls="flex items-center justify-center p-4 border-t")
 
 
-def _SchemaTab(req):
+def _SchemaTab(req: Request) -> Any:
     """元数据视图 Tab 内容"""
     tables = db.db.table_names()
 
@@ -201,7 +228,7 @@ def _SchemaTab(req):
 
 
 @rt("/")
-async def index(req):
+async def index(req: Request) -> Any:
     active_tab = _get_active_tab(req)
 
     if active_tab == "schema":

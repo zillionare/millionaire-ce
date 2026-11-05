@@ -1,15 +1,29 @@
 """Strategy report views."""
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 import fasthtml.common as fh
 from fasthtml.common import *
 from fasthtml.common import (
+    H3,
+    A,
     Div,
+    Input,
+    P,
+    Script,
     Span,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
+    Tr,
 )
 from monsterui.all import *
+from monsterui.all import TableT
+from starlette.requests import Request
 
 from quantide.service.strategy_runtime import strategy_runtime_manager
 from quantide.web.layouts.main import MainLayout
@@ -43,10 +57,16 @@ from quantide.web.pages.strategy_trade_report import (
     _paginate_trade_pairs,
     _sort_trade_pair_rows,
 )
+from quantide.web.session_data import SessionData
 from quantide.web.template_assets import render_asset
 
 
-def _trade_and_position_tables(portfolio_id, trade_sort, trade_direction, trade_page_param):
+def _trade_and_position_tables(
+    portfolio_id: str,
+    trade_sort: str,
+    trade_direction: str,
+    trade_page_param: int,
+) -> tuple[Any, Any]:
     """Trade and position tables."""
     trade_pair_rows = _build_trade_pair_rows(portfolio_id)
     trade_pair_rows = _sort_trade_pair_rows(trade_pair_rows, trade_sort, trade_direction)
@@ -88,7 +108,13 @@ def _trade_and_position_tables(portfolio_id, trade_sort, trade_direction, trade_
     return trade_table, positions_table
 
 
-def _render_backtest_report(query_params, portfolio_id, active_tab, layout, trade_page_param):
+def _render_backtest_report(
+    query_params: Mapping[str, str],
+    portfolio_id: str,
+    active_tab: str,
+    layout: MainLayout,
+    trade_page_param: int,
+) -> Any:
     """Populate the selected report tab and its supporting data views."""
     trade_sort = str(query_params.get("sort") or "").strip()
     if trade_sort not in {TRADE_SORT_BUY_TIME, TRADE_SORT_RETURN}:
@@ -110,27 +136,29 @@ def _render_backtest_report(query_params, portfolio_id, active_tab, layout, trad
             portfolio_id=portfolio_id, status=status, rows=_build_log_rows(portfolio_id, limit=200)
         ),
     }[active_tab]
-    layout.main_block = lambda: Div(
-        Script(src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"),
-        Div(
+    layout.set_main_block(
+        lambda: Div(
+            Script(src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"),
             Div(
-                A(
-                    "← 返回策略详情",
-                    href="javascript:history.back()",
-                    cls="text-gray-500 hover:text-gray-800 mb-4 inline-block",
-                ),
-                _report_error_panel(backtest_error),
-                _build_cheat_on_close_badge(portfolio_id),
-                active_panel,
-                cls="max-w-6xl mx-auto py-8",
-            )
-        ),
-        _strategy_modal_script(),
-        Div(id="modal-container"),
+                Div(
+                    A(
+                        "← 返回策略详情",
+                        href="javascript:history.back()",
+                        cls="text-gray-500 hover:text-gray-800 mb-4 inline-block",
+                    ),
+                    _report_error_panel(backtest_error),
+                    _build_cheat_on_close_badge(portfolio_id),
+                    active_panel,
+                    cls="max-w-6xl mx-auto py-8",
+                )
+            ),
+            _strategy_modal_script(),
+            Div(id="modal-container"),
+        )
     )
 
 
-def _normalize_backtest_tab(value: Any) -> str:
+def _normalize_backtest_tab(value: object) -> str:
     """规范化回测报告标签。"""
     key = str(value or "overview").strip().lower()
     if key not in BACKTEST_REPORT_TABS:
@@ -176,7 +204,7 @@ def _build_backtest_sidebar_menu(
     ]
 
 
-def _build_cheat_on_close_badge(portfolio_id: str):
+def _build_cheat_on_close_badge(portfolio_id: str) -> Any:
     """回测报告 header 区 amber badge (#49).
 
     当 cheat_on_close=True 时显示 amber badge + cheat_on_close_time, 提示用户
@@ -210,7 +238,7 @@ def _build_cheat_on_close_badge(portfolio_id: str):
 
 
 @rt("/backtest/{portfolio_id}")
-def backtest_result(req, session, portfolio_id: str):
+def backtest_result(req: Request, session: SessionData, portfolio_id: str) -> Any:
     layout = MainLayout(title="回测报告", user=session.get("auth"))
     layout.header_active = "策略"
     query_params = getattr(req, "query_params", {}) or {}
@@ -250,7 +278,7 @@ REPORT_METRICS = [
 ]
 
 
-def _report_metrics(metrics_payload):
+def _report_metrics(metrics_payload: Mapping[str, Any]) -> Any:
     """Render the named metrics with one formatting rule."""
     metrics_entries = []
     for key, label, fmt in REPORT_METRICS:
@@ -268,7 +296,7 @@ def _report_metrics(metrics_payload):
     return metrics_text
 
 
-def _report_overview(portfolio_id):
+def _report_overview(portfolio_id: str) -> Any:
     """Compose the metrics, date filters and equity chart for one report."""
     date_axis = _build_date_axis(portfolio_id)
     series_payload = _build_series_payload(portfolio_id, date_axis)
@@ -332,7 +360,7 @@ def _report_overview(portfolio_id):
     return overview_panel
 
 
-def _report_error_panel(backtest_error):
+def _report_error_panel(backtest_error: str | None) -> Any:
     return (
         Div(
             H3("运行错误", cls="text-sm font-semibold text-red-700 mb-2"),
@@ -344,7 +372,7 @@ def _report_error_panel(backtest_error):
     )
 
 
-def _report_data_panel(title, panel_id, table):
+def _report_data_panel(title: str, panel_id: str, table: Any) -> Any:
     return Div(
         H3(title, cls="text-xl font-bold mb-4"),
         table,

@@ -42,7 +42,9 @@ DEFAULT_HOLDING_DAYS = (1, 2, 3, 5, 10, 20)
 MIN_CROSS_SECTION = 100
 
 
-def _append_decile_summaries(buckets, totals, result):
+def _append_decile_summaries(
+    buckets: int, totals: dict[int, list[float]], result: list[DecileBucket]
+) -> None:
     """Append decile summaries."""
     for bucket in range(1, buckets + 1):
         values = totals[bucket]
@@ -519,14 +521,14 @@ def main(argv: list[str] | None = None) -> int:
 class _FactorBatch:
     """Accumulate per-day IC, yearly IC and bucket returns in a single traversal."""
 
-    def __init__(self, factors, buckets):
+    def __init__(self, factors: list[str], buckets: int) -> None:
         self.factors, self.buckets = factors, buckets
-        self.ics = {factor: [] for factor in factors}
-        self.year_ics = {}
+        self.ics: dict[str, list[float]] = {factor: [] for factor in factors}
+        self.year_ics: dict[int, dict[str, list[float]]] = {}
         self.sums = {factor: np.zeros(buckets + 1) for factor in factors}
         self.counts = {factor: np.zeros(buckets + 1) for factor in factors}
 
-    def add(self, group):
+    def add(self, group: pl.DataFrame) -> None:
         if group.height < MIN_CROSS_SECTION:
             return
         y = group["forward"].to_numpy().astype(float)
@@ -534,7 +536,7 @@ class _FactorBatch:
         for factor in self.factors:
             self._add_factor(factor, group[factor].to_numpy().astype(float), y, year)
 
-    def _add_factor(self, factor, x, y, year):
+    def _add_factor(self, factor: str, x: np.ndarray, y: np.ndarray, year: int | None) -> None:
         mask = np.isfinite(x) & np.isfinite(y)
         if int(mask.sum()) < MIN_CROSS_SECTION:
             return
@@ -547,14 +549,20 @@ class _FactorBatch:
         labels = np.floor(_average_ranks(x) / len(x) * self.buckets).astype(int) + 1
         self._add_buckets(factor, labels, y)
 
-    def _add_buckets(self, factor, labels, y):
+    def _add_buckets(self, factor: str, labels: np.ndarray, y: np.ndarray) -> None:
         for bucket in range(1, self.buckets + 1):
             picked = y[labels == bucket]
             if picked.size:
                 self.sums[factor][bucket] += float(picked.sum())
                 self.counts[factor][bucket] += int(picked.size)
 
-    def result(self):
+    def result(
+        self,
+    ) -> tuple[
+        dict[str, list[float]],
+        dict[int, dict[str, list[float]]],
+        dict[str, list[tuple[int, int, float]]],
+    ]:
         deciles = {
             factor: [
                 (bucket, int(self.counts[factor][bucket]), float(self.sums[factor][bucket]))

@@ -1,5 +1,6 @@
 """Strategy trade report."""
 
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -7,16 +8,26 @@ from fasthtml.common import *
 from fasthtml.common import (
     A,
     Div,
+    Form,
+    Input,
     P,
     Span,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
+    Tr,
 )
 from monsterui.all import *
 from monsterui.all import (
     H3,
     Button,
+    TableT,
 )
+from starlette.requests import Request
 
-from quantide.service.trade_pairs import build_trade_pairs
+from quantide.service.trade_pairs import TradePair, build_trade_pairs
 from quantide.web.components.analysis.trade_kline import (
     build_trade_kline_payload,
     render_trade_kline_chart,
@@ -32,7 +43,11 @@ from quantide.web.pages.strategy_routes import (
 )
 
 
-def _trade_pair_detail_table(_sort_header, portfolio_id, rows):
+def _trade_pair_detail_table(
+    _sort_header: Callable[[str, str], Any],
+    portfolio_id: str,
+    rows: list[dict[str, Any]],
+) -> Any:
     """Render trade pair values and links using the selected sort header."""
     table = Table(
         Thead(
@@ -85,7 +100,7 @@ def _trade_pair_detail_table(_sort_header, portfolio_id, rows):
     return table
 
 
-def _ordered_trade_pairs(portfolio_id: str) -> list[Any]:
+def _ordered_trade_pairs(portfolio_id: str) -> list[TradePair]:
     """按买入时间倒序返回成交对（与交易明细表顺序一致）。
 
     Args:
@@ -97,7 +112,7 @@ def _ordered_trade_pairs(portfolio_id: str) -> list[Any]:
     return list(reversed(build_trade_pairs(portfolio_id)))
 
 
-def _build_trade_pair_rows(portfolio_id: str) -> list[dict]:
+def _build_trade_pair_rows(portfolio_id: str) -> list[dict[str, Any]]:
     """构建成交对明细行（按买入时间倒序）。
 
     Args:
@@ -128,7 +143,9 @@ def _build_trade_pair_rows(portfolio_id: str) -> list[dict]:
     return rows
 
 
-def _sort_trade_pair_rows(rows: list[dict], sort: str = "", direction: str = "asc") -> list[dict]:
+def _sort_trade_pair_rows(
+    rows: list[dict[str, Any]], sort: str = "", direction: str = "asc"
+) -> list[dict[str, Any]]:
     """按指定字段排序成交对。
 
     Args:
@@ -151,8 +168,8 @@ def _sort_trade_pair_rows(rows: list[dict], sort: str = "", direction: str = "as
 
 
 def _paginate_trade_pairs(
-    rows: list[dict], page: int, page_size: int = TRADE_PAIRS_PAGE_SIZE
-) -> tuple[list[dict], int, int, int]:
+    rows: list[dict[str, Any]], page: int, page_size: int = TRADE_PAIRS_PAGE_SIZE
+) -> tuple[list[dict[str, Any]], int, int, int]:
     """对成交对分页。
 
     Args:
@@ -172,7 +189,7 @@ def _paginate_trade_pairs(
 
 def _build_trade_pair_table(
     portfolio_id: str,
-    rows: list[dict],
+    rows: list[dict[str, Any]],
     page: int,
     total_pages: int,
     total: int,
@@ -249,7 +266,7 @@ def _trade_kline_modal_url(
     return url
 
 
-def _trade_pair_nav_url(portfolio_id: str, pair: Any, panel: str = "") -> str:
+def _trade_pair_nav_url(portfolio_id: str, pair: TradePair, panel: str = "") -> str:
     """构建成交对 K 线弹窗的跳转链接。"""
     return _trade_kline_modal_url(portfolio_id, pair.buy_tid, pair.sell_tid, panel)
 
@@ -303,7 +320,7 @@ def _trade_kline_modal_title(
 
 
 @rt("/backtest/{portfolio_id}/trade/kline/modal")
-def trade_kline_modal(req, portfolio_id: str):
+def trade_kline_modal(req: Request, portfolio_id: str) -> Any:
     """成交对 K 线弹窗路由：展示个股 K 线、买卖点与交易信息。"""
     query = getattr(req, "query_params", {}) or {}
     buy_tid = str(query.get("buy_tid") or "").strip()
@@ -333,7 +350,14 @@ def trade_kline_modal(req, portfolio_id: str):
     )
 
 
-def _trade_pair_pagination(page, total_pages, page_link, sort, direction, total):
+def _trade_pair_pagination(
+    page: int,
+    total_pages: int,
+    page_link: Callable[..., Any],
+    sort: str,
+    direction: str,
+    total: int,
+) -> Any:
     """Render a five-page window and a jump control with the current sorting."""
     page_links = []
     start_page = max(1, page - 2)

@@ -31,7 +31,7 @@ class IndexBarsStore(BarStore):
         """
         super().__init__("IndexBars", path, calendar, "sector_id")
 
-    def get(
+    def get(  # type: ignore[override]
         self,
         symbols: list[str] | None = None,
         start: datetime.date | datetime.datetime | None = None,
@@ -51,7 +51,7 @@ class IndexBarsStore(BarStore):
         """
         return self._read_bars(symbols, start, end, eager_mode, full_day=False)
 
-    def fetch(
+    def fetch(  # type: ignore[override]
         self,
         symbol: str,
         start: datetime.date,

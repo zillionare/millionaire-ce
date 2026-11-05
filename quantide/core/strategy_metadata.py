@@ -1,6 +1,6 @@
 """Immutable discovered-strategy metadata and its shared legacy field schema."""
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
@@ -15,8 +15,3 @@ class StrategyMetadata:
     module: str
     is_builtin: bool
     default_config: dict[str, Any] = field(default_factory=dict)
-
-
-def metadata_annotations() -> dict[str, Any]:
-    """Share fields with the mutable persistence DTO without dataclass inheritance."""
-    return {item.name: item.type for item in fields(StrategyMetadata)}

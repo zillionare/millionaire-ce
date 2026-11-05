@@ -110,9 +110,7 @@ class GatewayBrokerWrapper(BarViewFacade, OrderConvenience, AbstractBroker):
             forming_applied = True
 
         if not forming_applied and "adjust" in hist.columns and not hist.is_empty():
-            hist = cast(
-                pl.DataFrame, qfq_adjustment(hist, adj_factor_col="adjust", eager_mode=True)
-            )
+            hist = qfq_adjustment(hist, adj_factor_col="adjust", eager_mode=True)
         return hist
 
     def _provider_get_bars(
@@ -432,9 +430,7 @@ class GatewayBrokerWrapper(BarViewFacade, OrderConvenience, AbstractBroker):
         """Estimate a deferred limit order from its scheduled reference session."""
         end_date, column = self._limit_price_reference(order)
         try:
-            history = cast(
-                pl.DataFrame, daily_bars.get_bars(n=2, end=end_date, assets=[order["asset"]])
-            )
+            history = daily_bars.get_bars(n=2, end=end_date, assets=[order["asset"]])
             base = (
                 float(history.row(-1, named=True).get(column, 0.0) or 0.0)
                 if history is not None and not history.is_empty()

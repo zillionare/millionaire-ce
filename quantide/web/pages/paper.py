@@ -4,6 +4,8 @@ from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
+    H1,
+    H2,
     H3,
     A,
     Button,
@@ -12,6 +14,7 @@ from fasthtml.common import (
     Input,
     Label,
     P,
+    RedirectResponse,
     Span,
     Table,
     Tbody,
@@ -22,28 +25,30 @@ from fasthtml.common import (
 )
 from loguru import logger
 from monsterui.all import UkIcon
+from starlette.requests import Request
 
 from quantide.core.enums import BrokerKind
 from quantide.web.application import fast_app
 from quantide.web.components.asset_label import resolve_asset_name
 from quantide.web.layouts.main import MainLayout
 from quantide.web.services.trade_orders import submit_share_form
+from quantide.web.session_data import SessionData
 from quantide.web.theme import AppTheme
 
 paper_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _get_registry(req) -> Any:
+def _get_registry(req: Request) -> Any:
     return req.scope.get("registry")
 
 
-def _resolve_account_id(req) -> str | None:
+def _resolve_account_id(req: Request) -> str | None:
     """从 query string 读取 account_id。"""
     params = req.query_params
     return params.get("account_id") or None
 
 
-def _resolve_default_paper_account(req) -> str | None:
+def _resolve_default_paper_account(req: Request) -> str | None:
     """无 account_id 时取第一个 SIMULATION 账户。"""
     reg = _get_registry(req)
     if reg is None:
@@ -51,11 +56,12 @@ def _resolve_default_paper_account(req) -> str | None:
     sims = reg.list_by_kind(BrokerKind.SIMULATION)
     if not sims:
         return None
-    return sims[0].get("id")
+    account_id = sims[0].get("id")
+    return account_id if isinstance(account_id, str) else None
 
 
 @rt("/")
-def paper_list(req, session):
+def paper_list(req: Request, session: SessionData) -> Any:
     """`GET /trade/paper/` 已废弃：统一跳转到 /trade（带 account_id）。"""
     account_id = _resolve_account_id(req)
     if account_id:
@@ -81,7 +87,7 @@ def _fmt_money(value: Any) -> str:
         return "0.00"
 
 
-def AssetSummary(asset_overview: dict | None = None, **kwargs):
+def AssetSummary(asset_overview: dict[str, Any] | None = None, **kwargs: Any) -> Any:
     """资产概览：白底卡片 + 分隔线，与项目整体风格一致。"""
     overview = asset_overview or {}
     pnl = float(overview.get("pnl") or 0.0)
@@ -111,7 +117,7 @@ def AssetSummary(asset_overview: dict | None = None, **kwargs):
     )
 
 
-def _paper_position_row(p):
+def _paper_position_row(p: Any) -> Any:
     """Render one row with its display values and available actions."""
     pnl_pct = (p.profit / (p.mv - p.profit)) if (p.mv - p.profit) != 0 else 0
     current_price = p.mv / p.shares if p.shares > 0 else 0
@@ -148,7 +154,7 @@ def PositionInfo(positions: list[Any] | None = None, portfolio_id: str = "") -> 
         ("盈亏比例", "text-right"),
     ]
 
-    rows = []
+    rows: list[Any] = []
     if positions:
         rows.extend(_paper_position_row(p) for p in positions)
     else:
@@ -361,7 +367,7 @@ def _render_paper_account(layout: MainLayout, broker: Any) -> Any:
 
     positions = broker.positions if hasattr(broker, "positions") else []
 
-    def main_block():
+    def main_block() -> Any:
         return Div(
             A(
                 "← 返回仿真列表",
@@ -407,11 +413,11 @@ def _render_paper_account(layout: MainLayout, broker: Any) -> Any:
             cls="space-y-6",
         )
 
-    layout.main_block = main_block
+    layout.set_main_block(main_block)
     return layout.render()
 
 
-def _render_paper_picker(layout: MainLayout, sims: list[dict]) -> Any:
+def _render_paper_picker(layout: MainLayout, sims: list[dict[str, Any]]) -> Any:
     rows = []
     for info in sims:
         account_id = info.get("id", "")
@@ -439,7 +445,7 @@ def _render_paper_picker(layout: MainLayout, sims: list[dict]) -> Any:
         ),
     )
 
-    def main_block():
+    def main_block() -> Any:
         return Div(
             H2("请选择仿真账户", cls="text-lg font-bold mb-4"),
             P("当前系统中有多个仿真账户，请选择一个进入。", cls="text-sm text-gray-600 mb-4"),
@@ -447,12 +453,12 @@ def _render_paper_picker(layout: MainLayout, sims: list[dict]) -> Any:
             cls="p-4 bg-white rounded-xl shadow-sm border border-gray-100",
         )
 
-    layout.main_block = main_block
+    layout.set_main_block(main_block)
     return layout.render()
 
 
 def _render_empty_paper(layout: MainLayout) -> Any:
-    def main_block():
+    def main_block() -> Any:
         return Div(
             H2("暂无仿真账户", cls="text-lg font-bold mb-2"),
             P(
@@ -462,24 +468,24 @@ def _render_empty_paper(layout: MainLayout) -> Any:
             cls="p-6 bg-white rounded-xl shadow-sm border border-gray-100",
         )
 
-    layout.main_block = main_block
+    layout.set_main_block(main_block)
     return layout.render()
 
 
-def _render_no_registry(session) -> Any:
+def _render_no_registry(session: SessionData) -> Any:
     layout = MainLayout(title="仿真交易", user=session.get("auth"))
 
-    def main_block():
+    def main_block() -> Any:
         return Div(
             P("Broker registry 不可用。", cls="text-red-500 p-4"),
         )
 
-    layout.main_block = main_block
+    layout.set_main_block(main_block)
     return layout.render()
 
 
 @rt("/{portfolio_id}/positions")
-def get_positions(req, portfolio_id: str):
+def get_positions(req: Request, portfolio_id: str) -> Any:
     reg = _get_registry(req)
     broker = reg.get(BrokerKind.SIMULATION, portfolio_id) if reg else None
     positions = list(broker.positions) if broker and hasattr(broker, "positions") else []
@@ -487,7 +493,7 @@ def get_positions(req, portfolio_id: str):
 
 
 @rt("/{portfolio_id}/order", methods=["POST"])
-async def place_order(req, portfolio_id: str):
+async def place_order(req: Request, portfolio_id: str) -> Any:
     reg = _get_registry(req)
     broker = reg.get(BrokerKind.SIMULATION, portfolio_id) if reg else None
 

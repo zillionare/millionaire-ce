@@ -14,11 +14,16 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polars as pl
+
+if TYPE_CHECKING:
+    from quantide.strategies.example._ml_explanation import MLExplanation
+    from quantide.strategies.example.ml_momentum_reversal import MLMomentumReversalStrategy
 
 from quantide.config.settings import get_data_home
 from quantide.data.models.calendar import calendar
@@ -31,7 +36,13 @@ from quantide.factors.alpha import (
 )
 
 
-def _training_feature_panel(feature_cols, label_cache_key, hist_df, horizon, train_window):
+def _training_feature_panel(
+    feature_cols: Sequence[str] | None,
+    label_cache_key: tuple[Any, ...] | None,
+    hist_df: pl.DataFrame,
+    horizon: int,
+    train_window: int,
+) -> tuple[list[str], pl.DataFrame]:
     """Training feature panel."""
     selected_features = tuple(feature_cols or FEATURE_COLS)
     z_cols = [f"{c}_z" for c in selected_features]
@@ -92,7 +103,12 @@ def _training_feature_panel(feature_cols, label_cache_key, hist_df, horizon, tra
     return z_cols, valid_train
 
 
-def _append_ranked_candidates(ranked, results, date_str, model_engine):
+def _append_ranked_candidates(
+    ranked: pl.DataFrame,
+    results: list[dict[str, Any]],
+    date_str: str,
+    model_engine: str,
+) -> None:
     """Append ranked candidates."""
     for idx, row in enumerate(ranked.iter_rows(named=True), start=1):
         asset = str(row["asset"])
@@ -122,7 +138,7 @@ def _append_ranked_candidates(ranked, results, date_str, model_engine):
         )
 
 
-def _append_price_action_reasons(row, rs20, parts):
+def _append_price_action_reasons(row: Mapping[str, Any], rs20: float, parts: list[str]) -> None:
     """Append momentum, resilience and candle signals to a stock explanation."""
     rs5 = float(row.get("rs_board_5d") or 0.0)
     if abs(rs20) >= abs(rs5) or rs20 > 0:
@@ -159,7 +175,7 @@ except ImportError:  # pragma: no cover
 
 
 #: 流水线版本（策略源码哈希）：策略逻辑变化时归因缓存自动失效
-def _pipeline_version(source_file=None):
+def _pipeline_version(source_file: str | Path | None = None) -> str:
     """Invalidate model artifacts when any implementation component changes."""
     digest = hashlib.sha256()
     source = (
@@ -174,7 +190,14 @@ def _pipeline_version(source_file=None):
 PIPELINE_VERSION: str = _pipeline_version()
 
 
-def _ranked_prediction_result(cross_df, model, engine, feature_cols, target_date, top_k):
+def _ranked_prediction_result(
+    cross_df: pl.DataFrame,
+    model: object | None,
+    engine: str,
+    feature_cols: Sequence[str] | None,
+    target_date: datetime.date,
+    top_k: int,
+) -> tuple[list[dict[str, Any]], dict[str, float], dict[str, int]]:
     """Score a cross-section and expose candidates, prices and complete ranks."""
     scores = _score_cross_section(cross_df, model, engine, feature_cols)
     scored_df = cross_df.with_columns(pl.Series("ml_score", scores)).sort(
@@ -194,7 +217,12 @@ def _ranked_prediction_result(cross_df, model, engine, feature_cols, target_date
     return ranked, price_map, full_ranks
 
 
-def _training_return_labels(hist_df, horizon, label_key, labels):
+def _training_return_labels(
+    hist_df: pl.DataFrame,
+    horizon: int,
+    label_key: tuple[Any, ...] | None,
+    labels: pl.DataFrame | None,
+) -> pl.DataFrame:
     """Training return labels."""
     if labels is None:
         labels = compute_future_close_return_labels(
@@ -207,7 +235,13 @@ def _training_return_labels(hist_df, horizon, label_key, labels):
     return labels
 
 
-def _describe_moving_average_signal(ma20_bounce, ma20_slope, ma_align, parts, sharpe_mom):
+def _describe_moving_average_signal(
+    ma20_bounce: float,
+    ma20_slope: float,
+    ma_align: float,
+    parts: list[str],
+    sharpe_mom: float,
+) -> None:
     """Describe moving average signal."""
     if ma20_bounce > 0.5:
         parts.append("MA20回踩支撑")
@@ -220,8 +254,14 @@ def _describe_moving_average_signal(ma20_bounce, ma20_slope, ma_align, parts, sh
 
 
 def _resolve_explanation_training_windows(
-    bt_end, bt_start, build_signal, refit_build, refit_signal, self, signal_date
-):
+    bt_end: datetime.date | None,
+    bt_start: datetime.date | None,
+    build_signal: datetime.date | None,
+    refit_build: datetime.date | None,
+    refit_signal: datetime.date | None,
+    self: MLExplanation,
+    signal_date: datetime.date,
+) -> tuple[datetime.date | None, datetime.date | None, datetime.date | None]:
     """Resolve explanation training windows."""
     if bt_start is not None and bt_end is not None:
         try:
@@ -233,7 +273,12 @@ def _resolve_explanation_training_windows(
     return build_signal, refit_build, refit_signal
 
 
-def _retrain_replay_model(hist_slice, is_live, self, signal_date):
+def _retrain_replay_model(
+    hist_slice: pl.DataFrame,
+    is_live: bool,
+    self: MLMomentumReversalStrategy,
+    signal_date: datetime.date,
+) -> None:
     """Retrain replay model."""
     if not is_live and self._should_retrain(signal_date):
         training_df = self._training_slice(hist_slice, signal_date)
@@ -254,7 +299,7 @@ def _retrain_replay_model(hist_slice, is_live, self, signal_date):
         self._mark_retrained()
 
 
-def _bars_fingerprint() -> tuple[Any, ...]:
+def _bars_fingerprint() -> tuple[object, ...]:
     """行情数据的轻量指纹（数据更新后使面板缓存失效）。"""
     try:
         return (
@@ -280,7 +325,7 @@ _LABEL_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
 _LABEL_CACHE_MAX = 6
 
 #: 归因用的模型缓存（按训练参数 + 因子集 + 截面日 + 持仓键控）
-_EXPLAIN_MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, str]] = {}
+_EXPLAIN_MODEL_CACHE: dict[tuple[Any, ...], tuple[object, str]] = {}
 
 #: 归因用的截面缓存（只保留当前这一条：约 2000 行、1MB）
 _EXPLAIN_CROSS_SECTION_CACHE: dict[tuple[Any, ...], pl.DataFrame] = {}
@@ -395,7 +440,7 @@ def _fit_ml_model(
     use_lightgbm: bool = True,
     feature_cols: list[str] | None = None,
     label_cache_key: tuple[Any, ...] | None = None,
-) -> tuple[Any, str]:
+) -> tuple[object | None, str]:
     """Train the ranking model strictly on leak-free historical samples.
 
     The target is the future ``horizon``-trading-day close return computed from
@@ -447,9 +492,9 @@ def _fit_ml_model(
 
 def _score_cross_section(
     pred_df: pl.DataFrame,
-    model: Any,
+    model: object | None,
     model_engine: str,
-    feature_cols: list[str] | None = None,
+    feature_cols: Sequence[str] | None = None,
 ) -> np.ndarray:
     """预测目标日截面的模型得分（截面 z-score，不含任何手工先验）。"""
     cols = feature_cols or FEATURE_COLS
@@ -462,8 +507,9 @@ def _score_cross_section(
     if model is None:
         raise RuntimeError("模型不可用，无法计算截面得分")
 
-    if model_engine == "LightGBM" and hasattr(model, "predict"):
-        raw_pred = np.asarray(model.predict(x_pred), dtype=np.float64)
+    predict = getattr(model, "predict", None)
+    if model_engine == "LightGBM" and callable(predict):
+        raw_pred = np.asarray(predict(x_pred), dtype=np.float64)
         return _zscore_1d(raw_pred) if len(x_pred) > 1 else raw_pred
 
     if isinstance(model, np.ndarray):
@@ -473,11 +519,11 @@ def _score_cross_section(
     raise RuntimeError(f"未知的模型引擎: {model_engine}")
 
 
-def _signal_value(row, key, default=0.0):
+def _signal_value(row: Mapping[str, Any], key: str, default: float = 0.0) -> float:
     return float(row.get(key) or default)
 
 
-def _reversal_pattern(row):
+def _reversal_pattern(row: Mapping[str, Any]) -> str | None:
     if _signal_value(row, "low_open_bull") > 0.0004 or (
         _signal_value(row, "overnight_gap") < -0.004 and _signal_value(row, "intraday_ret") > 0.012
     ):
@@ -489,7 +535,7 @@ def _reversal_pattern(row):
     return None
 
 
-def _trend_pattern(row):
+def _trend_pattern(row: Mapping[str, Any]) -> str | None:
     if _signal_value(row, "ret_1d") >= 0.035 and _signal_value(row, "vol_ratio_5_20", 1.0) >= 1.15:
         return "放量突破动量"
     if (
@@ -620,14 +666,14 @@ def _cap_universe(
 
 
 def _filter_universe(
-    bars_df,
-    target_date,
-    universe_size,
-    mode="market_cap_trim",
-    trim_pct=0.05,
-    holdings=None,
-    index_codes=None,
-):
+    bars_df: pl.DataFrame,
+    target_date: datetime.date,
+    universe_size: int,
+    mode: str = "market_cap_trim",
+    trim_pct: float = 0.05,
+    holdings: list[str] | None = None,
+    index_codes: list[str] | None = None,
+) -> list[str]:
     """Select a tradable point-in-time pool, retaining eligible held securities."""
     on_date = bars_df.filter(pl.col("date") == target_date)
     if on_date.is_empty():
@@ -639,9 +685,9 @@ def _filter_universe(
             return _cap_universe(cap, universe_size, holdings, mode)
         mode = "market_cap_trim"
     if mode == "market_cap_trim" and "total_mv" in on_date.columns:
-        cap = _trim_market_cap(on_date, trim_pct)
-        if cap is not None:
-            return _cap_universe(cap, universe_size, holdings, mode)
+        trimmed_cap = _trim_market_cap(on_date, trim_pct)
+        if trimmed_cap is not None:
+            return _cap_universe(trimmed_cap, universe_size, holdings, mode)
     eligible = _eligible_universe(on_date, True)
     if eligible.is_empty():
         return []
@@ -676,7 +722,9 @@ def _drop_st_names(frame: pl.DataFrame) -> pl.DataFrame:
     return frame
 
 
-def _liquidity_universe(bars_df, eligible, universe_size):
+def _liquidity_universe(
+    bars_df: pl.DataFrame, eligible: pl.DataFrame, universe_size: int
+) -> list[str]:
     """Rank eligible securities by their trailing mean traded amount."""
     cols = set(bars_df.columns)
     assets = eligible["asset"].unique().to_list()
@@ -695,7 +743,7 @@ def _liquidity_universe(bars_df, eligible, universe_size):
     return top_liquid["asset"].to_list()
 
 
-def _eligible_universe(frame, require_close):
+def _eligible_universe(frame: pl.DataFrame, require_close: bool) -> pl.DataFrame:
     """Exclude suspended and ST securities after a pool's size filter."""
     condition = pl.col("volume") > 0
     if require_close:
@@ -705,7 +753,7 @@ def _eligible_universe(frame, require_close):
     return _drop_st_names(frame.filter(condition))
 
 
-def _trim_market_cap(on_date, trim_pct):
+def _trim_market_cap(on_date: pl.DataFrame, trim_pct: float) -> pl.DataFrame | None:
     """Trim an exact number from both cap tails before tradability filtering."""
     cap = on_date.filter(
         (pl.col("close") > 0) & pl.col("total_mv").is_not_null() & (pl.col("total_mv") > 0)

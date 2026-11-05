@@ -22,9 +22,8 @@ from __future__ import annotations
 import datetime
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from typing import Any
 
 import pandas as pd
 from filelock import FileLock
@@ -98,7 +97,7 @@ class BaostockMinuteFetcher:
     def __enter__(self) -> BaostockMinuteFetcher:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
 
     # ------------------------------------------------------------------
@@ -125,13 +124,13 @@ class BaostockMinuteFetcher:
             raise BaostockThrottledError(f"BaoStock 黑名单冻结/冷却期至 {until}: {message}")
         raise BaostockThrottledError(f"BaoStock 请求失败: {message}")
 
-    def _retry_error(self, message, attempt):
+    def _retry_error(self, message: str, attempt: int) -> None:
         if self._is_blocking(message) or attempt >= DEFAULT_RETRIES:
             self._handle_error(message)
         time.sleep(attempt + 1)
 
     @contextmanager
-    def _session(self):
+    def _session(self) -> Iterator[None]:
         # BaoStock uses a module-global socket. Lock login, query iteration and logout
         # together across all fetchers, and serialize other local processes as well.
         with self._lock, FileLock(str(self._budget.path) + ".session.lock", timeout=60):
@@ -221,7 +220,9 @@ class BaostockMinuteFetcher:
 
             raise BaostockThrottledError(f"BaoStock 抓取失败: {last_error}")
 
-    def fetch_trading_status(self, asset, start, end):
+    def fetch_trading_status(
+        self, asset: str, start: datetime.date, end: datetime.date
+    ) -> pd.DataFrame:
         """Read explicit suspended-session flags to distinguish absence from source gaps."""
         code = self._to_baostock_code(asset)
         self._budget.path.parent.mkdir(parents=True, exist_ok=True)
@@ -253,7 +254,7 @@ class BaostockMinuteFetcher:
         end_date: datetime.date,
         frequency: str = "30",
         adjust: str = "3",
-        progress: Any = None,
+        progress: Callable[[int, int], None] | None = None,
     ) -> pd.DataFrame:
         """串行抓取多只股票的分钟线（受每日预算限制）。
 

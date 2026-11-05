@@ -1,5 +1,7 @@
 import datetime
+from typing import Any
 
+from quantide.core.ports.broker import StrategyBroker
 from quantide.core.strategy import BaseStrategy
 
 
@@ -7,10 +9,10 @@ class DualMAStrategy(BaseStrategy):
     """双均线策略示例 (FR-090)"""
 
     @staticmethod
-    def default_config() -> dict:
+    def default_config() -> dict[str, Any]:
         return {"fast": 5, "slow": 20}
 
-    def __init__(self, broker, config):
+    def __init__(self, broker: StrategyBroker, config: dict[str, Any]) -> None:
         super().__init__(broker, config)
         self.fast_window = int(self.config.get("fast", 5))
         self.slow_window = int(self.config.get("slow", 20))

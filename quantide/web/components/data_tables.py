@@ -1,9 +1,12 @@
 """Table shells for market datasets and compact account details."""
 
+from collections.abc import Callable, Sequence
+from typing import Any
+
 from fasthtml.common import A, Div, Span, Table, Tbody, Th, Thead, Tr
 
 
-def DatasetTable(headers, rows):
+def DatasetTable(headers: Sequence[str], rows: Sequence[object]) -> Any:
     return Div(
         Table(
             Thead(
@@ -24,7 +27,7 @@ def DatasetTable(headers, rows):
     )
 
 
-def AccountDetailTable(headers, rows):
+def AccountDetailTable(headers: Sequence[str], rows: Sequence[object]) -> Any:
     return Table(
         Thead(Tr(*[Th(label, cls="text-xs font-bold") for label in headers])),
         Tbody(*rows),
@@ -35,7 +38,14 @@ def AccountDetailTable(headers, rows):
     )
 
 
-def DatasetPagination(info, page, per_page, total_pages, url, button_class):
+def DatasetPagination(
+    info: object,
+    page: int,
+    per_page: int,
+    total_pages: int,
+    url: Callable[[int, int], str],
+    button_class: Callable[[bool], str],
+) -> Any:
     return Div(
         Div(info, cls="text-sm text-gray-700"),
         Div(

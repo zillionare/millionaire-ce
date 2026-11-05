@@ -1,12 +1,16 @@
 """账号管理页面"""
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
+from typing import Any, cast
 
 from fasthtml.common import *
 from fasthtml.common import (
     A,
     Div,
+    Input,
     P,
     Script,
     Span,
@@ -21,10 +25,13 @@ from monsterui.all import (
     Form,
     UkIcon,
 )
+from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
 from quantide.config.features import supports_live_trading
 from quantide.core.enums import BrokerKind
+from quantide.core.ports.broker import BrokerPort
+from quantide.core.ports.market_data import MarketDataPort
 from quantide.core.runtime.registration import register_port_backed_broker
 from quantide.data.sqlite import db
 from quantide.service.registry import BrokerRegistry
@@ -32,34 +39,37 @@ from quantide.service.sim_broker import PaperBroker
 from quantide.web.application import fast_app
 from quantide.web.components.navigation import SystemBreadcrumb
 from quantide.web.layouts.main import MainLayout
+from quantide.web.session_data import SessionData
 from quantide.web.theme import AppTheme
 
 accounts_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
-def _account_capital_values(broker, principal, total):
+def _account_capital_values(
+    broker: object | None, principal: float, total: float
+) -> tuple[float, float]:
     """Account capital values."""
     if broker:
         # QMTBroker 使用 asset 属性
         asset = getattr(broker, "asset", None)
         if asset:
-            total = getattr(asset, "total", 0)
-            principal = getattr(asset, "principal", 0)
+            total = float(getattr(asset, "total", 0) or 0)
+            principal = float(getattr(asset, "principal", 0) or 0)
     return principal, total
 
 
-def _get_registry(req) -> BrokerRegistry:
-    return req.scope.get("registry")
+def _get_registry(req: Request) -> BrokerRegistry:
+    return cast(BrokerRegistry, req.scope.get("registry"))
 
 
-def _get_market_data(req):
+def _get_market_data(req: Request) -> MarketDataPort | None:
     runtime = getattr(req.app.state, "runtime", None)
     if runtime is None:
         return None
-    return getattr(runtime, "market_data", None)
+    return cast(MarketDataPort | None, getattr(runtime, "market_data", None))
 
 
-def LiveAccountCard(account: dict, is_active: bool = False):
+def LiveAccountCard(account: dict[str, Any], is_active: bool = False) -> Any:
     """实盘账号卡片"""
     status_color = (
         "bg-green-100 text-green-700" if account.get("status") else "bg-gray-100 text-gray-500"
@@ -115,7 +125,7 @@ def LiveAccountCard(account: dict, is_active: bool = False):
     )
 
 
-def SimAccountCard(account: dict, is_active: bool = False):
+def SimAccountCard(account: dict[str, Any], is_active: bool = False) -> Any:
     """仿真账号卡片"""
     total = account.get("total", 0)
     principal = account.get("principal", 0)
@@ -188,7 +198,7 @@ def SimAccountCard(account: dict, is_active: bool = False):
 
 def ConfirmDialogModal(
     dialog_id: str, title: str, message: str, confirm_url: str, confirm_method: str = "POST"
-):
+) -> Any:
     """确认对话框组件"""
     return Div(
         Div(
@@ -221,12 +231,12 @@ def ConfirmDialogModal(
 
 
 def AccountsPage(
-    live_accounts: list[dict],
-    sim_accounts: list[dict],
+    live_accounts: list[dict[str, Any]],
+    sim_accounts: list[dict[str, Any]],
     active_kind: str = "",
     active_id: str = "",
     show_create_modal: bool = False,
-):
+) -> Any:
     """账号管理页面主内容"""
     # 弹窗显示脚本
     modal_script = Script(
@@ -345,7 +355,7 @@ def AccountsPage(
     )
 
 
-def accounts_list(request):
+def accounts_list(request: Request) -> Any:
     """账号管理主页面"""
     session = request.scope.get("session", {})
     layout = MainLayout(title="账号管理", user=session.get("auth"))
@@ -359,46 +369,45 @@ def accounts_list(request):
     active_id = session.get("active_account_id", "")
 
     # 获取所有账号
-    live_accounts = []
-    sim_accounts = []
-
     live_accounts = _managed_accounts(reg, BrokerKind.QMT) if supports_live_trading() else []
     sim_accounts = _managed_accounts(reg, BrokerKind.SIMULATION)
 
     # 检查是否需要显示创建弹窗
     show_create_modal = request.query_params.get("create_sim") == "1"
 
-    def main_block():
+    def main_block() -> Any:
         return AccountsPage(live_accounts, sim_accounts, active_kind, active_id, show_create_modal)
 
-    layout.main_block = main_block
+    layout.set_main_block(main_block)
     return layout.render(request)
 
 
 @rt("/")
-def accounts_index(request):
+def accounts_index(request: Request) -> Any:
     """账号管理主页面 - 根路径"""
     return accounts_list(request)
 
 
 @rt("/live/{account_id}", methods=["DELETE"])
-def delete_live_account(req, account_id: str):
+def delete_live_account(req: Request, account_id: str) -> Any:
     """删除实盘账号"""
     # TODO: 实现删除逻辑
     return Div("实盘账号删除功能待实现", cls="text-gray-500 p-4")
 
 
 @rt("/live/{account_id}/refresh", methods=["POST"])
-def refresh_live_account(req, account_id: str):
+def refresh_live_account(req: Request, account_id: str) -> Any:
     """刷新实盘账号状态"""
     # TODO: 实现刷新逻辑
     return Div("实盘账号刷新功能待实现", cls="text-gray-500 p-4")
 
 
-def _auto_select_latest_account(reg, session):
+def _auto_select_latest_account(
+    reg: BrokerRegistry | None, session: SessionData
+) -> dict[str, Any] | None:
     """自动选择最新的账户作为活动账户"""
     if not reg:
-        return
+        return None
 
     # 获取所有模拟账户
     sim_accounts = []
@@ -429,7 +438,7 @@ def _auto_select_latest_account(reg, session):
     if live_accounts:
         live = live_accounts[0]
         session["active_account_kind"] = BrokerKind.QMT.value
-        session["active_account_id"] = live.get("id")
+        session["active_account_id"] = str(live.get("id") or "")
         return {"id": live.get("id"), "kind": BrokerKind.QMT.value}
 
     # 没有任何账户
@@ -439,7 +448,7 @@ def _auto_select_latest_account(reg, session):
 
 
 @rt("/sim/all/delete", methods=["POST"])
-def delete_all_sim_accounts(req):
+def delete_all_sim_accounts(req: Request) -> Any:
     """清空所有仿真账号"""
     logger.info("DELETE ALL request received")
 
@@ -469,7 +478,7 @@ def delete_all_sim_accounts(req):
 
 
 @rt("/sim/{account_id}/delete", methods=["POST"])
-def delete_sim_account(req, account_id: str):
+def delete_sim_account(req: Request, account_id: str) -> Any:
     """删除仿真账号"""
     logger.info(f"DELETE request received for account: {account_id}")
 
@@ -499,7 +508,7 @@ def delete_sim_account(req, account_id: str):
 
 
 @rt("/sim/{account_id}/reset", methods=["POST"])
-def reset_sim_account(req, account_id: str):
+def reset_sim_account(req: Request, account_id: str) -> Any:
     """重置仿真账号"""
     logger.info(f"RESET request received for account: {account_id}")
 
@@ -514,7 +523,7 @@ def reset_sim_account(req, account_id: str):
     return RedirectResponse(url="/system/accounts", status_code=303)
 
 
-def CreateSimAccountForm():
+def CreateSimAccountForm() -> Any:
     """创建模拟交易账户表单"""
     return Div(
         Div(
@@ -579,7 +588,9 @@ def CreateSimAccountForm():
     )
 
 
-def _get_sim_accounts_list(reg, active_kind: str = "", active_id: str = ""):
+def _get_sim_accounts_list(
+    reg: BrokerRegistry | None, active_kind: str = "", active_id: str = ""
+) -> Any:
     """获取模拟交易账户列表HTML"""
     sim_accounts = []
     if reg:
@@ -640,15 +651,19 @@ def _get_sim_accounts_list(reg, active_kind: str = "", active_id: str = ""):
 
 
 @rt("/sim/create", methods=["POST"])
-async def create_sim_account(req):
+async def create_sim_account(req: Request) -> Any:
     """创建模拟交易账户"""
     reg = _get_registry(req)
     if not reg:
         return Div("系统错误：无法访问账户注册表", cls="text-red-500 p-4")
 
     form = await req.form()
-    name = form.get("name", "").strip()
-    principal_str = form.get("principal", "100")
+
+    def text_value(value: object, default: str = "") -> str:
+        return value if isinstance(value, str) else default
+
+    name = text_value(form.get("name", "")).strip()
+    principal_str = text_value(form.get("principal", "100"), "100")
 
     if not name:
         return Div("账户名称不能为空", cls="text-red-500 p-4")
@@ -682,7 +697,8 @@ async def create_sim_account(req):
             register_port_backed_broker(
                 registry=runtime.registry,
                 adapters=runtime.adapters,
-                port=port,
+                # PaperBroker's concrete methods do not expose the protocol's extra kwargs.
+                port=cast(BrokerPort, port),
                 portfolio_id=account_id,
                 kind=BrokerKind.SIMULATION,
                 portfolio_name=name,
@@ -703,15 +719,17 @@ async def create_sim_account(req):
         return Div(f"创建失败：{str(e)}", cls="text-red-500 p-4")
 
 
-def _managed_accounts(reg, kind):
+def _managed_accounts(reg: BrokerRegistry | None, kind: BrokerKind) -> list[dict[str, Any]]:
     """Collect balances for one account kind using its native accounting interface."""
+    if not reg:
+        return []
     accounts = []
-    for info in reg.list_by_kind(kind) if reg else []:
+    for info in reg.list_by_kind(kind):
         account_id = info.get("id")
         if not account_id:
             continue
         broker = reg.get(kind, account_id)
-        principal, total = 0, 0
+        principal, total = 0.0, 0.0
         if kind == BrokerKind.QMT:
             principal, total = _account_capital_values(broker, principal, total)
         elif broker:

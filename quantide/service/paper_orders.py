@@ -24,6 +24,24 @@ from quantide.data.models import Asset, Order, Position, Trade
 from quantide.data.models.base import new_uuid_id
 from quantide.data.sqlite import db
 
+_IMMEDIATE_FILL_TIMINGS = {"", "close", "cheat_on_close", "auction_close", "auction"}
+_PAPER_ORDER_NOOP_OPTIONS = {"strategy_id"}
+
+
+def _validate_paper_order_options(options: dict[str, Any]) -> None:
+    """Reject execution options that the in-process paper matcher cannot honour."""
+    unsupported = set(options) - _PAPER_ORDER_NOOP_OPTIONS - {"fill_timing"}
+    if unsupported:
+        names = ", ".join(sorted(unsupported))
+        raise ValueError(f"PaperBroker does not support order options: {names}")
+    fill_timing = str(options.get("fill_timing", "")).strip().lower()
+    if fill_timing in _IMMEDIATE_FILL_TIMINGS:
+        return
+    raise ValueError(
+        f"PaperBroker does not support fill_timing={fill_timing!r}; "
+        "use the durable next-open broker proxy for deferred execution"
+    )
+
 
 def _validate_buy_reference_price(self: PaperOrders, price: float, asset: str) -> float:
     """Validate buying limits and select a conservative sizing reference price."""
@@ -125,6 +143,7 @@ class PaperOrders:
         price: float = 0,
         order_time: datetime.datetime | None = None,
         timeout: float = 0.5,
+        **kwargs: Any,
     ) -> ExecutionResult:
         """买入指令。
 
@@ -141,6 +160,7 @@ class PaperOrders:
         Raises:
             InsufficientCash: 资金不足
         """
+        _validate_paper_order_options(kwargs)
         self._settle_previous_sessions()
         existing = self._existing_order_result()
         if existing is not None:
@@ -206,6 +226,7 @@ class PaperOrders:
         price: float = 0,
         order_time: datetime.datetime | None = None,
         timeout: float = 0.5,
+        **kwargs: Any,
     ) -> ExecutionResult:
         """卖出指令。
 
@@ -223,6 +244,7 @@ class PaperOrders:
             InsufficientPosition: 持仓不足
             NonMultipleOfLotSize: 卖出数量不符合手数限制（非清仓时）
         """
+        _validate_paper_order_options(kwargs)
         self._settle_previous_sessions()
         existing = self._existing_order_result()
         if existing is not None:
@@ -261,6 +283,7 @@ class PaperOrders:
         price: float = 0,
         order_time: datetime.datetime | None = None,
         timeout: float = 0.5,
+        **kwargs: Any,
     ) -> ExecutionResult:
         """按总资产比例买入。
 
@@ -274,6 +297,7 @@ class PaperOrders:
         Returns:
             成交结果
         """
+        _validate_paper_order_options(kwargs)
         # 计算数量
         quote = self._get_quote(asset) or {}
         if not quote:
@@ -294,7 +318,7 @@ class PaperOrders:
         if shares == 0:
             return ExecutionResult.empty()
 
-        return await self.buy(asset, shares, price, order_time, timeout)
+        return await self.buy(asset, shares, price, order_time, timeout, **kwargs)
 
     async def buy_amount(
         self,
@@ -303,6 +327,7 @@ class PaperOrders:
         price: int | float = 0,
         order_time: datetime.datetime | None = None,
         timeout: float = 0.5,
+        **kwargs: Any,
     ) -> ExecutionResult:
         """按金额买入。
 
@@ -316,6 +341,7 @@ class PaperOrders:
         Returns:
             成交结果
         """
+        _validate_paper_order_options(kwargs)
         quote = self._get_quote(asset) or {}
         if not quote and price == 0:
             return ExecutionResult.empty()
@@ -332,7 +358,7 @@ class PaperOrders:
         if shares == 0:
             return ExecutionResult.empty()
 
-        return await self.buy(asset, shares, price, order_time, timeout)
+        return await self.buy(asset, shares, price, order_time, timeout, **kwargs)
 
     async def sell_percent(
         self,
@@ -341,6 +367,7 @@ class PaperOrders:
         price: float = 0,
         order_time: datetime.datetime | None = None,
         timeout: float = 0.5,
+        **kwargs: Any,
     ) -> ExecutionResult:
         """按持仓比例卖出。
 
@@ -354,6 +381,7 @@ class PaperOrders:
         Returns:
             成交结果
         """
+        _validate_paper_order_options(kwargs)
         if asset not in self._positions:
             return ExecutionResult.empty()
 
@@ -367,7 +395,7 @@ class PaperOrders:
         if shares == 0:
             return ExecutionResult.empty()
 
-        return await self.sell(asset, shares, price, order_time, timeout)
+        return await self.sell(asset, shares, price, order_time, timeout, **kwargs)
 
     async def sell_amount(
         self,
@@ -376,6 +404,7 @@ class PaperOrders:
         price: float = 0,
         order_time: datetime.datetime | None = None,
         timeout: float = 0.5,
+        **kwargs: Any,
     ) -> ExecutionResult:
         """按金额卖出。
 
@@ -389,6 +418,7 @@ class PaperOrders:
         Returns:
             成交结果
         """
+        _validate_paper_order_options(kwargs)
         quote = self._get_quote(asset) or {}
         if not quote and price == 0:
             return ExecutionResult.empty()
@@ -407,7 +437,7 @@ class PaperOrders:
             # 但是如果 amount 很大导致 shares > pos.shares，sell 方法会检查并抛出异常
             return ExecutionResult.empty()
 
-        return await self.sell(asset, shares, price, order_time, timeout)
+        return await self.sell(asset, shares, price, order_time, timeout, **kwargs)
 
     async def trade_target_pct(
         self,
@@ -416,6 +446,7 @@ class PaperOrders:
         price: float = 0,
         order_time: datetime.datetime | None = None,
         timeout: float = 0.5,
+        **kwargs: Any,
     ) -> ExecutionResult:
         """调整持仓至目标比例。
 
@@ -431,6 +462,7 @@ class PaperOrders:
         Returns:
             成交结果
         """
+        _validate_paper_order_options(kwargs)
         quote = self._get_quote(asset) or {}
         if not quote and price == 0:
             return ExecutionResult.empty()

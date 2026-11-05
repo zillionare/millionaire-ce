@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "control":
         from quantide.service.desktop_control import main as control_main
 
-        return control_main(install=args.install, uninstall=args.uninstall, system=args.system)
+        return int(control_main(install=args.install, uninstall=args.uninstall, system=args.system))
     if args.command == "simulated-counter":
         from quantide.service.simulated_counter_api import create_counter_app
 

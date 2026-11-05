@@ -396,13 +396,13 @@ def _delete_backtest_modal(portfolio_id: str) -> Any:
 
 
 @rt("/backtest/{portfolio_id}/delete/modal")
-def delete_backtest_modal(portfolio_id: str):
+def delete_backtest_modal(portfolio_id: str) -> Any:
     """删除回测确认弹窗路由。"""
     return _delete_backtest_modal(portfolio_id)
 
 
 @rt("/backtest/{portfolio_id}/delete", methods=["POST"])
-def delete_backtest_execute(portfolio_id: str):
+def delete_backtest_execute(portfolio_id: str) -> Any:
     """执行删除回测。"""
     status, _ = _resolve_backtest_status(portfolio_id)
     if status == "running":

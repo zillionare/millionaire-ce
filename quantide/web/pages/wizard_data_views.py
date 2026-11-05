@@ -1,5 +1,7 @@
 """User-facing data requirements, capability results and download confirmation."""
 
+from typing import Any
+
 from fasthtml.common import H3, A, Div, Input, Label, P, Table, Tbody, Td, Th, Thead, Tr
 
 from quantide.config.realtime_source import realtime_source
@@ -19,7 +21,7 @@ STATUS_LABELS = {
 }
 
 
-def AccessReport(report=None):
+def AccessReport(report: Any = None) -> Any:
     """Explain dataset permissions without exposing credentials or internal component names."""
     report = report or load_access_report(init_wizard.get_state())
     if not report:
@@ -54,10 +56,12 @@ def AccessReport(report=None):
     )
 
 
-def RealtimeSetup():
+def RealtimeSetup() -> Any:
     """Offer an optional, explicitly limited demonstration only after source configuration."""
     report = load_access_report(init_wizard.get_state()) or {}
-    minute = next((row for row in report.get("checks", []) if row["endpoint"] == "rt_min"), {})
+    minute: dict[str, Any] = next(
+        (row for row in report.get("checks", []) if row["endpoint"] == "rt_min"), {}
+    )
     return Div(
         P(
             "如果要使用仿真和实盘交易，必须配置实时行情数据源，至少每分钟更新行情，包含最新价格、"
@@ -91,7 +95,7 @@ def RealtimeSetup():
     )
 
 
-def _extension_choice():
+def _extension_choice() -> Any:
     if not quote_provider_enabled():
         return None
     return Label(
@@ -106,7 +110,7 @@ def _extension_choice():
     )
 
 
-def HistoryConfirmation(state):
+def HistoryConfirmation(state: Any) -> Any:
     """Keep bulk data import behind a named action after both source decisions."""
     source = {
         "tushare": "Tushare 实时快照（每分钟更新）",

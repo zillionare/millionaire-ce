@@ -1,6 +1,7 @@
 """Strategy scanning."""
 
 from pathlib import Path as FilePath
+from typing import Any
 
 from fasthtml.common import *
 from fasthtml.common import (
@@ -8,6 +9,9 @@ from fasthtml.common import (
     Li,
     P,
     Path,
+    Script,
+    Span,
+    Svg,
     Ul,
 )
 from fasthtml.svg import Path as SvgPath
@@ -17,7 +21,13 @@ from monsterui.all import (
     H3,
     Button,
     Input,
+    Modal,
+    ModalBody,
+    ModalFooter,
+    ModalTitle,
+    UkIcon,
 )
+from starlette.requests import Request
 
 from quantide.service.discovery import strategy_loader
 from quantide.web.pages.strategy_routes import (
@@ -26,7 +36,7 @@ from quantide.web.pages.strategy_routes import (
 )
 
 
-def _scan_scope_list(scan_dirs: list[str]):
+def _scan_scope_list(scan_dirs: list[str]) -> Any:
     """渲染策略扫描目录列表。"""
     return Ul(
         *[Li(path, cls="break-all") for path in scan_dirs],
@@ -34,7 +44,7 @@ def _scan_scope_list(scan_dirs: list[str]):
     )
 
 
-def _strategy_scan_toolbar():
+def _strategy_scan_toolbar() -> Any:
     """渲染策略扫描与示例复制工具栏。"""
     return Div(
         Button(
@@ -110,13 +120,13 @@ def _normalize_scan_directory(directory: str) -> tuple[str, Path]:
 
 
 @rt("/scan/config-modal")
-def config_modal_route(req):
+def config_modal_route(req: Request) -> Any:
     scan_dir = strategy_loader.get_user_scan_directory()
     return _config_modal_html(scan_dir, is_error=False)
 
 
 @rt("/scan/confirm")
-def scan_confirm_modal(req):
+def scan_confirm_modal(req: Request) -> Any:
     scan_dirs = strategy_loader.get_scan_directories()
 
     return Div(
@@ -158,7 +168,7 @@ def scan_confirm_modal(req):
 
 
 @rt("/scan/run", methods=["POST"])
-def run_scan(req):
+def run_scan(req: Request) -> Any:
     try:
         strategies = strategy_loader.scan_and_cache()
         strategy_count = len(strategies)
@@ -247,7 +257,7 @@ def run_scan(req):
         )
 
 
-def _config_modal_html(scan_dir: str, is_error: bool = False, error_message: str = ""):
+def _config_modal_html(scan_dir: str, is_error: bool = False, error_message: str = "") -> Any:
     """配置对话框 HTML。"""
     title = "配置用户策略目录"
     builtin_dir = strategy_loader.get_builtin_scan_directory()
@@ -315,11 +325,14 @@ def _config_modal_html(scan_dir: str, is_error: bool = False, error_message: str
 
 
 @rt("/scan/config", methods=["POST"])
-async def save_scan_config(req):
+async def save_scan_config(req: Request) -> Any:
     directory = ""
     try:
         form = await req.form()
-        directory = form.get("scan-dir-input", "").strip()
+        value = form.get("scan-dir-input", "")
+        if not isinstance(value, str):
+            raise ValueError("Invalid scan directory")
+        directory = value.strip()
         directory, _ = _normalize_scan_directory(directory)
 
         strategy_loader.set_scan_directory(directory)
@@ -356,7 +369,7 @@ async def save_scan_config(req):
         )
 
 
-def _copy_requires_config_modal():
+def _copy_requires_config_modal() -> Any:
     """提示用户先配置策略目录。"""
     return Modal(
         ModalTitle("请先设置用户策略目录"),
@@ -387,7 +400,7 @@ def _copy_requires_config_modal():
 
 
 @rt("/scan/copy-examples", methods=["POST"])
-async def copy_scan_examples(req):
+async def copy_scan_examples(req: Request) -> Any:
     """复制内置示例策略到用户目录。"""
     try:
         directory = strategy_loader.get_user_scan_directory().strip()

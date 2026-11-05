@@ -4,7 +4,7 @@ import json
 import threading
 import uuid
 from collections.abc import Iterable
-from typing import Any, cast
+from typing import Any
 
 import polars as pl
 from loguru import logger
@@ -437,9 +437,7 @@ class BacktestRunner:
 
             if assets:
                 quote_date = self._resolve_day_signal_date(current_date, bar_tm)
-                df = cast(
-                    pl.DataFrame, daily_bars.get_bars_in_range(quote_date, quote_date, assets)
-                )
+                df = daily_bars.get_bars_in_range(quote_date, quote_date, assets)
                 if not df.is_empty():
                     for row in df.iter_rows(named=True):
                         quote[row["asset"]] = {

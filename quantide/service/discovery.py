@@ -9,8 +9,10 @@ import os
 import shutil
 import sys
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -28,7 +30,9 @@ from quantide.data.models.strategy_config import (
 from quantide.data.sqlite import db
 
 
-def _cache_strategy_metadata(class_name, self, strategy_class):
+def _cache_strategy_metadata(
+    class_name: str, self: "StrategyLoader", strategy_class: type[Strategy] | None
+) -> None:
     """Cache strategy metadata."""
     if strategy_class and inspect.isclass(strategy_class):
         is_valid = (
@@ -78,7 +82,7 @@ class StrategyLoader:
             Path(__file__).resolve().parents[1] / "strategies" / "example"
         ).resolve()
         self._builtin_module_prefix = "quantide.strategies.example"
-        self._builtin_generation = None
+        self._builtin_generation: int | None = None
         self._builtin_lock = threading.RLock()
 
     def get_builtin_scan_directory(self) -> str:
@@ -423,7 +427,7 @@ strategy_loader = StrategyLoader()
 _BUILTIN_MODULE_PREFIX = "quantide.examples"
 
 
-def _classify_strategy(cls) -> str | None:
+def _classify_strategy(cls: object) -> Literal["independent", "risk"] | None:
     """v0.2 spec: BaseStrategy 子类 → "independent", RiskStrategy 子类 → "risk"
     排除 Strategy/BaseStrategy/RiskStrategy 自身.
     """
@@ -443,7 +447,7 @@ def _classify_strategy(cls) -> str | None:
     return None
 
 
-def _to_param_spec(params: dict) -> dict:
+def _to_param_spec(params: Mapping[str, Any]) -> dict[str, ParamSpec]:
     """v0.2 spec: default_config dict → dict[str, ParamSpec]"""
     result = {}
     for key, value in (params or {}).items():
@@ -457,7 +461,7 @@ def _to_param_spec(params: dict) -> dict:
     return result
 
 
-def _is_builtin_class(cls) -> bool:
+def _is_builtin_class(cls: object) -> bool:
     """v0.2 spec: 框架包内 (quantide.*) 的类视为内置"""
     module = getattr(cls, "__module__", "") or ""
     return module.startswith("quantide.") and not module.startswith("quantide.examples.")
@@ -545,7 +549,9 @@ def _enumerate_dir(
     return strategies, diagnostics
 
 
-def _enumerate_file(file, is_builtin):
+def _enumerate_file(
+    file: Path, is_builtin: bool
+) -> tuple[list[StrategyMetadata], list[SkippedEntry]]:
     """Import one strategy file and retain a diagnostic if importing fails."""
     strategies = []
     diagnostics = []
@@ -594,7 +600,14 @@ def _enumerate_file(file, is_builtin):
     return strategies, diagnostics
 
 
-def _enumerated_class(name, obj, module_name, file_path, is_builtin, diagnostics):
+def _enumerated_class(
+    name: str,
+    obj: type[Strategy],
+    module_name: str,
+    file_path: Path,
+    is_builtin: bool,
+    diagnostics: list[SkippedEntry],
+) -> StrategyMetadata | None:
     """Validate one class and construct its user-facing strategy metadata."""
     if obj.__module__ != module_name:
         return None
@@ -634,7 +647,9 @@ def _enumerated_class(name, obj, module_name, file_path, is_builtin, diagnostics
     )
 
 
-def _cached_class_info(name, obj, module_name, scan_dir):
+def _cached_class_info(
+    name: str, obj: type[Strategy], module_name: str, scan_dir: str
+) -> StrategyInfo | None:
     """Recognize a strategy class for the legacy discovery cache."""
     from datetime import datetime
 

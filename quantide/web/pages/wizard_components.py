@@ -24,7 +24,7 @@ from quantide.web.pages.wizard_state import (
 )
 
 
-def _render_inline_error(message: str):
+def _render_inline_error(message: str) -> Any:
     return Div(
         Div(
             Span("❌", cls="mr-2"),
@@ -35,12 +35,12 @@ def _render_inline_error(message: str):
     )
 
 
-def RequiredMark():
+def RequiredMark() -> Any:
     """必填项标记 - 红色星号"""
     return Span("*", style=FONT_STYLES["required"])
 
 
-def InfoTooltip(tooltip_text: str):
+def InfoTooltip(tooltip_text: str) -> Any:
     """信息提示图标 - 鼠标悬停显示 tooltip
 
     Args:
@@ -54,7 +54,7 @@ def InfoTooltip(tooltip_text: str):
     )
 
 
-def FormLabel(label: str, required: bool = False, tooltip: str | None = None):
+def FormLabel(label: str, required: bool = False, tooltip: str | None = None) -> Any:
     """表单标签组件
 
     Args:
@@ -70,7 +70,9 @@ def FormLabel(label: str, required: bool = False, tooltip: str | None = None):
     return Div(*children, cls="mb-1")
 
 
-def FormRow(label: str, input_component: Any, required: bool = False, tooltip: str | None = None):
+def FormRow(
+    label: str, input_component: Any, required: bool = False, tooltip: str | None = None
+) -> Any:
     """横向排列的表单项（label 和 input 在同一行）
 
     Args:
@@ -96,17 +98,17 @@ def FormRow(label: str, input_component: Any, required: bool = False, tooltip: s
     )
 
 
-def FormHint(text: str):
+def FormHint(text: str) -> Any:
     """表单提示文本"""
     return P(text, style=FONT_STYLES["hint"], cls="mt-1 mb-3")
 
 
-def SectionTitle(text: str):
+def SectionTitle(text: str) -> Any:
     """章节标题"""
     return H3(text, cls="mb-4", style=f"{FONT_STYLES['title']} color: {PRIMARY_COLOR};")
 
 
-def SectionDescription(text: str):
+def SectionDescription(text: str) -> Any:
     """章节描述"""
     return P(text, style=FONT_STYLES["description"], cls="mb-4")
 
@@ -178,7 +180,7 @@ def _get_step_meta(step: int) -> dict[str, str]:
     return meta
 
 
-def StepIndicator(current_step: int, steps: list[dict]):
+def StepIndicator(current_step: int, steps: list[dict[str, Any]]) -> Any:
     """Render a vertical wizard timeline with a fixed layout grid."""
     elements = []
     for index, step in enumerate(steps, 1):
@@ -191,7 +193,7 @@ def StepIndicator(current_step: int, steps: list[dict]):
     )
 
 
-def _step_indicator_nodes(index, step, current_step, total):
+def _step_indicator_nodes(index: Any, step: Any, current_step: Any, total: Any) -> Any:
     completed = step.get("completed", False)
     highlighted = index == current_step or completed
     top = (index - 1) * 70

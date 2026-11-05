@@ -1,20 +1,34 @@
 """Strategy."""
 
 import asyncio
+import datetime
 import json
 import uuid
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 import arrow
 import fasthtml.common as fh
 from fasthtml.common import *
 from fasthtml.common import (
+    H2,
     A,
     Div,
+    Input,
+    Nav,
     P,
     Pre,
     RedirectResponse,
     Response,
+    Script,
+    Span,
+    Svg,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
+    Tr,
 )
 from fasthtml.svg import Path as SvgPath
 from monsterui.all import *
@@ -25,10 +39,13 @@ from monsterui.all import (
     Card,
     CardBody,
     CardHeader,
+    TableT,
 )
+from starlette.requests import Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from quantide.core.enums import FrameType
+from quantide.core.strategy import BaseStrategy
 from quantide.data.sqlite import db
 from quantide.service.discovery import strategy_loader
 from quantide.service.risk_programs import (
@@ -357,9 +374,10 @@ from quantide.web.pages.strategy_trade_report import (
 from quantide.web.pages.strategy_trade_report import (
     trade_kline_modal as trade_kline_modal,
 )
+from quantide.web.session_data import SessionData
 
 
-def _strategy_backtest_history(name):
+def _strategy_backtest_history(name: str) -> Any:
     """Strategy backtest history."""
     portfolios = db.get_portfolios_by_strategy(name)
     history_rows = []
@@ -398,7 +416,7 @@ def _strategy_backtest_history(name):
 
 
 @rt("/")
-def index(req, session):
+def index(req: Request, session: SessionData) -> Any:
     layout = MainLayout(title="策略列表", user=session.get("auth"))
     layout.header_active = "策略"
     layout.sidebar_menu = [
@@ -464,95 +482,97 @@ def index(req, session):
 
     section_toggle_script = Script(src="/static/strategy-sidebar.js")
 
-    layout.main_block = lambda: Div(
-        Div(
-            Nav(
-                A("首页", href="/", cls="hover:text-[#e41815]"),
-                Span(">", cls="text-gray-400"),
-                A("策略", href="/strategy", cls="hover:text-[#e41815]"),
-                Span(">", cls="text-gray-400"),
-                Span("策略列表", cls="text-gray-900 font-medium"),
-                cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",
-            ),
-            cls="mb-4",
-        ),
-        Div(
+    layout.set_main_block(
+        lambda: Div(
             Div(
-                Div(
-                    H2("策略列表", cls="text-lg font-semibold text-gray-900"),
-                    P(
-                        "内置示例已自动加载；如需复制到自己的策略目录，请点击“复制示例策略”。",
-                        cls="mt-1 text-sm text-gray-500",
-                    ),
+                Nav(
+                    A("首页", href="/", cls="hover:text-[#e41815]"),
+                    Span(">", cls="text-gray-400"),
+                    A("策略", href="/strategy", cls="hover:text-[#e41815]"),
+                    Span(">", cls="text-gray-400"),
+                    Span("策略列表", cls="text-gray-900 font-medium"),
+                    cls="flex w-fit items-center justify-start space-x-2 text-sm text-gray-600",
                 ),
-                _strategy_scan_toolbar(),
-                cls="p-6 border-b border-gray-200 flex justify-between items-center",
+                cls="mb-4",
             ),
-            Div(strategy_table, cls="overflow-x-auto"),
-            cls="bg-white rounded-lg shadow mb-6",
-            id="strategy-list-section",
-        ),
-        Div(
             Div(
-                Div(
-                    H2("回测报告列表", cls="text-lg font-semibold text-gray-900"),
-                    Div(id="deploy-result", cls="mt-2 text-sm"),
-                    cls="flex flex-col items-start",
-                ),
                 Div(
                     Div(
-                        Input(
-                            type="text",
-                            placeholder="按策略名过滤...",
-                            cls="q-input text-gray-900",
-                            style="padding-left: 2.5rem; width: 16rem;",
+                        H2("策略列表", cls="text-lg font-semibold text-gray-900"),
+                        P(
+                            "内置示例已自动加载；如需复制到自己的策略目录，请点击“复制示例策略”。",
+                            cls="mt-1 text-sm text-gray-500",
                         ),
-                        Svg(
-                            SvgPath(
-                                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
-                                **{
-                                    "stroke-linecap": "round",
-                                    "stroke-linejoin": "round",
-                                    "stroke-width": "2",
-                                },
-                            ),
-                            cls="w-5 h-5 text-gray-400",
-                            style="position: absolute; left: 0.75rem; top: 50%; "
-                            "transform: translateY(-50%); pointer-events: none;",
-                            fill="none",
-                            stroke="currentColor",
-                            viewBox="0 0 24 24",
-                        ),
-                        cls="relative",
                     ),
-                    fh.Select(
-                        fh.Option("按年化收益排序", value="annual", selected=True),
-                        fh.Option("按夏普比率排序", value="sharpe"),
-                        fh.Option("按最大回撤排序", value="drawdown"),
-                        fh.Option("按索提诺排序", value="sortino"),
-                        cls="uk-select uk-form-small text-gray-900",
-                    ),
-                    cls="flex items-center space-x-4",
+                    _strategy_scan_toolbar(),
+                    cls="p-6 border-b border-gray-200 flex justify-between items-center",
                 ),
-                cls="p-6 border-b border-gray-200 flex justify-between items-center",
+                Div(strategy_table, cls="overflow-x-auto"),
+                cls="bg-white rounded-lg shadow mb-6",
+                id="strategy-list-section",
             ),
-            Div(backtest_table, cls="overflow-x-auto"),
-            cls="bg-white rounded-lg shadow",
-            id="backtest-list",
-        ),
-        section_toggle_script,
-        _strategy_modal_script(),
-        _htmx_indicator_style(),
-        _global_loading_overlay(),
-        Div(id="modal-container"),
-        cls="space-y-6",
+            Div(
+                Div(
+                    Div(
+                        H2("回测报告列表", cls="text-lg font-semibold text-gray-900"),
+                        Div(id="deploy-result", cls="mt-2 text-sm"),
+                        cls="flex flex-col items-start",
+                    ),
+                    Div(
+                        Div(
+                            Input(
+                                type="text",
+                                placeholder="按策略名过滤...",
+                                cls="q-input text-gray-900",
+                                style="padding-left: 2.5rem; width: 16rem;",
+                            ),
+                            Svg(
+                                SvgPath(
+                                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+                                    **{
+                                        "stroke-linecap": "round",
+                                        "stroke-linejoin": "round",
+                                        "stroke-width": "2",
+                                    },
+                                ),
+                                cls="w-5 h-5 text-gray-400",
+                                style="position: absolute; left: 0.75rem; top: 50%; "
+                                "transform: translateY(-50%); pointer-events: none;",
+                                fill="none",
+                                stroke="currentColor",
+                                viewBox="0 0 24 24",
+                            ),
+                            cls="relative",
+                        ),
+                        fh.Select(
+                            fh.Option("按年化收益排序", value="annual", selected=True),
+                            fh.Option("按夏普比率排序", value="sharpe"),
+                            fh.Option("按最大回撤排序", value="drawdown"),
+                            fh.Option("按索提诺排序", value="sortino"),
+                            cls="uk-select uk-form-small text-gray-900",
+                        ),
+                        cls="flex items-center space-x-4",
+                    ),
+                    cls="p-6 border-b border-gray-200 flex justify-between items-center",
+                ),
+                Div(backtest_table, cls="overflow-x-auto"),
+                cls="bg-white rounded-lg shadow",
+                id="backtest-list",
+            ),
+            section_toggle_script,
+            _strategy_modal_script(),
+            _htmx_indicator_style(),
+            _global_loading_overlay(),
+            Div(id="modal-container"),
+            cls="space-y-6",
+        )
     )
 
     return layout.render()
 
 
 @rt("/{name}")
-def strategy_detail(req, session, name: str):
+def strategy_detail(req: Request, session: SessionData, name: str) -> Any:
     layout = MainLayout(title=f"策略详情 - {name}", user=session.get("auth"))
 
     strategies = strategy_loader.load_from_cache()
@@ -606,50 +626,66 @@ def strategy_detail(req, session, name: str):
             )
         )
 
-    layout.main_block = lambda: Div(
-        Div(
-            A(
-                "← 返回列表",
-                href="/strategy",
-                cls="text-gray-500 hover:text-gray-800 mb-4 inline-block",
-            ),
+    layout.set_main_block(
+        lambda: Div(
             Div(
-                Div(
-                    H1(name, cls="text-3xl font-bold mb-2"),
-                    P(doc, cls="text-gray-600"),
+                A(
+                    "← 返回列表",
+                    href="/strategy",
+                    cls="text-gray-500 hover:text-gray-800 mb-4 inline-block",
                 ),
-                Div(*detail_actions, cls="flex items-center gap-3 shrink-0"),
-                cls=("flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6"),
-            ),
-            Card(
-                CardHeader(H3("默认参数")),
-                CardBody(Pre(str(params), cls="bg-gray-50 p-4 rounded text-sm")),
-                cls="mb-6",
-            ),
-            Div(
-                H3("回测历史", cls="text-xl font-bold mb-4"),
-                history_table,
-                cls="bg-white p-6 rounded-lg shadow-sm border border-gray-100",
-            ),
-            _strategy_modal_script(),
-            _htmx_indicator_style(),
-            _global_loading_overlay(),
-            Div(id="modal-container"),
-            cls="max-w-4xl mx-auto py-8",
+                Div(
+                    Div(
+                        H1(name, cls="text-3xl font-bold mb-2"),
+                        P(doc, cls="text-gray-600"),
+                    ),
+                    Div(*detail_actions, cls="flex items-center gap-3 shrink-0"),
+                    cls=("flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6"),
+                ),
+                Card(
+                    CardHeader(H3("默认参数")),
+                    CardBody(Pre(str(params), cls="bg-gray-50 p-4 rounded text-sm")),
+                    cls="mb-6",
+                ),
+                Div(
+                    H3("回测历史", cls="text-xl font-bold mb-4"),
+                    history_table,
+                    cls="bg-white p-6 rounded-lg shadow-sm border border-gray-100",
+                ),
+                _strategy_modal_script(),
+                _htmx_indicator_style(),
+                _global_loading_overlay(),
+                Div(id="modal-container"),
+                cls="max-w-4xl mx-auto py-8",
+            )
         )
     )
 
     return layout.render()
 
 
+def _backtest_form_values(
+    form: Mapping[str, object],
+) -> tuple[datetime.date, datetime.date, float]:
+    """Parse and validate the date and cash fields of a backtest run request."""
+    start_value = form.get("start_date")
+    end_value = form.get("end_date")
+    cash_value = form.get("initial_cash", "1000000")
+    if (
+        not isinstance(start_value, str)
+        or not isinstance(end_value, str)
+        or not isinstance(cash_value, str)
+    ):
+        raise ValueError("Invalid backtest form values")
+    return arrow.get(start_value).date(), arrow.get(end_value).date(), float(cash_value)
+
+
 @rt("/{name}/backtest/run", methods=["POST"])
-async def run_backtest(req, name: str):
+async def run_backtest(req: Request, name: str) -> Any:
     form = await req.form()
 
     try:
-        start_date = arrow.get(form.get("start_date")).date()
-        end_date = arrow.get(form.get("end_date")).date()
-        initial_cash = float(form.get("initial_cash", 1000000))
+        start_date, end_date, initial_cash = _backtest_form_values(form)
         save_logs = _parse_checkbox(form.get("save_logs"))
         cls, config, interval = _backtest_form_strategy(name, form)
 
@@ -684,7 +720,7 @@ async def run_backtest(req, name: str):
 
 
 @rt("/backtest/{portfolio_id}/deploy/paper/modal")
-def deploy_backtest_to_paper_modal(portfolio_id: str):
+def deploy_backtest_to_paper_modal(portfolio_id: str) -> Any:
     """渲染转入仿真确认弹窗。"""
     config, default_config = _load_backtest_run_config(portfolio_id)
     run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
@@ -698,7 +734,7 @@ def deploy_backtest_to_paper_modal(portfolio_id: str):
 
 
 @rt("/backtest/{portfolio_id}/deploy/live/modal")
-def deploy_backtest_to_live_modal(req, portfolio_id: str):
+def deploy_backtest_to_live_modal(req: Request, portfolio_id: str) -> Any:
     """渲染转入实盘确认弹窗。"""
     config, default_config = _load_backtest_run_config(portfolio_id)
     run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
@@ -713,7 +749,7 @@ def deploy_backtest_to_live_modal(req, portfolio_id: str):
 
 
 @rt("/backtest/{portfolio_id}/deploy/paper", methods=["POST"])
-async def deploy_backtest_to_paper(req, portfolio_id: str):
+async def deploy_backtest_to_paper(req: Request, portfolio_id: str) -> Any:
     form = await req.form()
     principal_raw = str(form.get("paper_principal", "1000000") or "1000000")
     try:
@@ -768,7 +804,7 @@ async def deploy_backtest_to_paper(req, portfolio_id: str):
 
 
 @rt("/backtest/{portfolio_id}/deploy/live", methods=["POST"])
-async def deploy_backtest_to_live(req, portfolio_id: str):
+async def deploy_backtest_to_live(req: Request, portfolio_id: str) -> Any:
     form = await req.form()
     account_id = str(form.get("live_account_id") or "gateway:default")
     registry = _get_registry(req)
@@ -862,7 +898,7 @@ async def backtest_ws(websocket: WebSocket) -> None:
 strategy_app.add_websocket_route("/backtest/{portfolio_id}/ws", backtest_ws)
 
 
-def _paper_deployment_error(portfolio_id, principal_raw, message):
+def _paper_deployment_error(portfolio_id: str, principal_raw: str, message: str) -> Any:
     config, defaults = _load_backtest_run_config(portfolio_id)
     run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
     return _paper_deploy_modal(
@@ -875,7 +911,9 @@ def _paper_deployment_error(portfolio_id, principal_raw, message):
     )
 
 
-def _deployment_form_config(portfolio_id, form):
+def _deployment_form_config(
+    portfolio_id: str, form: Mapping[str, object]
+) -> tuple[dict[str, Any], str]:
     """Apply risk selections using the immutable period of the source backtest."""
     base_config, _ = _load_backtest_run_config(portfolio_id)
     run = strategy_runtime_manager.get_backtest_run_or_resolve(portfolio_id)
@@ -888,31 +926,41 @@ def _deployment_form_config(portfolio_id, form):
     return _form_to_config(form, risk_config), warning
 
 
-def _backtest_form_strategy(name, form):
+def _backtest_form_strategy(
+    name: str, form: Mapping[str, object]
+) -> tuple[type[BaseStrategy], dict[str, Any], str]:
     """Resolve strategy configuration and validate its declared interval."""
-    config = _parse_params(form)
+    config: dict[str, Any] = _parse_params(form)
 
     strategies = strategy_loader.load_from_cache()
     cls = strategies.get(name)
 
     if not cls:
         raise Exception("Strategy not found")
+    strategy_cls = cast(type[BaseStrategy], cls)
 
-    expected_interval = BacktestRunner.strategy_interval(cls)
+    expected_interval = BacktestRunner.strategy_interval(strategy_cls)
     submitted_interval = form.get("interval")
     interval = str(submitted_interval or expected_interval).strip().lower()
-    BacktestRunner.validate_strategy_interval(cls, config, interval)
+    BacktestRunner.validate_strategy_interval(strategy_cls, config, interval)
 
     if form.get("risk_selection_present"):
-        selected, allow_same_bar = _parse_risk_program_selection(form, cls, str(interval))
+        selected, allow_same_bar = _parse_risk_program_selection(form, strategy_cls, str(interval))
         config[RISK_PROGRAMS_KEY] = selected
         config[ALLOW_SAME_BAR_REPURCHASE_KEY] = allow_same_bar
-    return cls, config, interval
+    return strategy_cls, config, interval
 
 
 def _launch_backtest_job(
-    cls, config, start_date, end_date, interval, initial_cash, portfolio_id, save_logs
-):
+    cls: type[BaseStrategy],
+    config: dict[str, Any],
+    start_date: datetime.date,
+    end_date: datetime.date,
+    interval: str,
+    initial_cash: float,
+    portfolio_id: str,
+    save_logs: bool,
+) -> None:
     """Run the validated backtest and persist its terminal status."""
     runner = BacktestRunner()
     from quantide.service.background import run_blocking, start_background

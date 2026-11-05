@@ -1,16 +1,45 @@
 # auth/routes.py
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, cast
 
 from fasthtml.common import *
+from fasthtml.common import (
+    H1,
+    H2,
+    H3,
+    A,
+    Button,
+    Card,
+    Container,
+    Div,
+    Form,
+    Grid,
+    Input,
+    P,
+    RedirectResponse,
+    Response,
+    Title,
+)
 
 # Use FastHTML's plain Label for form elements to avoid MonsterUI's uk-label styling
 from fasthtml.common import Label as _Label
 from monsterui.all import *
+from monsterui.all import (
+    ButtonT,
+    CardBody,
+    CardHeader,
+    ContainerT,
+    DivFullySpaced,
+)
+from starlette.datastructures import UploadFile
+from starlette.requests import Request
 
 from quantide.config.branding import get_branding
 from quantide.web.application import RouteRegistrar
 from quantide.web.components.modal import ModalBackdrop, ModalViewport
+from quantide.web.session_data import SessionData
 
+from . import forms as auth_forms
 from .forms import (
     create_forgot_password_form,
     create_login_form,
@@ -19,10 +48,21 @@ from .forms import (
 )
 
 if TYPE_CHECKING:
+    from fasthtml.core import FastHTML
+
     from .manager import AuthManager
+    from .models import User
+    from .repository import UserRepository
 
 
-def _admin_flash_message(query):
+def _repository(manager: "AuthManager") -> "UserRepository":
+    repository = manager.user_repo
+    if repository is None:
+        raise RuntimeError("auth manager is not initialized")
+    return repository
+
+
+def _admin_flash_message(query: Mapping[str, str]) -> Any:
     from .forms import create_message_alert
 
     success = query.get("success")
@@ -32,7 +72,7 @@ def _admin_flash_message(query):
             "updated": "User updated successfully!",
             "deleted": "User deleted successfully!",
         }
-        return create_message_alert(messages.get(success), "success")
+        return create_message_alert(messages.get(success, success), "success")
     error = query.get("error")
     if error:
         messages = {
@@ -41,38 +81,43 @@ def _admin_flash_message(query):
             "delete_failed": "Failed to delete user.",
             "update_failed": "Failed to update user.",
         }
-        return create_message_alert(messages.get(error), "error")
+        return create_message_alert(messages.get(error, error), "error")
     return None
 
 
-def _insert_admin_alert(response, message):
-    if not message or not hasattr(response, "__iter__"):
+def _insert_admin_alert(response: object, message: object) -> object:
+    if not message or not isinstance(response, (list, tuple)):
         return response
     result = list(response)
     for item in result:
-        if hasattr(item, "children"):
-            children = list(item.children)
-            children.insert(1, message)
-            item.children = children
+        children = getattr(item, "children", None)
+        if children is not None:
+            updated = list(children)
+            updated.insert(1, message)
+            item.children = updated
             break
     return tuple(result)
 
 
-def _validated_profile_updates(repository, user, form):
+def _validated_profile_updates(
+    repository: "UserRepository",
+    user: "User",
+    form: Mapping[str, str | UploadFile],
+) -> dict[str, str]:
     """Require the existing credential and validate all fields before changing the account."""
-    updates = {}
-    email = form.get("email", "").strip()
+    updates: dict[str, str] = {}
+    email = auth_forms.form_text(form, "email").strip()
     if email and email != user.email:
         updates["email"] = email
-    current = form.get("current_password", "")
-    password = form.get("new_password", "")
+    current = auth_forms.form_text(form, "current_password")
+    password = auth_forms.form_text(form, "new_password")
     if not current and not password:
         return updates
     if not current:
         raise ValueError("当前密码不能为空")
-    if not repository.verify_password(current, user.password):
+    if not repository.verify_password(current, user.password or ""):
         raise ValueError("当前密码不正确")
-    if password != form.get("confirm_password", ""):
+    if password != auth_forms.form_text(form, "confirm_password"):
         raise ValueError("两次输入的新密码不一致")
     if len(password) < 8:
         raise ValueError("新密码至少需要8个字符")
@@ -80,20 +125,24 @@ def _validated_profile_updates(repository, user, form):
     return updates
 
 
-def _profile_error_redirect(prefix, form, message):
-    path = "modal/reset-password" if form.get("modal") == "1" else "profile"
+def _profile_error_redirect(
+    prefix: str, form: Mapping[str, str | UploadFile], message: str
+) -> RedirectResponse:
+    path = "modal/reset-password" if auth_forms.form_text(form, "modal") == "1" else "profile"
     return RedirectResponse(f"{prefix}/{path}?error={message}", status_code=303)
 
 
-def _create_admin_dashboard_handler(self, prefix, rt):
+def _create_admin_dashboard_handler(
+    self: "AuthRoutes", prefix: str, rt: RouteRegistrar
+) -> Callable[..., object]:
     """Create the admin dashboard route with explicit dependencies."""
 
     @rt(f"{prefix}/admin")
     @self.auth.require_admin()
-    def admin_dashboard(req):
+    def admin_dashboard(req: Request) -> Any:
 
         # Get user statistics
-        user_counts = self.auth.user_repo.count_by_role()
+        user_counts = _repository(self.auth).count_by_role()
         total_users = sum(user_counts.values())
 
         return Title("Admin Dashboard"), Container(
@@ -179,22 +228,24 @@ def _create_admin_dashboard_handler(self, prefix, rt):
     return admin_dashboard
 
 
-def _create_admin_users_list_with_messages_handler(self, original_list, rt, prefix):
+def _create_admin_users_list_with_messages_handler(
+    self: "AuthRoutes", original_list: Callable[[Request], object], rt: RouteRegistrar, prefix: str
+) -> Callable[..., object]:
     """Register the admin list with messages while retaining its role guard."""
 
     @rt(f"{prefix}/admin/users")
     @self.auth.require_admin()
-    def admin_users_list_with_messages(req):
+    def admin_users_list_with_messages(req: Request) -> Any:
         return _insert_admin_alert(original_list(req), _admin_flash_message(req.query_params))
 
     return admin_users_list_with_messages
 
 
-def _create_register_page_handler(prefix, rt):
+def _create_register_page_handler(prefix: str, rt: RouteRegistrar) -> Callable[..., object]:
     """Create the register page route with explicit dependencies."""
 
     @rt(f"{prefix}/register", methods=["GET"])
-    def register_page(req):
+    def register_page(req: Request) -> Any:
         error = req.query_params.get("error")
         return Title("Register"), Container(
             create_register_form(error=error, action=f"{prefix}/register")
@@ -203,17 +254,19 @@ def _create_register_page_handler(prefix, rt):
     return register_page
 
 
-def _create_register_submit_handler(self, prefix, rt):
+def _create_register_submit_handler(
+    self: "AuthRoutes", prefix: str, rt: RouteRegistrar
+) -> Callable[..., object]:
     """Create the register submit route with explicit dependencies."""
 
     @rt(f"{prefix}/register", methods=["POST"])
-    async def register_submit(req, sess):
+    async def register_submit(req: Request, sess: SessionData) -> Any:
         form = await req.form()
-        username = form.get("username", "").strip()
-        email = form.get("email", "").strip()
-        password = form.get("password", "")
-        confirm = form.get("confirm_password", "")
-        accept_terms = form.get("accept_terms") == "on"
+        username = auth_forms.form_text(form, "username").strip()
+        email = auth_forms.form_text(form, "email").strip()
+        password = auth_forms.form_text(form, "password")
+        confirm = auth_forms.form_text(form, "confirm_password")
+        accept_terms = auth_forms.form_text(form, "accept_terms") == "on"
 
         if not accept_terms:
             return RedirectResponse(f"{prefix}/register?error=terms_required", status_code=303)
@@ -226,17 +279,17 @@ def _create_register_submit_handler(self, prefix, rt):
             return RedirectResponse(f"{prefix}/register?error=password_mismatch", status_code=303)
 
         # Check if user exists
-        if self.auth.user_repo.get_by_username(username):
+        if _repository(self.auth).get_by_username(username):
             return RedirectResponse(f"{prefix}/register?error=username_taken", status_code=303)
 
         # Create user
         try:
-            user = self.auth.user_repo.create(username, email, password)
+            user = _repository(self.auth).create(username, email, password)
             if user:
                 # Auto-login after registration
-                sess["auth"] = user.username
-                sess["user_id"] = user.id
-                sess["role"] = user.role
+                sess["auth"] = str(user.username or "")
+                sess["user_id"] = str(user.id or "")
+                sess["role"] = str(user.role or "")
                 return RedirectResponse("/", status_code=303)
         except Exception as e:
             print(f"Registration error: {e}")
@@ -247,11 +300,11 @@ def _create_register_submit_handler(self, prefix, rt):
     return register_submit
 
 
-def _create_profile_page_handler(prefix, rt):
+def _create_profile_page_handler(prefix: str, rt: RouteRegistrar) -> Callable[..., object]:
     """Create the profile page route with explicit dependencies."""
 
     @rt(f"{prefix}/profile", methods=["GET"])
-    def profile_page(req):
+    def profile_page(req: Request) -> Any:
         user = req.scope["user"]  # Added by beforeware
         success = req.query_params.get("success")
         error = req.query_params.get("error")
@@ -262,11 +315,11 @@ def _create_profile_page_handler(prefix, rt):
     return profile_page
 
 
-def _create_reset_password_modal_handler(prefix, rt):
+def _create_reset_password_modal_handler(prefix: str, rt: RouteRegistrar) -> Callable[..., object]:
     """Create the reset password modal route with explicit dependencies."""
 
     @rt(f"{prefix}/modal/reset-password", methods=["GET"])
-    def reset_password_modal(req):
+    def reset_password_modal(req: Request) -> Any:
         error = req.query_params.get("error")
 
         # Simple form for the modal
@@ -344,23 +397,25 @@ def _create_reset_password_modal_handler(prefix, rt):
     return reset_password_modal
 
 
-def _create_profile_submit_handler(self, prefix, rt):
+def _create_profile_submit_handler(
+    self: "AuthRoutes", prefix: str, rt: RouteRegistrar
+) -> Callable[..., object]:
     """Register profile updates with validation before a single repository write."""
 
     @rt(f"{prefix}/profile", methods=["POST"])
-    async def profile_submit(req):
+    async def profile_submit(req: Request) -> Any:
         user = req.scope["user"]
         form = await req.form()
         try:
-            updates = _validated_profile_updates(self.auth.user_repo, user, form)
+            updates = _validated_profile_updates(_repository(self.auth), user, form)
             if updates:
-                self.auth.user_repo.update(user.id, **updates)
+                _repository(self.auth).update(user.id, **updates)
             if "password" in updates:
                 req.scope["session"].clear()
                 target = f"{prefix}/login?success=password_changed"
                 return (
                     Response(headers={"HX-Redirect": target})
-                    if form.get("modal") == "1"
+                    if auth_forms.form_text(form, "modal") == "1"
                     else RedirectResponse(target, status_code=303)
                 )
             return RedirectResponse(f"{prefix}/profile?success=1", status_code=303)
@@ -377,17 +432,17 @@ class AuthRoutes:
 
     def __init__(self, auth_manager: "AuthManager") -> None:
         self.auth = auth_manager
-        self.routes: dict[str, Any] = {}
+        self.routes: dict[str, Callable[..., object]] = {}
 
     def register_all(
         self,
-        app: Any,
+        app: "FastHTML",
         prefix: str = "/auth",
         include_admin: bool = False,
         allow_custom_login: bool = False,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Callable[..., object]]:
         """Register all auth routes with optional admin interface"""
-        rt = app.route
+        rt: RouteRegistrar = app.route
 
         # Handle success/error messages for admin operations
         if include_admin:
@@ -440,7 +495,7 @@ class AuthRoutes:
 
         # Login routes
         @rt(f"{prefix}/login", methods=["GET"])
-        def login_page(req):
+        def login_page(req: Request) -> Any:
             error = req.query_params.get("error")
             # Get redirect destination from query params
             redirect_to = req.query_params.get("redirect_to", "/")
@@ -451,22 +506,22 @@ class AuthRoutes:
         self.routes["login_page"] = login_page
 
         @rt(f"{prefix}/login", methods=["POST"])
-        async def login_submit(req, sess):
+        async def login_submit(req: Request, sess: SessionData) -> Any:
             form = await req.form()
-            username = form.get("username", "").strip() or "admin"
-            password = form.get("password", "")
-            remember_me = form.get("remember_me") == "on"
+            username = auth_forms.form_text(form, "username").strip() or "admin"
+            password = auth_forms.form_text(form, "password")
+            remember_me = auth_forms.form_text(form, "remember_me") == "on"
 
             # Authenticate
-            user = self.auth.user_repo.authenticate(username, password)
+            user = _repository(self.auth).authenticate(username, password)
 
             if user:
                 # Set session
-                sess["auth"] = user.username
-                sess["user_id"] = user.id
-                sess["role"] = user.role
+                sess["auth"] = str(user.username or "")
+                sess["user_id"] = str(user.id or "")
+                sess["role"] = str(user.role or "")
 
-                redirect_url = form.get("redirect_to", "/")
+                redirect_url = auth_forms.form_text(form, "redirect_to", "/")
                 response = RedirectResponse(redirect_url, status_code=303)
 
                 response.delete_cookie("remember_user")
@@ -478,7 +533,7 @@ class AuthRoutes:
                 return response
 
             # On failure, preserve the redirect_to parameter
-            redirect_to = form.get("redirect_to", "/")
+            redirect_to = auth_forms.form_text(form, "redirect_to", "/")
             error_url = f"{prefix}/login?error=invalid"
             if redirect_to != "/":
                 error_url += f"&redirect_to={redirect_to}"
@@ -488,8 +543,8 @@ class AuthRoutes:
 
     def _register_logout_route(self, rt: RouteRegistrar, prefix: str) -> None:
         @rt(f"{prefix}/logout")
-        def logout(sess):
-            sess.clear()
+        def logout(sess: SessionData) -> Any:
+            cast(dict[str, Any], sess).clear()
             return RedirectResponse(f"{prefix}/login", status_code=303)
 
         self.routes["logout"] = logout
@@ -510,7 +565,7 @@ class AuthRoutes:
         if self.auth.config.get("allow_password_reset", False):
 
             @rt(f"{prefix}/forgot", methods=["GET"])
-            def forgot_page(req):
+            def forgot_page(req: Request) -> Any:
                 error = req.query_params.get("error")
                 success = req.query_params.get("success")
                 return Title("Forgot Password"), create_forgot_password_form(
@@ -518,9 +573,9 @@ class AuthRoutes:
                 )
 
             @rt(f"{prefix}/forgot", methods=["POST"])
-            async def forgot_submit(req):
+            async def forgot_submit(req: Request) -> Any:
                 form = await req.form()
-                form.get("email", "").strip()
+                auth_forms.form_text(form, "email").strip()
 
                 # TODO: Implement actual password reset logic
                 # For now, just show success message

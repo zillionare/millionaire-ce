@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from quantide.core.strategy_metadata import metadata_annotations
+from quantide.core.strategy_metadata import StrategyMetadata as CoreStrategyMetadata
 from quantide.data.models.base import Entity, new_uuid_id
 
 
@@ -31,11 +31,11 @@ SKIP_INVALID_CONFIG = "InvalidConfig"
 SKIP_BUILTIN_OVERRIDDEN = "BuiltinOverridden"
 
 
-@dataclass
-class StrategyMetadata:
-    """Mutable legacy DTO, with required fields and its additional diagnostics list."""
+@dataclass(frozen=True)
+class StrategyMetadata(CoreStrategyMetadata):
+    """Persistence DTO that adds scan diagnostics to the shared metadata schema."""
 
-    __annotations__ = {**metadata_annotations(), "skipped_reasons": list}
+    skipped_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass

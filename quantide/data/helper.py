@@ -1,8 +1,35 @@
+from typing import Literal, overload
+
 import pandas as pd
 import polars as pl
 from loguru import logger
 
 DataFrame = pd.DataFrame | pl.DataFrame | pl.LazyFrame
+
+
+@overload
+def qfq_adjustment(
+    df: pd.DataFrame | pl.DataFrame | pl.LazyFrame,
+    adj_factor_col: str = "adjust",
+    eager_mode: Literal[True] = True,
+) -> pl.DataFrame: ...
+
+
+@overload
+def qfq_adjustment(
+    df: pd.DataFrame | pl.DataFrame | pl.LazyFrame,
+    adj_factor_col: str = "adjust",
+    *,
+    eager_mode: Literal[False],
+) -> pl.LazyFrame: ...
+
+
+@overload
+def qfq_adjustment(
+    df: pd.DataFrame | pl.DataFrame | pl.LazyFrame,
+    adj_factor_col: str = "adjust",
+    eager_mode: bool = True,
+) -> pl.LazyFrame | pl.DataFrame: ...
 
 
 def qfq_adjustment(
@@ -60,6 +87,31 @@ def qfq_adjustment(
         return result.collect()
 
     return result
+
+
+@overload
+def hfq_adjustment(
+    df: pd.DataFrame | pl.DataFrame | pl.LazyFrame,
+    adj_factor_col: str = "adjust",
+    eager_mode: Literal[True] = True,
+) -> pl.DataFrame: ...
+
+
+@overload
+def hfq_adjustment(
+    df: pd.DataFrame | pl.DataFrame | pl.LazyFrame,
+    adj_factor_col: str = "adjust",
+    *,
+    eager_mode: Literal[False],
+) -> pl.LazyFrame: ...
+
+
+@overload
+def hfq_adjustment(
+    df: pd.DataFrame | pl.DataFrame | pl.LazyFrame,
+    adj_factor_col: str = "adjust",
+    eager_mode: bool = True,
+) -> pl.LazyFrame | pl.DataFrame: ...
 
 
 def hfq_adjustment(

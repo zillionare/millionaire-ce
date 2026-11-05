@@ -1,24 +1,32 @@
 """Resolve account selections consistently with the current edition boundary."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+
 from quantide.core.enums import BrokerKind
+from quantide.service.registry import BrokerRegistry
+from quantide.web.session_data import SessionData
 
 
 class LiveAccountUnavailable(ValueError):
     """The selected account requires a live-trading edition."""
 
 
-def is_live_kind(kind):
+def is_live_kind(kind: object) -> bool:
     """Accept persisted kind strings and enum values."""
     value = getattr(kind, "value", kind)
     return str(value or "").lower() in {"qmt", "live"}
 
 
-def account_kinds(allow_live):
+def account_kinds(allow_live: bool) -> list[BrokerKind]:
     """List usable account kinds in preference order."""
     return [BrokerKind.QMT, BrokerKind.SIMULATION] if allow_live else [BrokerKind.SIMULATION]
 
 
-def find_broker(registry, kind, account_id):
+def find_broker(
+    registry: BrokerRegistry | None, kind: BrokerKind | str | None, account_id: str | None
+) -> object | None:
     """Return a selected broker, retaining explicit invalid selections as failures."""
     if registry is None or not kind or not account_id:
         return None
@@ -28,32 +36,45 @@ def find_broker(registry, kind, account_id):
         return None
 
 
-def default_account(registry, allow_live):
+def default_account(registry: BrokerRegistry | None, allow_live: bool) -> tuple[str, str] | None:
     """Resolve a default and replace edition-blocked defaults with a simulation."""
     default = registry.get_default() if registry else None
     if not isinstance(default, (tuple, list)) or len(default) != 2:
         return None
     if is_live_kind(default[0]) and not allow_live:
-        simulations = registry.list_by_kind(BrokerKind.SIMULATION)
-        return (BrokerKind.SIMULATION.value, simulations[0].get("id")) if simulations else None
+        simulations = registry.list_by_kind(BrokerKind.SIMULATION) if registry else []
+        return (BrokerKind.SIMULATION.value, str(simulations[0].get("id"))) if simulations else None
     return default
 
 
-def query_account(registry, session, account_id, allow_live):
+def query_account(
+    registry: BrokerRegistry | None,
+    session: SessionData,
+    account_id: str,
+    allow_live: bool,
+) -> tuple[BrokerKind, str, object] | None:
     """Resolve an explicit account link and remember only a successful lookup."""
     if not account_id or not registry:
         return None
     for kind in account_kinds(allow_live):
         broker = find_broker(registry, kind, account_id)
         if broker is not None:
-            session.update(active_account_kind=kind.value, active_account_id=account_id)
+            session["active_account_kind"] = kind.value
+            session["active_account_id"] = account_id
             return kind, account_id, broker
     return None
 
 
-def resolve_active_account(registry, session, query, allow_live):
+def resolve_active_account(
+    registry: BrokerRegistry | None,
+    session: SessionData,
+    query: Mapping[str, object] | None,
+    allow_live: bool,
+) -> tuple[BrokerKind, str, object] | None:
     """Select a query account, remembered account or usable default."""
-    selected = query_account(registry, session, (query or {}).get("account_id"), allow_live)
+    selected = query_account(
+        registry, session, str((query or {}).get("account_id") or ""), allow_live
+    )
     if selected:
         return selected
     kind, account_id = session.get("active_account_kind"), session.get("active_account_id")
@@ -66,7 +87,7 @@ def resolve_active_account(registry, session, query, allow_live):
     return (BrokerKind(kind), account_id, broker) if broker else None
 
 
-def account_details(kind, account_id, broker):
+def account_details(kind: BrokerKind, account_id: str, broker: object | None) -> dict[str, object]:
     """Build the shared trading-page account representation."""
     live = is_live_kind(kind)
     return {
@@ -79,7 +100,12 @@ def account_details(kind, account_id, broker):
     }
 
 
-def resolve_order_account(registry, session, form, allow_live):
+def resolve_order_account(
+    registry: BrokerRegistry | None,
+    session: SessionData,
+    form: Mapping[str, object],
+    allow_live: bool,
+) -> tuple[object | None, str]:
     """Do not redirect an explicit invalid order selection to another account."""
     explicit_kind = str(form.get("account_kind") or "")
     kind = explicit_kind or str(session.get("active_account_kind") or "")
@@ -96,7 +122,7 @@ def resolve_order_account(registry, session, form, allow_live):
     return find_broker(registry, kind, account_id), getattr(kind, "value", kind)
 
 
-def listed_account(kind, info):
+def listed_account(kind: BrokerKind, info: Mapping[str, object]) -> dict[str, object]:
     """Represent a registry listing without fetching a broker or changing its status."""
     return {
         "id": info.get("id"),

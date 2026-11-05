@@ -2,7 +2,7 @@
 
 import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 
 import polars as pl
 
@@ -18,6 +18,39 @@ class BarStore(ParquetStorage):
         partition: Literal["year"] | None = None if path.suffix == ".parquet" else "year"
         super().__init__(name, path, calendar, None, error_handler=None, partition_by=partition)
         self._id_cols = ["date", identity]
+
+    @overload
+    def _read_bars(
+        self,
+        identifiers: list[str] | None,
+        start: datetime.date | datetime.datetime | None,
+        end: datetime.date | datetime.datetime | None,
+        eager: Literal[True],
+        *,
+        full_day: bool = False,
+    ) -> pl.DataFrame: ...
+
+    @overload
+    def _read_bars(
+        self,
+        identifiers: list[str] | None,
+        start: datetime.date | datetime.datetime | None,
+        end: datetime.date | datetime.datetime | None,
+        eager: Literal[False],
+        *,
+        full_day: bool = False,
+    ) -> pl.LazyFrame: ...
+
+    @overload
+    def _read_bars(
+        self,
+        identifiers: list[str] | None,
+        start: datetime.date | datetime.datetime | None,
+        end: datetime.date | datetime.datetime | None,
+        eager: bool,
+        *,
+        full_day: bool = False,
+    ) -> pl.DataFrame | pl.LazyFrame: ...
 
     def _read_bars(
         self,

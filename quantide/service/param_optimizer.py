@@ -13,11 +13,13 @@ import itertools
 import random
 import threading
 import uuid
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass, field
 from multiprocessing import get_context
-from typing import Any
+from typing import Any, cast
 
+import pandas as pd
 from loguru import logger
 
 from quantide.core.enums import FrameType
@@ -52,7 +54,12 @@ OBJECTIVE_METRIC_KEYS = {
 MODES = ("grid", "random")
 
 
-def _append_monthly_returns(month_last, prev_total, expected_month_ends, result):
+def _append_monthly_returns(
+    month_last: dict[tuple[int, int], tuple[datetime.date, float]],
+    prev_total: float | None,
+    expected_month_ends: dict[tuple[int, int], datetime.date],
+    result: list[dict[str, Any]],
+) -> None:
     """Append monthly returns."""
     for key in sorted(month_last):
         month_dt, month_total = month_last[key]
@@ -150,7 +157,7 @@ def _split_date(
     return cut, end
 
 
-def parse_metric(value: Any) -> float:
+def parse_metric(value: object) -> float:
     """解析指标表中的字符串值（如 ``"26.53%"``）为浮点数。"""
     if value is None:
         return float("nan")
@@ -178,7 +185,7 @@ def objective_value(metrics: dict[str, Any], objective: str) -> float:
     return value
 
 
-def _metrics_to_dict(metrics_df: Any) -> dict[str, Any]:
+def _metrics_to_dict(metrics_df: pd.DataFrame | None) -> dict[str, Any]:
     """把指标表（索引为指标名、列为 Value）转成扁平字典。"""
     if metrics_df is None:
         return {}
@@ -314,7 +321,7 @@ def _worker(
     assert spec.start_date is not None and spec.end_date is not None
     in_sample_end, _ = _split_date(spec.start_date, spec.end_date, spec.in_sample_ratio)
     return _run_combo(
-        strategy_cls,
+        cast(type[BaseStrategy], strategy_cls),
         config,
         spec.start_date,
         spec.end_date,
@@ -349,7 +356,7 @@ def build_combinations(spec: OptimizationSpec) -> list[dict[str, Any]]:
     return combos
 
 
-def _terminate_workers(executor: Any) -> None:
+def _terminate_workers(executor: ProcessPoolExecutor) -> None:
     """终止仍在运行的 worker 进程（中断或超时时调用）。"""
     for process in list(getattr(executor, "_processes", {}).values()):
         try:
@@ -370,12 +377,12 @@ class ParamOptimizer:
         """请求中断优化。"""
         self._cancel.set()
 
-    def _resolve_strategy(self) -> Any:
+    def _resolve_strategy(self) -> type[BaseStrategy] | None:
         """在父进程解析策略类（子进程通过引用导入，避免依赖数据库）。"""
         from quantide.service.discovery import strategy_loader
 
         strategies = strategy_loader.load_from_cache()
-        return strategies.get(self.spec.strategy_name)
+        return cast(type[BaseStrategy] | None, strategies.get(self.spec.strategy_name))
 
     @property
     def cancelled(self) -> bool:
@@ -384,7 +391,7 @@ class ParamOptimizer:
 
     def run(
         self,
-        on_progress: Any = None,
+        on_progress: Callable[[int, int, dict[str, Any]], None] | None = None,
     ) -> list[dict[str, Any]]:
         """执行搜索，返回每个组合的结果。
 
@@ -433,7 +440,12 @@ class ParamOptimizer:
             executor.shutdown(wait=not stopped, cancel_futures=stopped)
         return results
 
-    def _submit_combinations(self, executor, strategy_cls, combinations):
+    def _submit_combinations(
+        self,
+        executor: ProcessPoolExecutor,
+        strategy_cls: type[BaseStrategy],
+        combinations: list[dict[str, Any]],
+    ) -> dict[Future[dict[str, Any]], dict[str, Any]]:
         futures = {}
         for config in combinations:
             if self._cancel.is_set():
@@ -446,8 +458,14 @@ class ParamOptimizer:
         return futures
 
     def _evaluate_combinations(
-        self, executor, strategy_cls, combinations, deadline, on_progress, results
-    ):
+        self,
+        executor: ProcessPoolExecutor,
+        strategy_cls: type[BaseStrategy],
+        combinations: list[dict[str, Any]],
+        deadline: datetime.datetime | None,
+        on_progress: Callable[[int, int, dict[str, Any]], None] | None,
+        results: list[dict[str, Any]],
+    ) -> bool:
         futures = self._submit_combinations(executor, strategy_cls, combinations)
         done, pending = 0, set(futures)
         while pending:
@@ -462,7 +480,9 @@ class ParamOptimizer:
                 return True
         return self._cancel.is_set()
 
-    def _future_result(self, future, config):
+    def _future_result(
+        self, future: Future[dict[str, Any]], config: dict[str, Any]
+    ) -> dict[str, Any]:
         try:
             result = future.result()
         except Exception as exc:
@@ -472,7 +492,7 @@ class ParamOptimizer:
         result["config"] = config
         return result
 
-    def _search_should_stop(self, deadline):
+    def _search_should_stop(self, deadline: datetime.datetime | None) -> bool:
         if self._cancel.is_set():
             logger.info("参数优化已被中断")
             return True
@@ -511,8 +531,14 @@ def new_task_id() -> str:
 
 
 def _optimization_backtest(
-    strategy_cls, config, start_date, end_date, interval, initial_cash, home_dir
-):
+    strategy_cls: type[BaseStrategy],
+    config: dict[str, Any],
+    start_date: datetime.date,
+    end_date: datetime.date,
+    interval: str,
+    initial_cash: float,
+    home_dir: str | None,
+) -> str | None:
     """Run one isolated in-memory backtest in the worker process."""
     from quantide.config.settings import get_data_home
 
@@ -535,7 +561,12 @@ def _optimization_backtest(
     return portfolio_id
 
 
-def _combination_metrics(portfolio_id, start_date, in_sample_end, end_date):
+def _combination_metrics(
+    portfolio_id: str,
+    start_date: datetime.date,
+    in_sample_end: datetime.date,
+    end_date: datetime.date,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Score the same portfolio on the configured sample split."""
     from quantide.service.metrics import metrics as compute_metrics
 

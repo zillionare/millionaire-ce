@@ -1,10 +1,38 @@
 """Execution of the ML example's target portfolio rebalance."""
 
+from __future__ import annotations
+
+import datetime
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from quantide.core.ports.broker import StrategyBroker
+    from quantide.data.models import Position
+
 
 class MLRebalance:
     """Keep the target-set exit policy separate from ranking and model fitting."""
 
-    async def _sell_non_targets(self, current_positions, target_assets, tm):
+    if TYPE_CHECKING:
+        broker: StrategyBroker
+        top_k: int
+
+        def log(
+            self,
+            msg: str,
+            *args: Any,
+            tm: datetime.datetime | datetime.date | None = None,
+            level: str = "INFO",
+            **kwargs: Any,
+        ) -> None: ...
+
+    async def _sell_non_targets(
+        self,
+        current_positions: Mapping[str, Position],
+        target_assets: set[str],
+        tm: datetime.datetime,
+    ) -> set[str]:
         sold_assets = set()
         for asset, pos in current_positions.items():
             if asset in target_assets:
@@ -23,7 +51,12 @@ class MLRebalance:
                 )
         return sold_assets
 
-    async def _buy_target_candidates(self, ranked, sold_assets, tm):
+    async def _buy_target_candidates(
+        self,
+        ranked: list[dict[str, Any]],
+        sold_assets: set[str],
+        tm: datetime.datetime,
+    ) -> None:
         held_assets = {
             a for a, p in self.broker.positions.items() if float(getattr(p, "shares", 0) or 0) > 0
         }

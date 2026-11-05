@@ -2,11 +2,14 @@
 
 import base64
 import json
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 from fasthtml.common import *
 from monsterui.all import *
+from starlette.requests import Request
 
+from quantide.core.strategy import BaseStrategy
 from quantide.service.discovery import strategy_loader
 from quantide.service.risk_programs import (
     ALLOW_SAME_BAR_REPURCHASE_KEY,
@@ -27,7 +30,13 @@ from quantide.web.pages.strategy_routes import (
 )
 
 
-def _append_selected_risk_programs(by_id, form, programs, raw_ids, selected):
+def _append_selected_risk_programs(
+    by_id: Mapping[str, dict[str, Any]],
+    form: Mapping[str, Any],
+    programs: list[dict[str, Any]],
+    raw_ids: list[object],
+    selected: list[dict[str, Any]],
+) -> None:
     """Append selected risk programs."""
     for index, program_id in enumerate(raw_ids):
         program_id = str(program_id)
@@ -43,12 +52,12 @@ def _append_selected_risk_programs(by_id, form, programs, raw_ids, selected):
         selected.append({"id": program_id, "params": params, "priority": priority})
 
 
-def _parse_params(form, prefix="param_"):
+def _parse_params(form: Mapping[str, Any], prefix: str = "param_") -> dict[str, Any]:
     """解析回测表单参数。
 
     同名多值字段（例如因子勾选）会解析成列表。
     """
-    config = {}
+    config: dict[str, Any] = {}
     getlist = getattr(form, "getlist", None)
     for k in form.keys():
         if not k.startswith(prefix):
@@ -84,7 +93,7 @@ def _split_backtest_params(default_params: dict[str, Any]) -> tuple[dict[str, An
     return strategy_params, trade_params
 
 
-def _decode_backtest_prefill(req: Any) -> dict[str, Any]:
+def _decode_backtest_prefill(req: Request | None) -> dict[str, Any]:
     """解析回测向导的预填参数（参数优化结果回填）。
 
     Args:
@@ -106,7 +115,7 @@ def _decode_backtest_prefill(req: Any) -> dict[str, Any]:
 
 
 def _parse_risk_program_selection(
-    form: Any, strategy_cls: Any, interval: str
+    form: Mapping[str, Any], strategy_cls: type[BaseStrategy], interval: str
 ) -> tuple[list[dict[str, Any]], bool]:
     """Parse and server-validate risk IDs, priorities, and parameters."""
     if not form.get("risk_selection_present"):
@@ -140,7 +149,7 @@ def _parse_risk_program_selection(
 
 
 def _form_to_config(
-    form,
+    form: Mapping[str, Any],
     base_config: dict[str, Any],
     editable_keys: tuple[str, ...] = tuple(BROKER_FEE_PARAM_DEFAULTS),
 ) -> dict[str, Any]:
@@ -160,7 +169,7 @@ def _form_to_config(
 
 
 def _deployment_risk_config(
-    form: Any,
+    form: Mapping[str, Any],
     base_config: dict[str, Any],
     strategy_name: str,
     interval: str = "1d",
@@ -172,7 +181,9 @@ def _deployment_risk_config(
         strategy_cls = strategy_loader.load_from_cache().get(strategy_name)
         if strategy_cls is None:
             raise ValueError("源回测策略不存在，无法校验风控程序")
-        selected, allow_same_bar = _parse_risk_program_selection(form, strategy_cls, interval)
+        selected, allow_same_bar = _parse_risk_program_selection(
+            form, cast(type[BaseStrategy], strategy_cls), interval
+        )
         config[RISK_PROGRAMS_KEY] = selected
         config[ALLOW_SAME_BAR_REPURCHASE_KEY] = allow_same_bar
         return config, _removed_risk_warning(source, selected, interval=interval)
@@ -181,7 +192,7 @@ def _deployment_risk_config(
         if strategy_cls is not None:
             config[RISK_PROGRAMS_KEY] = normalize_risk_programs(
                 config[RISK_PROGRAMS_KEY],
-                host_strategy_cls=strategy_cls,
+                host_strategy_cls=cast(type[BaseStrategy], strategy_cls),
                 frame_type=interval,
             )
     return config, ""
