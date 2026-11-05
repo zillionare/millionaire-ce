@@ -6,6 +6,7 @@ import datetime as dt
 
 import polars as pl
 import pytest
+from starlette.testclient import TestClient
 
 from quantide.factors import FEATURE_COLS
 from quantide.factors.alphatest import (
@@ -31,6 +32,18 @@ class _QueryParams:
 
     def getlist(self, key: str) -> list[str]:
         return list(self._data.get(key, []))
+
+
+@pytest.fixture(scope="module")
+def client():
+    """创建测试客户端"""
+    from quantide.app_factory import create_app
+    from tests.e2e.support.auth_fixture import sign_in_test_admin
+
+    app = create_app(enforce_single_instance=False)
+    with TestClient(app) as c:
+        sign_in_test_admin(c)
+        yield c
 
 
 def test_parse_holdings_defaults_and_filters() -> None:
@@ -108,11 +121,23 @@ def test_run_ledger_uses_cache(monkeypatch) -> None:
 async def test_index_renders_page_without_results(monkeypatch) -> None:
     result = await alpha_ledger.index(_FakeRequest())
     parts = result if isinstance(result, tuple) else (result,)
-    html = "".join(
-        part.__html__() if hasattr(part, "__html__") else str(part) for part in parts
-    )
+    html = "".join(part.__html__() if hasattr(part, "__html__") else str(part) for part in parts)
 
     assert "因子台账" in html
     assert "开始检验" in html
     assert "没有可展示的结果" in html
     assert len(FEATURE_COLS) == 28
+
+
+def test_alpha_ledger_redirects_to_trailing_slash(client) -> None:
+    """侧栏菜单不带尾部斜杠，必须重定向到页面路由。"""
+    resp = client.get("/system/alpha-ledger", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].endswith("/system/alpha-ledger/")
+
+
+def test_alpha_ledger_page_opens_from_menu(client) -> None:
+    resp = client.get("/system/alpha-ledger", follow_redirects=True)
+    assert resp.status_code == 200
+    assert "因子台账" in resp.text
+    assert "开始检验" in resp.text

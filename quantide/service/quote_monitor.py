@@ -103,23 +103,30 @@ class QuoteMonitor:
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         """返回最新快照（按成交额降序，可过滤代码/名称）。"""
-        text = str(query or "").strip().upper()
         with self._lock:
             rows = list(self._quotes.values())
-        if text:
-            rows = [
-                row
-                for row in rows
-                if text in row["symbol"].upper() or text in str(row.get("name") or "").upper()
-            ]
-        rows.sort(
-            key=lambda row: (row.get("amount") or 0.0, row.get("volume") or 0.0),
-            reverse=True,
-        )
-        return rows[: max(1, int(limit))]
+        return select_snapshot_rows(rows, query, limit)
+
+
+def select_snapshot_rows(
+    rows: list[dict[str, Any]], query: str = "", limit: int = 50
+) -> list[dict[str, Any]]:
+    """Filter and rank snapshot rows shared by live and persisted views."""
+    text = str(query or "").strip().upper()
+    if text:
+        rows = [
+            row
+            for row in rows
+            if text in row["symbol"].upper() or text in str(row.get("name") or "").upper()
+        ]
+    rows.sort(
+        key=lambda row: (row.get("amount") or 0.0, row.get("volume") or 0.0),
+        reverse=True,
+    )
+    return rows[: max(1, int(limit))]
 
 
 #: 全局单例
 quote_monitor = QuoteMonitor()
 
-__all__ = ["QuoteMonitor", "quote_monitor"]
+__all__ = ["QuoteMonitor", "quote_monitor", "select_snapshot_rows"]

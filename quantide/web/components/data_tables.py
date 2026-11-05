@@ -38,6 +38,13 @@ def AccountDetailTable(headers: Sequence[str], rows: Sequence[object]) -> Any:
     )
 
 
+def pagination_button_class(active: bool) -> str:
+    """Shared selected-page styling: red outline instead of filled emphasis."""
+    return "q-btn q-btn--sm mx-0.5 " + (
+        "bg-white text-[#e41815] border-[#e41815] font-semibold" if active else "border-black/20"
+    )
+
+
 def DatasetPagination(
     info: object,
     page: int,

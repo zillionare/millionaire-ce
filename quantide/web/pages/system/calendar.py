@@ -19,13 +19,13 @@ from loguru import logger
 from monsterui.all import *
 from monsterui.all import (
     H2,
-    Button,
     UkIcon,
 )
 from starlette.requests import Request
 
 from quantide.data.models.calendar import calendar as trade_calendar
 from quantide.web.application import fast_app
+from quantide.web.components.system import subtle_icon_button
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -142,30 +142,26 @@ async def index(req: Request, year: int | None = None, month: int | None = None)
                 H2("交易日历", cls="text-2xl font-bold"),
                 cls="flex items-center",
             ),
-            cls="mb-6",
+            subtle_icon_button(
+                UkIcon("refresh-cw", size=16),
+                post_url="/system/calendar/sync",
+                target="#calendar-content",
+                label="立即更新交易日历",
+            ),
+            cls="mb-6 flex items-center justify-between",
         ),
         Div(
             UkIcon("alert-triangle", cls="text-gray-500 mr-2"),
             Span(
                 f"当前交易日历数据范围 {data_range_text}，"
                 "未覆盖所选月份；节假日与周末均按周末默认规则显示，"
-                "请点击右上角「立即更新」拉取最新数据以获得准确的节假日标红。",
+                "请点击标题栏右侧的刷新图标拉取最新数据以获得准确的节假日标红。",
                 cls="text-sm text-gray-600",
             ),
             cls=("flex items-center p-3 mb-4 bg-gray-50 border border-gray-200 rounded-lg"),
         )
         if stale
         else None,
-        Div(
-            Button(
-                "立即更新",
-                hx_post="/system/calendar/sync",
-                hx_target="#calendar-content",
-                hx_swap="innerHTML",
-                cls="btn btn-sm btn-secondary",
-            ),
-            cls="flex justify-end mb-4",
-        ),
         _calendar_navigation(year, month),
         Div(_build_calendar_grid(year, month), id="calendar-content"),
         Div(
@@ -243,25 +239,25 @@ def _calendar_navigation(year: Any, month: Any) -> Any:
             A(
                 "<<",
                 href=f"/system/calendar/?year={prev_year}&month={month}",
-                cls="btn btn-sm btn-outline",
+                cls="q-btn q-btn--sm border-black/20",
                 title="上一年",
             ),
             A(
                 "<",
                 href=f"/system/calendar/?year={prev_month_year}&month={prev_month}",
-                cls="btn btn-sm btn-outline ml-1",
+                cls="q-btn q-btn--sm border-black/20 ml-1",
                 title="上一月",
             ),
             A(
                 ">",
                 href=f"/system/calendar/?year={next_month_year}&month={next_month}",
-                cls="btn btn-sm btn-outline ml-1",
+                cls="q-btn q-btn--sm border-black/20 ml-1",
                 title="下一月",
             ),
             A(
                 ">>",
                 href=f"/system/calendar/?year={next_year}&month={month}",
-                cls="btn btn-sm btn-outline ml-1",
+                cls="q-btn q-btn--sm border-black/20 ml-1",
                 title="下一年",
             ),
             cls="flex items-center space-x-1",

@@ -1,7 +1,7 @@
 # 本版能力与支持范围
 
 Millionaire CE 采用 MIT 许可证，分发包名为 `millionaire-ce`，导入名为 `quantide`。
-本手册对应 `0.3.0` 交付线；正式安装包须在 Release 中实际提供后才能下载使用。
+本手册对应 `0.3.1` 交付线；正式安装包须在 Release 中实际提供后才能下载使用。
 
 millionaire 是 CE 与 millionaire pro 的合称。本页列出社区版的交付范围；
 仅属于专业版的功能均使用 millionaire pro 明确标注。

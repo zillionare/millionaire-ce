@@ -1,28 +1,32 @@
 """系统维护 - 行情数据模块"""
 
+from __future__ import annotations
+
 import asyncio
 import datetime
 from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from typing import Any, cast
+from urllib.parse import urlencode
 
 from fasthtml.common import *
 from fasthtml.common import (
     A,
     Div,
-    P,
+    Form,
     Span,
     Tr,
 )
-
-# Use FastHTML's plain Label for form elements to avoid MonsterUI's uk-label styling
-from fasthtml.common import Label as _Label
+from fasthtml.common import (
+    Button as ActionButton,
+)
+from fasthtml.common import (
+    Input as TextInput,
+)
 from loguru import logger
 from monsterui.all import *
 from monsterui.all import (
     H2,
-    Button,
-    Form,
-    Input,
     Td,
     UkIcon,
 )
@@ -31,12 +35,176 @@ from starlette.requests import Request
 from quantide.data.models.daily_bars import daily_bars
 from quantide.data.models.stocks import stock_list
 from quantide.web.application import fast_app
-from quantide.web.components.data_tables import DatasetPagination, DatasetTable
+from quantide.web.components.data_tables import (
+    DatasetPagination,
+    DatasetTable,
+    pagination_button_class,
+)
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
 # 定义子路由应用
 system_market_app, rt = fast_app(hdrs=AppTheme.headers())
+
+_FILTER_CONTROL_STYLE = (
+    "height:36px;width:144px;min-height:36px;margin:0;box-sizing:border-box;padding:0 12px;"
+)
+
+
+def _parse_flag(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class _MarketView:
+    code: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    adjust: str = "none"
+    page: int = 1
+    per_page: int = 20
+    show_turnover: bool = False
+    show_limits: bool = False
+    show_st: bool = False
+
+    @classmethod
+    def from_request(cls, req: Request) -> _MarketView:
+        query = req.query_params
+        return cls(
+            code=query.get("code", ""),
+            start_date=query.get("start_date", ""),
+            end_date=query.get("end_date", ""),
+            adjust=query.get("adjust") or "none",
+            page=int(query.get("page") or 1),
+            per_page=int(query.get("per_page") or 20),
+            show_turnover=_parse_flag(query.get("show_turnover", "")),
+            show_limits=_parse_flag(query.get("show_limits", "")),
+            show_st=_parse_flag(query.get("show_st", "")),
+        )
+
+    @property
+    def show_identity(self) -> bool:
+        return not self.code.strip()
+
+    def url(self, *, page: int | None = None, per_page: int | None = None) -> str:
+        params = {
+            "code": self.code,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "adjust": self.adjust,
+            "page": str(self.page if page is None else page),
+            "per_page": str(self.per_page if per_page is None else per_page),
+        }
+        for name in ("show_turnover", "show_limits", "show_st"):
+            if getattr(self, name):
+                params[name] = "1"
+        return f"/system/market/?{urlencode(params)}"
+
+
+def _state_button_class(active: bool) -> str:
+    selected = (
+        "bg-white text-[#e41815] border-[#e41815] font-semibold" if active else "border-black/20"
+    )
+    return f"q-btn q-btn--sm whitespace-nowrap {selected}"
+
+
+def _display_asset(asset: str) -> str:
+    """Drop the exchange suffix in compact market tables."""
+    return asset.partition(".")[0]
+
+
+def _adjust_toggle(state: _MarketView) -> A:
+    active = state.adjust == "qfq"
+    target = replace(state, adjust="none" if active else "qfq", page=1)
+    return A(
+        "前复权" if active else "不复权",
+        href=target.url(),
+        title="切换复权",
+        aria_label="切换复权",
+        cls=_state_button_class(active),
+    )
+
+
+def _toggle_button(state: _MarketView, show_label: str, hide_label: str, key: str) -> A:
+    active = bool(getattr(state, key))
+    if key == "show_turnover":
+        target = replace(state, show_turnover=not active, page=1)
+    elif key == "show_limits":
+        target = replace(state, show_limits=not active, page=1)
+    elif key == "show_st":
+        target = replace(state, show_st=not active, page=1)
+    else:
+        raise ValueError(f"unknown market toggle: {key}")
+    return A(
+        hide_label if active else show_label,
+        href=target.url(),
+        cls=_state_button_class(active),
+    )
+
+
+def _hidden_inputs(state: _MarketView) -> list[Any]:
+    inputs: list[Any] = [
+        TextInput(type="hidden", name="adjust", value=state.adjust),
+        TextInput(type="hidden", name="per_page", value=str(state.per_page)),
+    ]
+    for name in ("show_turnover", "show_limits", "show_st"):
+        if getattr(state, name):
+            inputs.append(TextInput(type="hidden", name=name, value="1"))
+    return inputs
+
+
+def _filter_row(state: _MarketView) -> Div:
+    return Div(
+        Form(
+            *_hidden_inputs(state),
+            TextInput(
+                type="text",
+                name="code",
+                value=state.code,
+                placeholder="证券代码",
+                aria_label="证券代码",
+                cls="q-input h-9 w-40",
+                style=_FILTER_CONTROL_STYLE,
+            ),
+            TextInput(
+                type="date",
+                name="start_date",
+                value=state.start_date,
+                aria_label="起始日期",
+                title="起始日期",
+                cls="q-input h-9 w-40",
+                style=_FILTER_CONTROL_STYLE,
+            ),
+            TextInput(
+                type="date",
+                name="end_date",
+                value=state.end_date,
+                aria_label="结束日期",
+                title="结束日期",
+                cls="q-input h-9 w-40",
+                style=_FILTER_CONTROL_STYLE,
+            ),
+            ActionButton(
+                "查询",
+                type="submit",
+                cls="q-btn h-9 min-w-[72px] whitespace-nowrap",
+                style=(
+                    "height:36px;width:72px;min-width:72px;flex:none;margin:0;"
+                    "box-sizing:border-box;padding:0 12px;"
+                ),
+            ),
+            method="get",
+            cls="flex flex-wrap items-center gap-2",
+        ),
+        Div(
+            _adjust_toggle(state),
+            _toggle_button(state, "显示成交", "隐藏成交", "show_turnover"),
+            _toggle_button(state, "显示涨跌停", "隐藏涨跌停", "show_limits"),
+            _toggle_button(state, "显示ST", "隐藏ST", "show_st"),
+            cls="ml-auto flex flex-wrap items-center justify-end gap-2",
+        ),
+        cls="mb-4 flex flex-wrap items-center gap-2",
+    )
 
 
 def _get_market_data(
@@ -118,8 +286,12 @@ def _load_asset_names() -> dict[str, str]:
         return {}
 
 
-def _market_row(row: Mapping[str, Any], show_identity: bool, asset_names: Mapping[str, str]) -> Any:
-    """Render one row with its display values and available actions."""
+def _market_row(
+    row: Mapping[str, Any],
+    asset_names: Mapping[str, str],
+    state: _MarketView,
+) -> Any:
+    """Render one row with its display values and optional columns."""
     trade_date = str(row.get("date", "")).split(" ")[0] if row.get("date") else "-"
     is_st = "是" if row.get("is_st") else "否"
 
@@ -137,11 +309,11 @@ def _market_row(row: Mapping[str, Any], show_identity: bool, asset_names: Mappin
         change_str = "-"
 
     cells = []
-    if show_identity:
+    if state.show_identity:
         asset = str(row.get("asset") or "-")
         cells.extend(
             [
-                Td(asset, cls="px-4 py-2 text-sm font-medium text-gray-900"),
+                Td(_display_asset(asset), cls="px-4 py-2 text-sm font-medium text-gray-900"),
                 Td(asset_names.get(asset, "-"), cls="px-4 py-2 text-sm text-gray-900"),
             ]
         )
@@ -153,146 +325,103 @@ def _market_row(row: Mapping[str, Any], show_identity: bool, asset_names: Mappin
             Td(_market_number(row, "low", ".2f"), cls="px-4 py-2 text-sm text-gray-900"),
             Td(_market_number(row, "close", ".2f"), cls="px-4 py-2 text-sm text-gray-900"),
             Td(Span(change_str, cls=change_cls), cls="px-4 py-2 text-sm"),
-            Td(_market_number(row, "volume", ",.0f"), cls="px-4 py-2 text-sm text-gray-500"),
-            Td(_market_number(row, "amount", ",.2f"), cls="px-4 py-2 text-sm text-gray-500"),
-            Td(_market_number(row, "up_limit", ".2f"), cls="px-4 py-2 text-sm text-gray-500"),
-            Td(_market_number(row, "down_limit", ".2f"), cls="px-4 py-2 text-sm text-gray-500"),
-            Td(_market_number(row, "adjust", ".4f"), cls="px-4 py-2 text-sm text-gray-500"),
-            Td(is_st, cls="px-4 py-2 text-sm text-gray-500"),
         ]
     )
+    if state.show_turnover:
+        cells.extend(
+            [
+                Td(_market_number(row, "volume", ",.0f"), cls="px-4 py-2 text-sm text-gray-500"),
+                Td(_market_number(row, "amount", ",.2f"), cls="px-4 py-2 text-sm text-gray-500"),
+            ]
+        )
+    if state.show_limits:
+        cells.extend(
+            [
+                Td(_market_number(row, "up_limit", ".2f"), cls="px-4 py-2 text-sm text-gray-500"),
+                Td(_market_number(row, "down_limit", ".2f"), cls="px-4 py-2 text-sm text-gray-500"),
+            ]
+        )
+    cells.append(Td(_market_number(row, "adjust", ".4f"), cls="px-4 py-2 text-sm text-gray-500"))
+    if state.show_st:
+        cells.append(Td(is_st, cls="px-4 py-2 text-sm text-gray-500"))
     return Tr(*cells, cls="hover:bg-gray-50")
 
 
-def _build_market_table(
-    data: list[dict[str, Any]],
-    page: int = 1,
-    per_page: int = 20,
-    total: int = 0,
-    code: str = "",
-    start_date: str = "",
-    end_date: str = "",
-    adjust: str = "none",
-) -> Any:
+def _build_market_table(data: list[dict[str, Any]], total: int, state: _MarketView) -> Any:
     """构建行情数据表格"""
-    show_identity = not str(code or "").strip()
-    asset_names = _load_asset_names() if show_identity else {}
+    asset_names = _load_asset_names() if state.show_identity else {}
+    headers = (["证券代码", "证券名称"] if state.show_identity else []) + [
+        "日期",
+        "开盘",
+        "最高",
+        "最低",
+        "收盘",
+        "涨跌",
+    ]
+    if state.show_turnover:
+        headers.extend(["成交量", "成交额"])
+    if state.show_limits:
+        headers.extend(["涨停价", "跌停价"])
+    headers.append("复权因子")
+    if state.show_st:
+        headers.append("ST")
 
     rows: list[Any] = []
     if data:
-        rows.extend(_market_row(row, show_identity, asset_names) for row in data)
+        rows.extend(_market_row(row, asset_names, state) for row in data)
     else:
         rows.append(
             Tr(
                 Td(
                     "暂无数据",
-                    colspan="14" if show_identity else "12",
+                    colspan=str(len(headers)),
                     cls="px-4 py-8 text-center text-gray-500",
                 )
             )
         )
 
-    total_pages = max(1, (total + per_page - 1) // per_page) if total > 0 else 1
+    total_pages = max(1, (total + state.per_page - 1) // state.per_page) if total > 0 else 1
     pagination_info = (
-        f"显示第 {(page - 1) * per_page + 1} 到 {min(page * per_page, total)} 条，共 {total} 条"
+        f"显示第 {(state.page - 1) * state.per_page + 1} 到 "
+        f"{min(state.page * state.per_page, total)} 条，共 {total} 条"
         if total > 0
         else "暂无数据"
     )
 
-    def page_url(p: int) -> str:
-        return (
-            "/system/market/?code="
-            f"{code}"
-            "&start_date="
-            f"{start_date}"
-            "&end_date="
-            f"{end_date}"
-            "&adjust="
-            f"{adjust}"
-            "&page="
-            f"{p}"
-            "&per_page="
-            f"{per_page}"
-        )
-
     return Div(
-        DatasetTable(
-            (["证券代码", "证券名称"] if show_identity else [])
-            + [
-                "日期",
-                "开盘",
-                "最高",
-                "最低",
-                "收盘",
-                "涨跌",
-                "成交量",
-                "成交额",
-                "涨停价",
-                "跌停价",
-                "复权因子",
-                "ST",
-            ],
-            rows,
-        ),
+        DatasetTable(headers, rows),
         DatasetPagination(
             pagination_info,
-            page,
-            per_page,
+            state.page,
+            state.per_page,
             total_pages,
-            lambda number, size: page_url(number).replace(
-                f"per_page={per_page}", f"per_page={size}"
-            ),
-            lambda active: (
-                "q-btn q-btn--sm mx-0.5"
-                + (" border-gray-900 bg-gray-900 text-white" if active else "")
-            ),
+            lambda number, size: state.url(page=number, per_page=size),
+            pagination_button_class,
         ),
         cls="bg-white rounded-lg shadow overflow-hidden",
     )
 
 
 @rt("/")
-async def index(
-    req: Request,
-    code: str = "",
-    start_date: str = "",
-    end_date: str = "",
-    adjust: str = "none",
-    page: int = 1,
-    per_page: int = 20,
-) -> Any:
+async def index(req: Request) -> Any:
     """行情数据页面"""
-    code = code or req.query_params.get("code", "")
-    start_date = start_date or req.query_params.get("start_date", "")
-    end_date = end_date or req.query_params.get("end_date", "")
-    adjust = adjust or req.query_params.get("adjust", "none")
-    page = int(req.query_params.get("page", page))
-    per_page = int(req.query_params.get("per_page", per_page))
-
+    state = _MarketView.from_request(req)
     logger.info(
-        f"market_page called with code='{code}', start_date='{start_date}', end_date='{end_date}'"
+        f"market_page called with code='{state.code}', "
+        f"start_date='{state.start_date}', end_date='{state.end_date}'"
     )
 
-    data, total = _get_market_data(code, start_date, end_date, adjust, page, per_page)
+    data, total = _get_market_data(
+        state.code,
+        state.start_date,
+        state.end_date,
+        state.adjust,
+        state.page,
+        state.per_page,
+    )
 
     layout = MainLayout(title="行情数据")
     layout.set_sidebar_active("/system/market")
-
-    def adjust_btn(label: str, value: str) -> A:
-        url = (
-            "/system/market/?code="
-            f"{code}"
-            "&start_date="
-            f"{start_date}"
-            "&end_date="
-            f"{end_date}"
-            "&adjust="
-            f"{value}"
-            "&page=1&per_page="
-            f"{per_page}"
-        )
-        active_cls = " border-gray-900 bg-gray-900 text-white" if adjust == value else ""
-        return A(label, href=url, cls=f"q-btn q-btn--sm whitespace-nowrap{active_cls}")
 
     page_content = Div(
         Div(
@@ -303,72 +432,8 @@ async def index(
             ),
             cls="mb-6",
         ),
-        Div(
-            Form(
-                Div(
-                    Div(
-                        _Label("证券代码", cls="q-label"),
-                        Input(
-                            type="text",
-                            name="code",
-                            value=code,
-                            placeholder="输入股票代码",
-                            cls="q-input w-full",
-                        ),
-                        cls="min-w-0",
-                    ),
-                    Div(
-                        _Label("起始日期", cls="q-label"),
-                        Input(
-                            type="date", name="start_date", value=start_date, cls="q-input w-full"
-                        ),
-                        cls="min-w-0",
-                    ),
-                    Div(
-                        _Label("结束日期", cls="q-label"),
-                        Input(type="date", name="end_date", value=end_date, cls="q-input w-full"),
-                        cls="min-w-0",
-                    ),
-                    Div(
-                        Button("查询", type="submit", cls="q-btn min-w-[72px] whitespace-nowrap"),
-                        cls="flex items-end",
-                    ),
-                    cls=(
-                        "grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1f"
-                        "r)_minmax(0,1fr)_auto]"
-                    ),
-                ),
-                cls="card p-4 mb-3",
-            ),
-            cls="mb-4",
-        ),
-        P(
-            "未提供筛选条件时，默认展示最近一个交易日的首页数据。",
-            cls="text-sm text-gray-500 mb-4",
-        ),
-        Div(
-            Div(
-                Span("复权方式", cls="whitespace-nowrap text-sm font-medium text-gray-700"),
-                Div(
-                    adjust_btn("不复权", "none"),
-                    adjust_btn("前复权", "qfq"),
-                    cls="flex flex-wrap items-center gap-1.5",
-                ),
-                cls="flex min-w-0 flex-wrap items-center gap-2",
-            ),
-            Button(
-                "立即刷新",
-                hx_post="/system/market/sync",
-                hx_target="#market-content",
-                hx_swap="innerHTML",
-                cls="q-btn q-btn--sm shrink-0 whitespace-nowrap",
-            ),
-            cls="card mb-4 flex flex-wrap items-center justify-between gap-3 p-3",
-        ),
-        Div(
-            _build_market_table(data, page, per_page, total, code, start_date, end_date, adjust),
-            id="market-content",
-        ),
+        _filter_row(state),
+        Div(_build_market_table(data, total, state), id="market-content"),
         cls="p-8",
     )
 
@@ -392,13 +457,16 @@ async def sync_market(req: Request) -> Any:
         except Exception:
             pass
 
-        code = req.query_params.get("code", "")
-        start_date = req.query_params.get("start_date", "")
-        end_date = req.query_params.get("end_date", "")
-        adjust = req.query_params.get("adjust", "none")
-
-        data, total = _get_market_data(code, start_date, end_date, adjust, 1, 20)
-        return _build_market_table(data, 1, 20, total, code, start_date, end_date, adjust)
+        state = replace(_MarketView.from_request(req), page=1, per_page=20)
+        data, total = _get_market_data(
+            state.code,
+            state.start_date,
+            state.end_date,
+            state.adjust,
+            state.page,
+            state.per_page,
+        )
+        return _build_market_table(data, total, state)
     except Exception as e:
         logger.error(f"同步行情数据失败: {e}")
         return Div(

@@ -86,6 +86,23 @@ def icon_btn(
     return Button(icon, cls="q-btn q-btn--icon", **attrs)
 
 
+def subtle_icon_button(icon: Any, *, post_url: str, target: str, label: str) -> Button:
+    """Lightweight header action icon; no button chrome or full-width layout."""
+    return Button(
+        icon,
+        hx_post=post_url,
+        hx_target=target,
+        hx_swap="innerHTML",
+        cls=(
+            "inline-flex h-5 w-5 items-center justify-center p-0 "
+            "border-0 bg-transparent text-gray-500 transition-colors "
+            "hover:text-gray-900"
+        ),
+        title="立即更新",
+        aria_label=label,
+    )
+
+
 def input_(
     name: str,
     *,
@@ -235,6 +252,7 @@ __all__ = [
     "card",
     "data_table",
     "icon_btn",
+    "subtle_icon_button",
     "input_",
     "modal",
     "page_header",

@@ -15,7 +15,6 @@ from loguru import logger
 from monsterui.all import *
 from monsterui.all import (
     H2,
-    Button,
     Input,
     UkIcon,
 )
@@ -23,7 +22,12 @@ from starlette.requests import Request
 
 from quantide.data.models.stocks import stock_list
 from quantide.web.application import fast_app
-from quantide.web.components.data_tables import DatasetPagination, DatasetTable
+from quantide.web.components.data_tables import (
+    DatasetPagination,
+    DatasetTable,
+    pagination_button_class,
+)
+from quantide.web.components.system import subtle_icon_button
 from quantide.web.layouts.main import MainLayout
 from quantide.web.theme import PRIMARY_COLOR, AppTheme
 
@@ -92,7 +96,7 @@ def _build_stock_table(
             per_page,
             total_pages,
             page_url,
-            lambda active: f"btn btn-sm {'btn-primary' if active else 'btn-outline'} mx-0.5",
+            pagination_button_class,
         ),
         cls="bg-white rounded-lg shadow overflow-hidden",
     )
@@ -142,34 +146,30 @@ async def index(req: Request, page: int = 1, per_page: int = 20, q: str = "") ->
                 H2("股票列表", cls="text-2xl font-bold"),
                 cls="flex items-center",
             ),
-            cls="mb-6",
+            subtle_icon_button(
+                UkIcon("refresh-cw", size=16),
+                post_url="/system/stocks/sync",
+                target="#stocks-content",
+                label="立即更新股票列表",
+            ),
+            cls="mb-6 flex items-center justify-between",
         ),
         Div(
-            Div(
-                Input(
-                    type="text",
-                    name="q",
-                    value=query,
-                    placeholder="输入代码、名称或拼音搜索...",
-                    cls="input input-bordered w-full max-w-md",
-                    hx_get="/system/stocks/search",
-                    hx_trigger="keyup changed delay:200ms, search",
-                    hx_target="#stocks-content",
-                    hx_swap="innerHTML",
-                    hx_include="[name='per_page']",
-                    hx_vals='{"page": "1"}',
-                ),
-                Input(type="hidden", name="per_page", value=str(per_page)),
-                cls="flex-1",
-            ),
-            Button(
-                "立即更新",
-                hx_post="/system/stocks/sync",
+            Input(
+                type="text",
+                name="q",
+                value=query,
+                placeholder="输入代码、名称或拼音搜索...",
+                cls="input input-bordered w-full",
+                hx_get="/system/stocks/search",
+                hx_trigger="keyup changed delay:200ms, search",
                 hx_target="#stocks-content",
                 hx_swap="innerHTML",
-                cls="btn btn-sm btn-secondary",
+                hx_include="[name='per_page']",
+                hx_vals='{"page": "1"}',
             ),
-            cls="flex justify-between items-center mb-4",
+            Input(type="hidden", name="per_page", value=str(per_page)),
+            cls="mb-4",
         ),
         Div(_build_stock_table(data, page, per_page, total, query), id="stocks-content"),
         cls="p-8",

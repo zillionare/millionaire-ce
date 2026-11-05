@@ -19,14 +19,14 @@ WinSW 和 OpenMP 的版权许可声明随相应安装包提供。
 ## 下载与校验
 
 打开 [GitHub Releases](https://github.com/zillionare/millionaire-ce/releases)，选择明确包含
-本手册对应原生包的版本，同时下载安装包和同名 `.sha256` 文件。以下以 `0.3.0` 为例；
+本手册对应原生包的版本，同时下载安装包和同名 `.sha256` 文件。以下以 `0.3.1` 为例；
 只有 Release 实际列出这些文件时才使用，不要拿旧版本或其他架构的包代替。
 
 | 平台 | 文件名 |
 | --- | --- |
-| macOS ARM64 | `millionaire-ce-0.3.0-macos-arm64.tar.gz` |
-| Ubuntu x86_64 | `millionaire-ce-0.3.0-ubuntu-amd64.deb` |
-| Windows x64 | `millionaire-ce-0.3.0-windows-x64.exe` |
+| macOS ARM64 | `millionaire-ce-0.3.1-macos-arm64.tar.gz` |
+| Ubuntu x86_64 | `millionaire-ce-0.3.1-ubuntu-amd64.deb` |
+| Windows x64 | `millionaire-ce-0.3.1-windows-x64.exe` |
 
 ## macOS 安装
 
@@ -34,9 +34,9 @@ WinSW 和 OpenMP 的版权许可声明随相应安装包提供。
 
 ```bash
 uname -m
-shasum -a 256 -c millionaire-ce-0.3.0-macos-arm64.tar.gz.sha256
-tar -xzf millionaire-ce-0.3.0-macos-arm64.tar.gz
-cd millionaire-ce-0.3.0-macos-arm64
+shasum -a 256 -c millionaire-ce-0.3.1-macos-arm64.tar.gz.sha256
+tar -xzf millionaire-ce-0.3.1-macos-arm64.tar.gz
+cd millionaire-ce-0.3.1-macos-arm64
 sh install.sh
 ```
 
@@ -60,8 +60,8 @@ sh install.sh
 ## Ubuntu 安装
 
 ```bash
-sha256sum -c millionaire-ce-0.3.0-ubuntu-amd64.deb.sha256
-sudo apt install ./millionaire-ce-0.3.0-ubuntu-amd64.deb
+sha256sum -c millionaire-ce-0.3.1-ubuntu-amd64.deb.sha256
+sudo apt install ./millionaire-ce-0.3.1-ubuntu-amd64.deb
 sudo millionaire-ce service status
 ```
 
@@ -79,7 +79,7 @@ ssh -L 18130:127.0.0.1:8130 your-user@your-server
 在 PowerShell 中进入下载目录，核对校验值：
 
 ```powershell
-$package = 'millionaire-ce-0.3.0-windows-x64.exe'
+$package = 'millionaire-ce-0.3.1-windows-x64.exe'
 $expected = ((Get-Content "$package.sha256" -Raw).Trim() -split '\s+')[0]
 $actual = (Get-FileHash $package -Algorithm SHA256).Hash
 if ($actual -ne $expected) { throw 'SHA256 校验失败，请重新下载' }

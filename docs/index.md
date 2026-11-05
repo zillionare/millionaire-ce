@@ -55,7 +55,7 @@ Millionaire CE 是面向 A 股的开源量化框架。你可以从自带策略�
 
 ## 阅读前确认
 
-本手册对应 `0.3.0` 交付线。支持 macOS Apple Silicon（ARM64）、Ubuntu x86_64、
+本手册对应 `0.3.1` 交付线。支持 macOS Apple Silicon（ARM64）、Ubuntu x86_64、
 Windows x64；原生包自带运行环境。安装包是否已经发布，以
 [Releases](https://github.com/zillionare/millionaire-ce/releases)中的实际文件为准。
 

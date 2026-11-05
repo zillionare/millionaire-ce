@@ -476,6 +476,11 @@ def create_app(
                 lambda req: RedirectResponse("/system/market/", status_code=303),
                 methods=["GET"],
             ),
+            Route(
+                "/system/alpha-ledger",
+                lambda req: RedirectResponse("/system/alpha-ledger/", status_code=303),
+                methods=["GET"],
+            ),
             Mount("/system/alpha-ledger", system_alpha_ledger_app),
             Mount("/system/calendar", system_calendar_app),
             Mount("/system/stocks", system_stocks_app),

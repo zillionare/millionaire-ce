@@ -2,7 +2,7 @@
 
 [tool.poetry]
 name = "millionaire-ce"
-version = "0.3.0"
+version = "0.3.1"
 homepage = "https://github.com/zillionare/millionaire-ce"
 description = "Millionaire Community Edition quantitative trading platform."
 authors = ["Aaron Yang <aaron_yang@jieyu.ai>"]

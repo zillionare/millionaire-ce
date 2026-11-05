@@ -13,6 +13,7 @@ from typing import Any, TypedDict
 import polars as pl
 
 from quantide.core.enums import OrderSide
+from quantide.core.market_values import datetime_or_none
 from quantide.data.sqlite import db
 
 TRADE_PAIR_OPEN = "open"
@@ -70,14 +71,7 @@ class TradePair:
 
 def _trade_dt(value: Any) -> datetime.datetime | None:
     """把成交时间字段转成 datetime。"""
-    if isinstance(value, datetime.datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            return datetime.datetime.fromisoformat(value)
-        except ValueError:
-            return None
-    return None
+    return datetime_or_none(value)
 
 
 def _unrealized_pnl_map(portfolio_id: str) -> dict[str, float]:
