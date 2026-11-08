@@ -154,6 +154,10 @@ def test_real_subprocess_study_initializes_data_home(tmp_path, monkeypatch) -> N
         Path(__file__).parents[3] / "assets" / "baseline_calendar.parquet",
         data_dir / "calendar.parquet",
     )
+    shutil.copy2(
+        Path(__file__).parents[3] / "assets" / "market_data" / "stock_list.parquet",
+        data_dir / "stock_list.parquet",
+    )
     raw = pl.read_parquet(Path(__file__).parents[3] / "assets" / "bars_2021_2024.small.parquet")
     raw.filter(pl.col("date").dt.year() == 2024).write_parquet(bars_dir / "data.parquet")
     store = FactorRunStore(tmp_path / "runs.sqlite")
