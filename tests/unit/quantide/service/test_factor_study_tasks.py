@@ -7,11 +7,12 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from quantide.service import factor_study_worker as worker
 from quantide.service.factor_runs import (
     CANCELLED,
     FAILED,
-    PENDING,
     RUNNING,
     SUCCEEDED,
     FactorRunStore,
@@ -24,6 +25,12 @@ from quantide.service.process_runner import (
     TIMEOUT as PROCESS_TIMEOUT,
 )
 from quantide.service.process_runner import ProcessOutcome, run_isolated
+
+
+@pytest.fixture(autouse=True)
+def _stop_worker_after_test():
+    yield
+    worker.stop_worker()
 
 
 def _wait(predicate, timeout: float = 5.0) -> bool:
