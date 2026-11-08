@@ -45,6 +45,7 @@ from starlette.requests import Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from quantide.core.enums import FrameType
+from quantide.core.intervals import normalize_interval
 from quantide.core.strategy import BaseStrategy
 from quantide.data.sqlite import db
 from quantide.service.discovery import strategy_loader
@@ -941,7 +942,7 @@ def _backtest_form_strategy(
 
     expected_interval = BacktestRunner.strategy_interval(strategy_cls)
     submitted_interval = form.get("interval")
-    interval = str(submitted_interval or expected_interval).strip().lower()
+    interval = normalize_interval(submitted_interval or expected_interval)
     BacktestRunner.validate_strategy_interval(strategy_cls, config, interval)
 
     if form.get("risk_selection_present"):

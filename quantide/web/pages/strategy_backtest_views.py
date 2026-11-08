@@ -535,7 +535,7 @@ def backtest_modal(name: str, req: Request | None = None) -> Any:
             Span("周期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
             Input(type="hidden", name="interval", value=interval),
             Span(
-                "日线" if interval == "1d" else "30分钟线",
+                {"1d": "日线", "30m": "30分钟线", "1M": "月线"}.get(interval, interval),
                 cls="text-sm text-gray-700",
             ),
             Span("（由策略固定）", cls="text-xs text-gray-500"),

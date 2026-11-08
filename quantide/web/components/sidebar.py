@@ -14,6 +14,9 @@ from fasthtml.common import (
     Summary,
     Svg,
 )
+from fasthtml.common import (
+    Input as PlainInput,
+)
 from fasthtml.svg import Path as SvgPath
 from monsterui.all import *
 from monsterui.all import UkIcon
@@ -24,6 +27,7 @@ def sidebar_component(
     *,
     enable_fragment_navigation: bool = False,
     hx_swap_oob: bool = False,
+    search_placeholder: str | None = None,
 ) -> Any:
     """渲染侧边栏一级菜单。
 
@@ -50,8 +54,28 @@ def sidebar_component(
     if hx_swap_oob:
         aside_attrs["hx_swap_oob"] = "true"
 
+    search = None
+    if search_placeholder:
+        search = PlainInput(
+            type="search",
+            placeholder=search_placeholder,
+            aria_label=search_placeholder,
+            autocomplete="off",
+            cls="q-input w-full mb-3",
+            oninput=(
+                "var q=this.value.toLowerCase();"
+                "document.querySelectorAll('#layout-sidebar [data-sidebar-entry]').forEach"
+                "(function(a){var hit=!q||(a.dataset.search||'').includes(q);"
+                "a.style.display=hit?'':'none';});"
+                "document.querySelectorAll('#layout-sidebar details').forEach"
+                "(function(d){var any=false;d.querySelectorAll('[data-sidebar-entry]').forEach"
+                "(function(a){if(a.style.display!=='none')any=true;});"
+                "d.style.display=any?'':'none';if(q&&any)d.open=true;});"
+            ),
+        )
+    nav = Nav(*items, cls="p-4 space-y-1", **nav_attrs)
     return Aside(
-        Nav(*items, cls="p-4 space-y-1", **nav_attrs),
+        Div(search, nav, cls="p-3") if search else nav,
         **aside_attrs,
     )
 
@@ -90,6 +114,8 @@ def _child_item(child: Mapping[str, Any]) -> Any:
             cls="flex items-center gap-2",
         ),
         href=child.get("url", "#"),
+        data_sidebar_entry="true",
+        data_search=str(child.get("search") or child.get("title", "")).lower(),
         cls="block px-3 py-2 rounded-lg text-sm transition-colors "
         + _menu_text_class(child.get("active", False)),
     )
@@ -104,6 +130,8 @@ def _sidebar_item(item: Mapping[str, Any]) -> Any:
         return A(
             label,
             href=item.get("url", "#"),
+            data_sidebar_entry="true",
+            data_search=str(item.get("title", "")).lower(),
             cls="w-full flex items-center px-3 py-2 rounded-lg transition-colors "
             + _menu_text_class(active),
         )

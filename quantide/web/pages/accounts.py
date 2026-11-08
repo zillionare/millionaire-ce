@@ -164,10 +164,15 @@ def SimAccountCard(account: dict[str, Any], is_active: bool = False) -> Any:
                     Div(f"{total / 10000:.2f}万", cls=f"text-sm font-medium {pnl_color}"),
                     cls="text-right mr-6",
                 ),
+                A(
+                    "收益归因",
+                    href=f"/attribution/{account.get('id')}",
+                    cls="q-btn q-btn--sm text-gray-700 ml-2",
+                ),
                 Button(
                     "删除",
                     type="button",
-                    cls=("q-btn q-btn--sm text-red-600 border-red-600"),
+                    cls=("q-btn q-btn--sm text-red-600 border-red-600 ml-2"),
                     onclick=f"document.getElementById('delete-dialog-{account.get('id')}').classList.remove('hidden')",
                 ),
                 ConfirmDialogModal(

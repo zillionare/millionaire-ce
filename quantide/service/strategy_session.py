@@ -82,6 +82,8 @@ class StrategySession:
         await self._check_risk(now)
         if self.interval == "30m":
             await self._minute_signal(now)
+        elif self.interval == "1M":
+            await self.strategy.on_bar(now)
         elif self.queued:
             await self._daily_signal(now)
         else:

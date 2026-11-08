@@ -31,7 +31,10 @@ millionaire 是社区版与专业版的合称；本仓库提供 millionaire-ce�
 4. [完成第一次回测](docs/backtesting.md)，阅读报告，再[转入仿真](docs/paper-trading.md)。
 
 [在线文档](https://zillionare.github.io/millionaire-ce/)随默认分支更新；
-功能开发分支的文档可能尚未部署。安装包以 [GitHub Releases](https://github.com/zillionare/millionaire-ce/releases)
+功能开发分支的文档可能尚未部署。如果所在网络无法访问 GitHub Pages，可直接在
+GitHub 仓库阅读 [`docs/`](docs/)（GitHub 会渲染 Markdown），或在源码目录运行
+`mkdocs serve` 离线查看。站点不依赖第三方字体或脚本资源，代理环境不应出现渲染挂起。
+安装包以 [GitHub Releases](https://github.com/zillionare/millionaire-ce/releases)
 实际列出的产物为准，旧版本的 Release 不代表已包含本分支的新安装器。
 
 ## 安装后

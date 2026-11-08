@@ -13,6 +13,7 @@ from quantide.config.features import require_live_trading, supports_live_trading
 from quantide.config.paths import get_strategy_runtime_state_path
 from quantide.core.atomic_files import write_json
 from quantide.core.enums import BrokerKind
+from quantide.core.intervals import normalize_interval
 from quantide.service.runtime_config import _optional_float
 from quantide.service.runtime_models import StrategyRuntime
 
@@ -331,7 +332,7 @@ class RuntimeStatePersistence:
 
     def _start_from_spec(self, spec: dict[str, Any]) -> StrategyRuntime:
         account_kind, portfolio_id, broker = _resolve_runtime_account(self, spec)
-        interval = str(spec["interval"]).strip().lower()
+        interval = normalize_interval(spec["interval"])
         _restore_paper_fees(account_kind, broker, spec)
         return self._start_strategy_runtime(
             mode=str(spec.get("mode") or ""),

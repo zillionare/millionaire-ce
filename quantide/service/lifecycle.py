@@ -15,6 +15,7 @@ def _component_shutdown_callbacks(modes: ModuleType, app: Starlette) -> list[Cal
     from quantide.core.scheduler import scheduler
     from quantide.service.data_readiness import data_readiness_monitor
     from quantide.service.data_sync import data_sync_service
+    from quantide.service.factor_tracking import factor_tracking_service
     from quantide.service.limit_price_refresher import limit_price_refresher
     from quantide.service.market_data_hub import market_data_hub
     from quantide.service.minute_bar_aggregator import minute_bar_aggregator
@@ -28,6 +29,7 @@ def _component_shutdown_callbacks(modes: ModuleType, app: Starlette) -> list[Cal
         shutdown_optimizations,
         app.state.strategy_runtime_manager.shutdown,
         data_readiness_monitor.stop,
+        factor_tracking_service.stop,
         limit_price_refresher.stop,
         lambda: scheduler.stop(wait=True),
         quote_monitor.stop,

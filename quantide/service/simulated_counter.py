@@ -125,11 +125,14 @@ class SimulatedCounter:
 
         return self._mutate(update)
 
-    @staticmethod
-    def _executable(request: dict[str, Any], quote: dict[str, Any]) -> bool:
+    def _executable(self, request: dict[str, Any], quote: dict[str, Any]) -> bool:
         price = float(quote.get("price", 0))
         if price <= 0:
             return False
+        order_time = str(request.get("time") or "")
+        if order_time and self.state["day"]:
+            if datetime.datetime.fromisoformat(order_time).date().isoformat() > self.state["day"]:
+                return False
         limit = float(request.get("price", 0))
         if request["side"] == "buy":
             return (not limit or price <= limit) and price < quote.get("up_limit", float("inf"))

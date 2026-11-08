@@ -19,6 +19,8 @@ nav:
       - 编写策略: strategies.md
       - 因子与 LightGBM: factors-and-ml.md
       - 极简因子分析: factor-analysis.md
+      - 策略与因子审计: strategy-audit.md
+      - 月线策略示例: monthly-strategy.md
       - 参数优化: optimization.md
       - 预测解释: prediction-explanation.md
       - AI 辅助开发: ai-development.md
@@ -45,6 +47,7 @@ nav:
 theme:
   name: material
   language: zh
+  font: false
 
 plugins:
   - search:

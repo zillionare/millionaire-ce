@@ -4,6 +4,8 @@ import asyncio
 import datetime
 from collections.abc import Iterable, Mapping
 
+from loguru import logger
+
 from quantide.config.paths import get_app_config_dir
 from quantide.config.settings import get_settings
 from quantide.core.atomic_files import write_json
@@ -30,6 +32,12 @@ def maintain_data() -> str:
     if not data_sync_service.run(task.task_id):
         result = data_sync_service.get_task(task.task_id)
         raise RuntimeError(result.error or result.message if result else "数据维护失败")
+    try:
+        from quantide.service.factor_tracking import trigger_refresh_all
+
+        trigger_refresh_all()
+    except Exception as exc:
+        logger.warning("行情维护完成后触发因子跟踪失败: {}", exc)
     return f"完整数据维护完成，task={task.task_id}"
 
 

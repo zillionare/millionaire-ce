@@ -34,6 +34,18 @@ def atomic_path(destination: str | Path) -> Iterator[Path]:
         temporary.unlink(missing_ok=True)
 
 
+def read_json_dict(path: str | Path) -> dict[str, Any]:
+    """Read a JSON object; missing, unreadable or non-object files are empty."""
+    source = Path(path)
+    if not source.exists():
+        return {}
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def write_json(destination: str | Path, payload: Any) -> None:
     """Validate and atomically publish JSON, preserving the previous file on failure."""
     encoded = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)

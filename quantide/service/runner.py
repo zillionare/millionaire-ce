@@ -12,6 +12,7 @@ from loguru import logger
 from quantide.config.settings import get_cheat_on_close_time
 from quantide.core.enums import FrameType
 from quantide.core.errors import RiskStrategyNotBacktestable
+from quantide.core.intervals import normalize_interval
 from quantide.core.order_execution import BROKER_ORDER_METHODS
 from quantide.core.ports import ClockPort
 from quantide.core.ports.broker import ExecutionResult
@@ -104,9 +105,12 @@ class BacktestRunner:
             defaults = getattr(strategy_cls, "default_config", None)
             values = defaults() if callable(defaults) else {}
             declared = values.get("bar_interval", "1d") if isinstance(values, dict) else "1d"
-        interval = str(declared).strip().lower()
-        if interval not in {"1d", "30m"}:
-            raise ValueError(f"策略声明了不支持的 bar_interval: {interval!r}")
+        raw = str(declared).strip()
+        interval = normalize_interval(raw)
+        if interval == "1m":
+            raise ValueError("1m minute bars are not supported; 1M means monthly")
+        if interval not in {"1d", "30m", "1M"}:
+            raise ValueError(f"策略声明了不支持的 bar_interval: {raw!r}")
         return interval
 
     @classmethod
@@ -118,11 +122,16 @@ class BacktestRunner:
     ) -> str:
         expected = cls.strategy_interval(strategy_cls)
         supplied = (config or {}).get("bar_interval")
-        if supplied is not None and str(supplied).strip().lower() != expected:
+        supplied_text = str(supplied).strip() if supplied is not None else ""
+        supplied_norm = normalize_interval(supplied_text)
+        if supplied is not None and supplied_norm != expected:
             raise ValueError(
                 f"bar_interval override {supplied!r} conflicts with strategy interval {expected!r}"
             )
-        actual = frame_type.value if isinstance(frame_type, FrameType) else str(frame_type).lower()
+        actual_raw = (
+            frame_type.value if isinstance(frame_type, FrameType) else str(frame_type).strip()
+        )
+        actual = normalize_interval(actual_raw)
         if actual != expected:
             # A few legacy tests use a callable mock as the strategy factory
             # and exercise the pre-v0.2 1m runner.  There is no declaration to
@@ -289,7 +298,7 @@ class BacktestRunner:
             stamp_duty=float(config.get("stamp_duty", 5e-4)),
             min_commission=float(config.get("min_commission", 5.0)),
             transfer_fee=float(config.get("transfer_fee", 1e-5)),
-            match_level="day" if frame_type == FrameType.DAY else "minute",
+            match_level="day" if frame_type in {FrameType.DAY, FrameType.MONTH} else "minute",
             portfolio_name=strategy_cls.__name__,
             desc=json.dumps({"config": dict(config or {})}, ensure_ascii=False),
             save_logs=save_logs,
@@ -576,12 +585,18 @@ class BacktestRunner:
         proxy, cheat_tm = self._next_open_settings(strategy_cls, config, frame_type, broker)
         strategy.interval = frame_type.value
         last_trade_day = None
+        if frame_type == FrameType.MONTH:
+            await self._run_monthly_execution(strategy, broker, config, start_date)
         for tm in self._iter_backtest_frames(start_date, end_date, frame_type):
             if self._stop_event.is_set():
                 raise InterruptedError("服务停止，回测被中断；已完成的交易记录保留")
             current_date = tm.date() if isinstance(tm, datetime.datetime) else tm
             bar_tm = (
-                tm if isinstance(tm, datetime.datetime) else calendar.replace_time(tm, *cheat_tm)
+                tm
+                if isinstance(tm, datetime.datetime)
+                else calendar.replace_time(tm, 15, 0)
+                if frame_type == FrameType.MONTH
+                else calendar.replace_time(tm, *cheat_tm)
             )
             last_trade_day = await self._handle_day_switch(
                 strategy, broker, current_date, last_trade_day
@@ -590,10 +605,50 @@ class BacktestRunner:
             await self._run_strategy_bar(
                 strategy, broker, current_date, bar_tm, config, frame_type, proxy
             )
+            last_trade_day = await self._run_monthly_next_open(
+                strategy,
+                broker,
+                config,
+                current_date,
+                end_date,
+                frame_type,
+                last_trade_day,
+            )
         if last_trade_day is not None:
             close_tm = calendar.replace_time(last_trade_day, 15, 30)
             self._set_strategy_time(strategy, broker, close_tm)
             await strategy.on_day_close(close_tm)
+
+    async def _run_monthly_next_open(
+        self,
+        strategy: BaseStrategy,
+        broker: BacktestBroker,
+        config: dict[str, Any],
+        current_date: datetime.date,
+        end_date: datetime.date,
+        frame_type: FrameType,
+        last_trade_day: datetime.date | None,
+    ) -> datetime.date | None:
+        if frame_type is not FrameType.MONTH:
+            return last_trade_day
+        execution_day = calendar.day_shift(current_date, 1)
+        if execution_day > end_date:
+            return last_trade_day
+        await self._run_monthly_execution(strategy, broker, config, execution_day)
+        return execution_day
+
+    async def _run_monthly_execution(
+        self,
+        strategy: BaseStrategy,
+        broker: BacktestBroker,
+        config: dict[str, Any],
+        day: datetime.date,
+    ) -> None:
+        """Run the next-open event so monthly intents execute before the next signal."""
+        execution_tm = calendar.replace_time(day, 9, 30)
+        await self._run_strategy_bar(
+            strategy, broker, day, execution_tm, config, FrameType.MONTH, None
+        )
 
     def _set_strategy_time(
         self, strategy: BaseStrategy, broker: BacktestBroker, moment: datetime.datetime

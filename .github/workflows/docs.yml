@@ -40,6 +40,14 @@ jobs:
       - name: Build documentation
         run: mkdocs build --strict --site-dir "${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/site"
 
+      - name: Verify documentation is self-contained
+        run: |
+          if grep -R -E "fonts\.googleapis\.com|fonts\.gstatic\.com" \
+            "${{ env.MILLIONAIRE_ARTIFACTS_DIR }}/site"; then
+            echo "Documentation must not depend on external font hosts" >&2
+            exit 1
+          fi
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

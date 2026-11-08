@@ -232,6 +232,9 @@ class PaperMatching:
     ) -> tuple[float, Trade | None]:
         """Check price eligibility, then create one fill bounded by the available quote volume."""
         last_price = quote.get("lastPrice", 0)
+        order_time = order.tm
+        if isinstance(order_time, datetime.datetime) and order_time.date() > self._now().date():
+            return 0.0, None
         if last_price <= 0 or not self._order_price_eligible(order, last_price):
             return 0.0, None
         if not self._auction_order_eligible(order, last_price):

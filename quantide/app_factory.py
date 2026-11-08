@@ -39,6 +39,7 @@ from quantide.core.errors import BaseTradeError
 from quantide.core.runtime import RuntimeBootstrap
 from quantide.data import init_data
 from quantide.data.sqlite import db
+from quantide.service.factor_tracking import factor_tracking_service
 from quantide.service.lifecycle import application_lifespan, recover_interrupted_tasks
 from quantide.service.registry import BrokerRegistry
 from quantide.service.strategy_runtime import strategy_runtime_manager
@@ -52,10 +53,12 @@ from quantide.web.middleware_feature import FeatureCheckMiddleware
 from quantide.web.middleware_init import InitCheckMiddleware
 from quantide.web.pages.accounts import accounts_app
 from quantide.web.pages.analysis import analysis_handler
+from quantide.web.pages.attribution import attribution_app
 from quantide.web.pages.data_calendar import data_calendar_app
 from quantide.web.pages.data_db import data_db_app
 from quantide.web.pages.data_market import data_market_app
 from quantide.web.pages.data_stocks import data_stocks_app
+from quantide.web.pages.factors import factor_app
 from quantide.web.pages.history_orders import history_orders_list
 from quantide.web.pages.history_positions import history_positions_list
 from quantide.web.pages.history_trades import history_trades_list
@@ -67,7 +70,6 @@ from quantide.web.pages.optimize import (
 )
 from quantide.web.pages.paper import paper_app
 from quantide.web.pages.strategy import strategy_app
-from quantide.web.pages.system.alpha_ledger import system_alpha_ledger_app
 from quantide.web.pages.system.calendar import system_calendar_app
 from quantide.web.pages.system.datasource import system_datasource_app
 from quantide.web.pages.system.gateway import system_gateway_app
@@ -160,8 +162,8 @@ def _attach_runtime_to_app_states(runtime: RuntimeBootstrap) -> None:
         data_db_app,
         data_market_app,
         data_stocks_app,
+        factor_app,
         init_wizard_app,
-        system_alpha_ledger_app,
         system_calendar_app,
         system_datasource_app,
         system_gateway_app,
@@ -187,8 +189,8 @@ def _attach_root_app_to_app_states(root_app: FastHTML) -> None:
         data_db_app,
         data_market_app,
         data_stocks_app,
+        factor_app,
         init_wizard_app,
-        system_alpha_ledger_app,
         system_calendar_app,
         system_datasource_app,
         system_gateway_app,
@@ -253,6 +255,7 @@ def create_app(
             data_readiness_monitor.start()
             try:
                 _init_scheduler_jobs()
+                factor_tracking_service.start(recover=enforce_single_instance)
             except Exception as exc:
                 logger.warning(f"定时任务注册失败: {exc}")
     except Exception as exc:
@@ -433,6 +436,13 @@ def create_app(
                 methods=["GET"],
             ),
             Mount("/strategy", strategy_app),
+            Route(
+                "/factors",
+                lambda req: RedirectResponse("/factors/", status_code=303),
+                methods=["GET"],
+            ),
+            Mount("/factors", factor_app),
+            Mount("/attribution", attribution_app),
             Route("/analysis", analysis_handler, methods=["GET"]),
             Mount("/broker", broker_api_app),
             Mount("/api/v1/kline", kline_router),
@@ -476,12 +486,6 @@ def create_app(
                 lambda req: RedirectResponse("/system/market/", status_code=303),
                 methods=["GET"],
             ),
-            Route(
-                "/system/alpha-ledger",
-                lambda req: RedirectResponse("/system/alpha-ledger/", status_code=303),
-                methods=["GET"],
-            ),
-            Mount("/system/alpha-ledger", system_alpha_ledger_app),
             Mount("/system/calendar", system_calendar_app),
             Mount("/system/stocks", system_stocks_app),
             Mount("/system/market", system_market_app),

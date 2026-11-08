@@ -10,6 +10,7 @@ from quantide.config.features import require_live_trading
 from quantide.config.paths import get_backtest_log_path
 from quantide.config.settings import get_cheat_on_close_time
 from quantide.core.enums import BrokerKind, FrameType
+from quantide.core.intervals import normalize_interval
 from quantide.core.market_time import market_now
 from quantide.core.ports.broker import BrokerPort
 from quantide.core.runtime import RuntimeContext
@@ -198,7 +199,8 @@ class StrategyRuntimeManager(RuntimeRiskControls, RuntimeStatePersistence, Runti
         initial_cash: float,
         save_logs: bool = False,
     ) -> None:
-        if interval not in {"1d", "30m"}:
+        interval = normalize_interval(interval)
+        if interval not in {"1d", "30m", "1M"}:
             raise ValueError(f"不支持的策略周期: {interval!r}")
         strategy_cls = strategy_loader.load_from_cache().get(strategy_name)
         if strategy_cls is not None:
@@ -595,7 +597,9 @@ class StrategyRuntimeManager(RuntimeRiskControls, RuntimeStatePersistence, Runti
     @staticmethod
     def _validate_config_interval(config: dict[str, Any] | None, interval: str) -> None:
         configured = (config or {}).get("bar_interval")
-        if configured is not None and str(configured).strip().lower() != interval:
+        if configured is not None and normalize_interval(configured) != normalize_interval(
+            interval
+        ):
             raise ValueError(
                 "bar_interval override "
                 f"{configured!r}"
@@ -606,8 +610,8 @@ class StrategyRuntimeManager(RuntimeRiskControls, RuntimeStatePersistence, Runti
     def validate_runtime_interval(
         self, spec: dict[str, Any], strategy_cls: Any | None = None
     ) -> str:
-        persisted = str(spec.get("interval") or "").strip().lower()
-        if persisted not in {"1d", "30m"}:
+        persisted = normalize_interval(spec.get("interval") or "")
+        if persisted not in {"1d", "30m", "1M"}:
             raise ValueError(f"无法验证持久化策略周期: {persisted!r}")
         self._validate_config_interval(spec.get("config") or {}, persisted)
         if strategy_cls is not None:
@@ -750,7 +754,10 @@ class StrategyRuntimeManager(RuntimeRiskControls, RuntimeStatePersistence, Runti
         if runtime.mode == "live":
             broker = StrategyBrokerProxy(broker, runtime.strategy_id)
         strategy = strategy_cls(broker, runtime.config)
-        frame = FrameType.MIN30 if interval == "30m" else FrameType.DAY
+        frame = {
+            "30m": FrameType.MIN30,
+            "1M": FrameType.MONTH,
+        }.get(interval, FrameType.DAY)
         strategy.interval = frame.value
         risks = self._build_live_risk_strategies(
             strategy_cls, broker, runtime.config, frame_type=frame
@@ -943,7 +950,7 @@ def _persisted_backtest_interval(
     if spec is not None:
         if "interval" not in spec or not str(spec.get("interval") or "").strip():
             raise RuntimeError("无法验证持久化策略周期：记录缺少 interval")
-        resolved_interval = str(spec["interval"]).strip().lower()
+        resolved_interval = normalize_interval(spec["interval"])
     elif strategy_cls is not None:
         try:
             from quantide.service.runner import BacktestRunner
@@ -953,7 +960,7 @@ def _persisted_backtest_interval(
             raise RuntimeError(f"无法验证策略 {strategy_name!r} 的周期声明") from exc
     else:
         raise RuntimeError(f"无法验证策略 {strategy_name!r} 的周期声明")
-    if resolved_interval not in {"1d", "30m"}:
+    if resolved_interval not in {"1d", "30m", "1M"}:
         raise RuntimeError(f"无法验证持久化策略周期: {resolved_interval!r}")
     return resolved_interval
 

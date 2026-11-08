@@ -89,11 +89,6 @@ SYSTEM_MAINTENANCE_MENU = [
                 ),
             },
             {"title": "实时行情", "url": "/system/realtime", "icon_path": "M3 12h4l3 8 4-16 3 8h4"},
-            {
-                "title": "因子台账",
-                "url": "/system/alpha-ledger",
-                "icon_path": "M3 3v18h18M7 15l3-4 3 3 5-7",
-            },
         ],
     },
     {
@@ -271,6 +266,8 @@ SIDEBAR_MENUS: dict[str, list[dict[str, Any]]] = {
 }
 
 STATIC_HEADER_ITEMS: list[dict[str, object]] = [
+    {"title": "概览", "url": "/"},
+    {"title": "因子", "url": "/factors"},
     {"title": "策略", "url": "/strategy"},
     {"title": "系统维护", "url": "/system"},
     {"title": "实盘", "url": "/trade/live/"},
@@ -387,6 +384,7 @@ class MainLayout(BaseLayout):
         self.header_active = ""
         self.header_menu = _without_live_items(copy.deepcopy(HEADER_MENU))
         self.sidebar_menu: list[dict[str, Any]] | None = None
+        self.sidebar_search: str | None = None
         self._sidebar_active_url: str = "/"
         self._main_block_override: Any = None
 
@@ -413,6 +411,8 @@ class MainLayout(BaseLayout):
         url = str(self._sidebar_active_url or "").strip()
         title = str(self.title or "")
 
+        if url.startswith("/factors"):
+            return "因子"
         if url.startswith("/data") or url.startswith("/system"):
             return "系统维护"
         if url.startswith("/strategy") or "策略" in title:
@@ -533,6 +533,7 @@ class MainLayout(BaseLayout):
             self._get_sidebar_menu(),
             enable_fragment_navigation=fragment_navigation_enabled,
             hx_swap_oob=hx_swap_oob,
+            search_placeholder=self.sidebar_search,
         )
 
     def render(self, req: Request | None = None) -> Any:

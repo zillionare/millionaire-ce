@@ -1,0 +1,196 @@
+"""Factor research navigation and detail page tests."""
+
+from __future__ import annotations
+
+import datetime as dt
+from types import SimpleNamespace
+
+import polars as pl
+import pytest
+from starlette.testclient import TestClient
+
+from quantide.factors.metadata import FACTOR_METADATA
+from quantide.service import factor_study, factor_tracking
+
+
+@pytest.fixture()
+def isolated_tracking(monkeypatch, tmp_path):
+    monkeypatch.setattr(factor_tracking, "_root", lambda: tmp_path / "factor-tracking")
+
+
+@pytest.fixture()
+def synthetic_panel(monkeypatch):
+    dates = [dt.date(2024, 1, 2) + dt.timedelta(days=index) for index in range(12)]
+    rows = []
+    for asset in range(120):
+        for index, day in enumerate(dates):
+            rows.append(
+                {
+                    "date": day,
+                    "asset": f"{asset:06d}",
+                    "bias_5": float(asset + index),
+                    "open": 10.0 + asset * 0.1 + index * 0.05,
+                    "close": 10.0 + asset * 0.1 + index * 0.06,
+                }
+            )
+    panel = pl.DataFrame(rows)
+    monkeypatch.setattr(factor_study, "load_factor_panel", lambda start, end: panel)
+    monkeypatch.setattr(
+        factor_study,
+        "trading_days",
+        lambda start, end: tuple(day for day in dates if start <= day <= end),
+    )
+
+
+@pytest.fixture(scope="module")
+def client():
+    from quantide.app_factory import create_app
+    from tests.e2e.support.auth_fixture import sign_in_test_admin
+
+    app = create_app(enforce_single_instance=False)
+    with TestClient(app) as test_client:
+        sign_in_test_admin(test_client)
+        yield test_client
+
+
+def test_factor_index_opens_from_header(client, isolated_tracking) -> None:
+    redirect = client.get("/factors", follow_redirects=False)
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == "/factors/"
+
+    response = client.get("/factors/")
+    assert response.status_code == 200
+    assert "因子总览" in response.text
+    assert "bias_5" in response.text
+    assert "因子" in response.text
+    assert "搜索因子" in response.text
+    assert "data-sidebar-entry" in response.text
+
+
+def test_factor_detail_renders_card_and_report_tabs(client, isolated_tracking) -> None:
+    response = client.get("/factors/bias_5")
+    assert response.status_code == 200
+    assert FACTOR_METADATA["bias_5"].display_name in response.text
+    assert "因子卡片" in response.text
+    assert "检验报告" in response.text
+    assert "尚未建立跟踪" in response.text or "数据截至" in response.text
+
+
+def test_unknown_factor_returns_404(client, isolated_tracking) -> None:
+    response = client.get("/factors/not_a_factor")
+    assert response.status_code == 404
+
+
+def test_profile_update_persists_and_reloads(client, isolated_tracking, monkeypatch) -> None:
+    monkeypatch.setattr("quantide.web.pages.factors.trigger_refresh", lambda factor_id: True)
+    response = client.post(
+        "/factors/bias_5/profile",
+        data={
+            "lookback": "5y",
+            "primary_holding_days": "10",
+            "comparison_holding_days": ["1", "10"],
+            "price_field": "close",
+            "enabled": "on",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    profile = factor_tracking.load_profile("bias_5")
+    assert profile.lookback == "5y"
+    assert profile.primary_holding_days == 10
+    assert profile.comparison_holding_days == (1, 10)
+    assert profile.price_field == "close"
+
+
+def test_custom_study_does_not_change_profile(client, isolated_tracking, monkeypatch) -> None:
+    from quantide.web.pages import factors
+
+    before = factor_tracking.load_profile("bias_5")
+    monkeypatch.setattr(factors, "submit_study", lambda *args: "run-queued")
+    monkeypatch.setattr(
+        factors,
+        "study_run",
+        lambda run_id: SimpleNamespace(
+            run_id="run-queued",
+            factor_ids=("bias_5",),
+            status="pending",
+            phase="",
+            error="",
+            result=None,
+        ),
+    )
+    response = client.post(
+        "/factors/bias_5/study",
+        data={
+            "start": "2024-01-02",
+            "end": "2024-01-08",
+            "holding_days": ["1", "3"],
+            "price_field": "open",
+        },
+    )
+    assert response.status_code == 200
+    assert "自定义检验任务" in response.text
+    assert "已排队" in response.text
+    assert factor_tracking.load_profile("bias_5") == before
+
+
+def test_custom_study_can_be_explicitly_promoted(client, isolated_tracking, monkeypatch) -> None:
+    monkeypatch.setattr("quantide.web.pages.factors.trigger_refresh", lambda factor_id: True)
+    response = client.post(
+        "/factors/bias_5/profile/from-study",
+        data={
+            "study_id": "study-123",
+            "lookback": "3y",
+            "primary_holding_days": "3",
+            "holding_days": ["1", "3"],
+            "price_field": "close",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    profile = factor_tracking.load_profile("bias_5")
+    assert profile.source_study_id == "study-123"
+    assert profile.source == "custom_study"
+    assert profile.source_selected_at
+    assert profile.primary_holding_days == 3
+    assert profile.comparison_holding_days == (1, 3)
+    assert profile.price_field == "close"
+
+
+def test_profile_reset_restores_defaults(client, isolated_tracking, monkeypatch) -> None:
+    monkeypatch.setattr("quantide.web.pages.factors.trigger_refresh", lambda factor_id: True)
+    factor_tracking.save_profile(
+        "bias_5",
+        lookback="5y",
+        primary_holding_days=10,
+        comparison_holding_days=[1, 10],
+        price_field="close",
+    )
+    response = client.post("/factors/bias_5/profile/reset", follow_redirects=False)
+    assert response.status_code == 303
+    profile = factor_tracking.load_profile("bias_5")
+    defaults = factor_tracking.default_profile("bias_5")
+    assert profile.lookback == defaults.lookback
+    assert profile.primary_holding_days == defaults.primary_holding_days
+    assert profile.comparison_holding_days == defaults.comparison_holding_days
+    assert profile.price_field == defaults.price_field
+    assert profile.revision == 2
+
+
+def test_invalid_profile_is_rejected(client, isolated_tracking) -> None:
+    response = client.post(
+        "/factors/bias_5/profile",
+        data={
+            "lookback": "3y",
+            "primary_holding_days": "4",
+            "comparison_holding_days": ["4"],
+            "price_field": "open",
+        },
+    )
+    assert response.status_code == 200
+    assert "invalid holding days" in response.text
+
+
+def test_old_alpha_ledger_route_is_removed(client) -> None:
+    response = client.get("/system/alpha-ledger")
+    assert response.status_code == 404
