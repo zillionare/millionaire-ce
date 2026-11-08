@@ -72,7 +72,7 @@ def test_cache_is_bound_to_token_range_source_and_expiry(tmp_path, monkeypatch):
     )
     report = access.ensure_access_report(state)
     assert access.load_access_report(state) == report
-    assert "secret" not in (tmp_path / "data-source-check.json").read_text()
+    assert "secret" not in (tmp_path / "data-source-check.json").read_text(encoding="utf-8")
     state.tushare_token = "changed"
     assert access.load_access_report(state) is None
     state.tushare_token = "secret"
