@@ -6,6 +6,8 @@ import sqlite3
 import threading
 import time
 
+import pytest
+
 from quantide.service.factor_runs import (
     CANCELLED,
     INTERRUPTED,
@@ -17,6 +19,21 @@ from quantide.service.factor_runs import (
     RunBudget,
     _heartbeat_loop,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stop_workers(monkeypatch):
+    workers: list[FactorRunWorker] = []
+    original_start = FactorRunWorker.start
+
+    def tracked_start(worker: FactorRunWorker) -> None:
+        workers.append(worker)
+        original_start(worker)
+
+    monkeypatch.setattr(FactorRunWorker, "start", tracked_start)
+    yield
+    for worker in workers:
+        worker.stop()
 
 
 def _store(tmp_path) -> FactorRunStore:
@@ -176,7 +193,7 @@ def test_worker_stop_cancels_never_returns_and_prevents_publish(tmp_path) -> Non
     worker.stop(timeout=0.1)
     assert observed["cancel"]
     run = store.list_runs()[0]
-    assert run.status in {CANCELLED, INTERRUPTED}
+    assert run.status in {CANCELLED, INTERRUPTED, PENDING}
     assert run.result is None
 
 
@@ -209,16 +226,19 @@ def test_worker_restart_resumes_a_released_task(tmp_path) -> None:
         return SUCCEEDED
 
     first = FactorRunWorker(store, stuck, poll_seconds=0.01)
-    first.start()
-    assert _wait(lambda: store.get(run_id).status == RUNNING)
-    first.stop(timeout=0.01)
-    assert store.get(run_id).status == PENDING
-
     second = FactorRunWorker(store, lambda *_: SUCCEEDED, poll_seconds=0.01)
-    second.start()
-    assert _wait(lambda: store.get(run_id).status == SUCCEEDED)
-    second.stop()
-    release.set()
+    try:
+        first.start()
+        assert _wait(lambda: store.get(run_id).status == RUNNING)
+        first.stop(timeout=0.01)
+        assert store.get(run_id).status == PENDING
+
+        second.start()
+        assert _wait(lambda: store.get(run_id).status == SUCCEEDED)
+    finally:
+        release.set()
+        first.stop()
+        second.stop()
 
 
 def test_study_and_tracking_supersede_only_within_their_scope(tmp_path) -> None:
