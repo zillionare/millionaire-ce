@@ -2139,6 +2139,7 @@ class TestGatewayFirstNavigation:
         urls = {item["title"]: item["url"] for item in menu}
 
         assert "实盘" not in urls
+        assert "概览" not in urls
 
     def test_home_defaults_to_live_nav_when_gateway_ready(self, monkeypatch):
         from quantide.web.layouts.main import MainLayout

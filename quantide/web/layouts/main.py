@@ -266,7 +266,6 @@ SIDEBAR_MENUS: dict[str, list[dict[str, Any]]] = {
 }
 
 STATIC_HEADER_ITEMS: list[dict[str, object]] = [
-    {"title": "概览", "url": "/"},
     {"title": "因子", "url": "/factors"},
     {"title": "策略", "url": "/strategy"},
     {"title": "系统维护", "url": "/system"},
