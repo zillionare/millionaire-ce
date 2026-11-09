@@ -54,16 +54,16 @@ def build_risk_event_center_content(limit: int = 20) -> Div:
         Div(
             Div(
                 H2("风险事件中心", cls="text-lg font-semibold text-gray-900"),
-                Span("展示封控、告警与重启恢复事件", cls="text-xs text-gray-500"),
+                Span("展示风控、告警与重启恢复事件", cls="text-xs text-gray-500"),
                 cls="flex flex-col",
             ),
             Div(
                 Span(
-                    f"账户封控 {summary['blocked_accounts']}",
+                    f"账户风控 {summary['blocked_accounts']}",
                     cls="px-2 py-1 rounded bg-red-50 text-red-700 text-xs",
                 ),
                 Span(
-                    f"策略封控 {summary['blocked_strategies']}",
+                    f"策略风控 {summary['blocked_strategies']}",
                     cls="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs",
                 ),
                 Span(
@@ -143,7 +143,7 @@ def build_runtime_table_content(action_base_path: str, target_selector: str) -> 
     return Div(
         Div(
             H2("运行时监控", cls="text-lg font-semibold text-gray-900"),
-            Span("运行时实例与封控状态总览", cls="text-xs text-gray-500"),
+            Span("运行时实例与风控状态总览", cls="text-xs text-gray-500"),
             cls="p-6 border-b border-gray-200 flex items-center justify-between",
         ),
         Div(
@@ -155,7 +155,7 @@ def build_runtime_table_content(action_base_path: str, target_selector: str) -> 
                         Th("策略", cls="whitespace-nowrap px-4 py-2"),
                         Th("策略ID", cls="whitespace-nowrap px-4 py-2"),
                         Th("状态", cls="whitespace-nowrap px-4 py-2"),
-                        Th("告警 / 封控原因", cls="whitespace-nowrap px-4 py-2"),
+                        Th("告警 / 风控原因", cls="whitespace-nowrap px-4 py-2"),
                         Th("总资产", cls="whitespace-nowrap px-4 py-2"),
                         Th("持仓数", cls="whitespace-nowrap px-4 py-2"),
                         Th("委托数", cls="whitespace-nowrap px-4 py-2"),
@@ -275,7 +275,7 @@ def _build_runtime_actions(
             )
         )
     if item.get("blocked_scope") == "account" and item.get("strategy_id"):
-        action_items.append(Span("请在账户行解除封控", cls="text-xs text-gray-700"))
+        action_items.append(Span("请在账户行解除账户封锁", cls="text-xs text-gray-700"))
     return action_items
 
 

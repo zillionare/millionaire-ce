@@ -194,10 +194,10 @@ def _build_alert_popover(
             Div(
                 _summary_chip("活动告警", risk_summary.get("open_events", 0), "text-[#e41815]"),
                 _summary_chip(
-                    "账户封控", risk_summary.get("blocked_accounts", 0), "text-[#e41815]"
+                    "账户风控", risk_summary.get("blocked_accounts", 0), "text-[#e41815]"
                 ),
                 _summary_chip(
-                    "策略封控", risk_summary.get("blocked_strategies", 0), "text-gray-700"
+                    "策略风控", risk_summary.get("blocked_strategies", 0), "text-gray-700"
                 ),
                 cls="grid grid-cols-3 gap-2",
             ),
