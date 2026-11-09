@@ -231,7 +231,7 @@ def test_worker_restart_resumes_a_released_task(tmp_path) -> None:
         first.start()
         assert _wait(lambda: store.get(run_id).status == RUNNING)
         first.stop(timeout=0.01)
-        assert store.get(run_id).status == PENDING
+        assert _wait(lambda: store.get(run_id).status == PENDING)
 
         second.start()
         assert _wait(lambda: store.get(run_id).status == SUCCEEDED)

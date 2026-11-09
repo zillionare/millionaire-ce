@@ -682,6 +682,9 @@ class FactorRunWorker:
             if run is None:
                 self._stop.wait(self.poll_seconds)
                 continue
+            if self._stop.is_set():
+                self.store.release_owner(self.owner)
+                break
             self._execute(run)
 
     def _execute(self, run: FactorRun) -> None:
