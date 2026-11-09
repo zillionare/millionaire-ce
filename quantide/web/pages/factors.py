@@ -64,10 +64,27 @@ from quantide.service.factor_tracking import (
     trigger_refresh_all,
 )
 from quantide.web.application import fast_app
-from quantide.web.components.data_tables import DatasetTable
 from quantide.web.layouts.main import MainLayout
 from quantide.web.pages.factors_custom import custom_form as _custom_form
 from quantide.web.pages.factors_custom import custom_result as _custom_result
+from quantide.web.pages.factors_overview import (
+    _sort_entries,
+)
+from quantide.web.pages.factors_overview import (
+    overview_row as _overview_row,
+)
+from quantide.web.pages.factors_overview import (
+    overview_summary as _overview_summary,
+)
+from quantide.web.pages.factors_overview import (
+    overview_table as _overview_table,
+)
+from quantide.web.pages.factors_overview import (
+    overview_toolbar as _overview_toolbar,
+)
+from quantide.web.pages.factors_overview import (
+    tracking_onboarding as _tracking_onboarding,
+)
 from quantide.web.pages.factors_tasks import study_task_block as _study_task_block
 from quantide.web.pages.factors_ui import (
     LOOKBACK_LABELS as _LOOKBACK_LABELS,
@@ -84,22 +101,12 @@ from quantide.web.pages.factors_ui import (
 from quantide.web.pages.factors_ui import (
     fmt_time as _fmt_time,
 )
+from quantide.web.pages.factors_ui import (
+    status_badge as _status_badge,
+)
 from quantide.web.theme import AppTheme
 
 factor_app, rt = fast_app(hdrs=AppTheme.headers())
-
-_STATUS_LABELS = {
-    "normal": "正常",
-    "uninitialized": "未建立",
-    "calculating": "计算中",
-    "stale_config": "配置已变更",
-    "stale_data": "行情已更新，待跟踪",
-    "source_unavailable": "来源版本不可用，待跟踪",
-    "failed": "计算失败",
-    "insufficient": "数据不足",
-    "interrupted": "已中断",
-    "disabled": "已关闭",
-}
 
 
 def _factor_menu(active_url: str = "") -> list[dict[str, Any]]:
@@ -122,25 +129,12 @@ def _factor_menu(active_url: str = "") -> list[dict[str, Any]]:
 
 def _layout(title: str, active_url: str) -> MainLayout:
     layout = MainLayout(title=title)
+    layout.content_max_width = "max-w-[1600px]"
     layout.header_active = "因子"
     layout.sidebar_menu = _factor_menu(active_url)
-    layout.sidebar_search = "搜索因子名称或 ID"
+    layout.sidebar_search = "筛选左侧因子目录"
     layout.set_sidebar_active(active_url)
     return layout
-
-
-def _status_badge(status: str) -> Span:
-    tone = {
-        "normal": "bg-green-50 text-green-700",
-        "failed": "bg-red-50 text-red-700",
-        "calculating": "bg-blue-50 text-blue-700",
-        "stale_config": "bg-amber-50 text-amber-700",
-        "stale_data": "bg-amber-50 text-amber-700",
-        "source_unavailable": "bg-amber-50 text-amber-700",
-        "insufficient": "bg-amber-50 text-amber-700",
-        "disabled": "bg-gray-100 text-gray-600",
-    }.get(status, "bg-gray-100 text-gray-600")
-    return Span(_STATUS_LABELS.get(status, status), cls=f"rounded-full px-2 py-1 text-xs {tone}")
 
 
 def _profile_text(profile: TrackingProfile) -> str:
@@ -661,76 +655,16 @@ def _require_maintenance(req: Request) -> None:
         raise HTTPException(status_code=403, detail="需要维护权限")
 
 
-_SORT_LABELS = {
-    "": "默认顺序",
-    "rank_ic": "RankIC",
-    "t": "t 值",
-    "days": "有效日",
-    "d1d10": "D1-D10",
-}
-
-
-def _sort_value(view: TrackingView, key: str) -> float | None:
-    current = view.current or {}
-    primary = current.get("primary_metrics") or {}
-    if key == "rank_ic":
-        return (primary.get("rank_ic") or {}).get("mean")
-    if key == "t":
-        return (primary.get("rank_ic") or {}).get("t_naive")
-    if key == "days":
-        return (primary.get("rank_ic") or {}).get("n_days")
-    if key == "d1d10":
-        return (primary.get("deciles") or {}).get("d1_minus_d10")
-    return None
-
-
-def _sort_entries(
-    entries: list[tuple[FactorDefinition, TrackingView]], key: str
-) -> list[tuple[FactorDefinition, TrackingView]]:
-    if key not in _SORT_LABELS or not key:
-        return entries
-    return sorted(
-        entries,
-        key=lambda entry: (
-            _sort_value(entry[1], key) is None,
-            -float(_sort_value(entry[1], key) or 0.0),
-        ),
-    )
-
-
-def _overview_row(meta: FactorDefinition, view: TrackingView) -> Any:
-    current = view.current or {}
-    primary = current.get("primary_metrics") or {}
-    rank_ic = primary.get("rank_ic") or {}
-    diagnostics = primary.get("diagnostics") or {}
-    deciles = primary.get("deciles") or {}
-    return Tr(
-        Td(
-            A(meta.display_name, href=f"/factors/{meta.factor_id}"),
-            cls="px-4 py-2 text-sm font-medium",
-        ),
-        Td(meta.factor_id, cls="px-4 py-2 font-mono text-xs text-gray-500"),
-        Td(meta.group, cls="px-4 py-2 text-xs text-gray-500"),
-        Td(_status_badge(view.status)),
-        Td(f"{view.profile.primary_holding_days} 日", cls="px-4 py-2 tabular-nums"),
-        Td(_fmt_number(rank_ic.get("mean")), cls="px-4 py-2 tabular-nums"),
-        Td(_fmt_number(rank_ic.get("t_naive"), 2), cls="px-4 py-2 tabular-nums"),
-        Td(
-            str(rank_ic.get("n_days") or 0) if current else "—",
-            cls="px-4 py-2 tabular-nums",
-        ),
-        Td(_fmt_percent(deciles.get("d1_minus_d10")), cls="px-4 py-2 tabular-nums"),
-        Td(str(diagnostics.get("as_of_date") or "—"), cls="px-4 py-2 text-xs text-gray-500"),
-        Td(_fmt_time(current.get("computed_at")), cls="px-4 py-2 text-xs text-gray-500"),
-    )
-
-
 @rt("/")
 def index(req: Request) -> Any:
     group_filter = req.query_params.get("group", "")
     query = req.query_params.get("q", "").strip().lower()
     sort_key = req.query_params.get("sort", "")
-    definitions = list_factor_definitions()
+    sort_dir = req.query_params.get("dir", "desc")
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "desc"
+    all_definitions = list_factor_definitions()
+    definitions = all_definitions
     if group_filter:
         definitions = [item for item in definitions if item.group == group_filter]
     if query:
@@ -742,77 +676,41 @@ def index(req: Request) -> Any:
     entries = _sort_entries(
         [(item, tracking_view(item.factor_id)) for item in definitions],
         sort_key,
+        sort_dir,
     )
-    rows = [_overview_row(item, view) for item, view in entries]
+    is_admin = bool(req.scope.get("user_is_admin"))
+    rows = [_overview_row(item, view, is_admin=is_admin) for item, view in entries]
     layout = _layout("因子", "/factors/")
     content = Div(
         Div(
-            Div(
-                H1("因子总览", cls="text-2xl font-bold text-gray-900"),
-                P("因子是策略之前的独立研究阶段。", cls="mt-1 text-sm text-gray-500"),
-                cls="min-w-0",
+            H1("因子总览", cls="text-2xl font-bold text-gray-900"),
+            P(
+                "在策略使用前，先验证因子与未来收益的统计关系。",
+                cls="mt-1 text-sm text-gray-500",
             ),
-            Div(
-                Form(
-                    TextInput(
-                        type="search",
-                        name="q",
-                        value=query,
-                        placeholder="搜索因子名称或 ID",
-                        cls="q-input",
-                    ),
-                    PlainSelect(
-                        Option("全部分组", value="", selected=not group_filter),
-                        *[
-                            Option(group, value=group, selected=group_filter == group)
-                            for group in FEATURE_GROUPS
-                        ],
-                        name="group",
-                        cls="q-input",
-                    ),
-                    PlainSelect(
-                        *[
-                            Option(label, value=value, selected=sort_key == value)
-                            for value, label in _SORT_LABELS.items()
-                        ],
-                        name="sort",
-                        cls="q-input",
-                    ),
-                    ActionButton("筛选", type="submit", cls="q-btn q-btn--sm"),
-                    method="get",
-                    cls="flex flex-wrap items-center gap-2",
-                ),
-                Form(
-                    ActionButton("刷新全部跟踪", type="submit", cls="q-btn q-btn--sm"),
-                    method="post",
-                    action="/factors/refresh-all",
-                ),
-                cls="flex flex-wrap items-center gap-2",
-            ),
-            cls="flex flex-wrap items-end justify-between gap-3",
         ),
+        _overview_summary(entries),
+        _tracking_onboarding(entries, is_admin=is_admin),
         Div(
-            DatasetTable(
-                [
-                    "因子",
-                    "ID",
-                    "分组",
-                    "状态",
-                    "持有期",
-                    "RankIC",
-                    "t",
-                    "有效日",
-                    "D1-D10",
-                    "截至",
-                    "更新",
-                ],
-                rows,
-            )
-            if rows
-            else P("暂无因子。", cls="p-4 text-sm text-gray-500"),
-            cls="mt-4 overflow-hidden rounded-xl border border-gray-100 bg-white p-4 shadow-sm",
+            _overview_toolbar(
+                query=query,
+                group_filter=group_filter,
+                sort_key=sort_key,
+                sort_dir=sort_dir,
+                result_count=len(entries),
+                total_count=len(all_definitions),
+                is_admin=is_admin,
+            ),
+            cls="rounded-xl border border-gray-100 bg-white p-4 shadow-sm",
         ),
-        cls="p-8",
+        _overview_table(
+            rows,
+            query=query,
+            group_filter=group_filter,
+            sort_key=sort_key,
+            sort_dir=sort_dir,
+        ),
+        cls="space-y-4",
     )
     layout.set_main_block(content)
     return layout.render(req)

@@ -6,24 +6,38 @@ from typing import Any
 from fasthtml.common import A, Div, Span, Table, Tbody, Th, Thead, Tr
 
 
-def DatasetTable(headers: Sequence[str], rows: Sequence[object]) -> Any:
+def DatasetTable(
+    headers: Sequence[object],
+    rows: Sequence[object],
+    *,
+    column_classes: Sequence[str] | None = None,
+    sticky_header: bool = False,
+    aria_label: str | None = None,
+) -> Any:
+    header_classes = (
+        "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+    )
+    if sticky_header:
+        header_classes += " sticky top-0 z-10 bg-gray-50"
+    table_attrs: dict[str, Any] = {}
+    if aria_label:
+        table_attrs["aria_label"] = aria_label
+    rendered_headers = []
+    for index, label in enumerate(headers):
+        extra = (
+            column_classes[index]
+            if column_classes is not None and index < len(column_classes)
+            else ""
+        )
+        rendered_headers.append(Th(label, cls=f"{header_classes} {extra}".rstrip(), scope="col"))
     return Div(
         Table(
-            Thead(
-                Tr(
-                    *[
-                        Th(
-                            label,
-                            cls="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
-                        )
-                        for label in headers
-                    ]
-                )
-            ),
+            Thead(Tr(*rendered_headers)),
             Tbody(*rows),
-            cls="min-w-full divide-y divide-gray-200",
+            cls="q-data-table min-w-full divide-y divide-gray-200",
+            **table_attrs,
         ),
-        cls="overflow-x-auto",
+        cls=("overflow-auto max-h-[calc(100vh-300px)]" if sticky_header else "overflow-x-auto"),
     )
 
 

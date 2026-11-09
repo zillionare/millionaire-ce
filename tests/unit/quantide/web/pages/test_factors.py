@@ -63,8 +63,102 @@ def test_factor_index_opens_from_header(client, isolated_tracking) -> None:
     assert "因子总览" in response.text
     assert "bias_5" in response.text
     assert "因子" in response.text
-    assert "搜索因子" in response.text
+    assert "筛选左侧因子目录" in response.text
+    assert "筛选结果：名称或 ID" in response.text
+    assert "因子总数" in response.text
+    assert "当前 28 / 共 28 个因子" in response.text
+    assert "还没有因子跟踪结果" in response.text
+    assert "点击数值列标题可切换排序" in response.text
+    assert 'aria-label="因子总览列表"' in response.text
+    assert "sticky top-0" in response.text
+    assert "sort=rank_ic" in response.text
     assert "data-sidebar-entry" in response.text
+
+
+def _tracking_view(status: str, rank_ic: float | None = None):
+    profile = factor_tracking.default_profile("bias_5")
+    current = None
+    if rank_ic is not None:
+        current = {
+            "computed_at": dt.datetime(2024, 1, 5, 15, 30),
+            "primary_metrics": {
+                "rank_ic": {"mean": rank_ic, "t_naive": 1.2, "n_days": 3},
+                "diagnostics": {"as_of_date": "2024-01-05"},
+                "deciles": {"d1_minus_d10": 0.02},
+            },
+        }
+    return factor_tracking.TrackingView(
+        profile=profile,
+        current=current,
+        last_attempt=None,
+        status=status,
+    )
+
+
+def test_factor_overview_summary_counts_statuses() -> None:
+    from quantide.web.pages import factors
+
+    entries = [
+        (FACTOR_METADATA["bias_5"], _tracking_view("normal", 0.1)),
+        (FACTOR_METADATA["rs_board_5d"], _tracking_view("stale_data")),
+        (FACTOR_METADATA["bias_20"], _tracking_view("uninitialized")),
+    ]
+    html = str(factors._overview_summary(entries))
+
+    assert "因子总数" in html
+    assert "正常" in html
+    assert "待处理" in html
+    assert "未建立" in html
+    assert "最近更新" in html
+    assert ">3<" in html
+    assert ">1<" in html
+
+
+def test_factor_overview_sorting_and_direction() -> None:
+    from quantide.web.pages import factors, factors_overview
+
+    entries = [
+        (FACTOR_METADATA["bias_5"], _tracking_view("normal", 0.1)),
+        (FACTOR_METADATA["rs_board_5d"], _tracking_view("normal", -0.2)),
+        (FACTOR_METADATA["bias_20"], _tracking_view("uninitialized")),
+    ]
+
+    descending = factors._sort_entries(entries, "rank_ic", "desc")
+    ascending = factors._sort_entries(entries, "rank_ic", "asc")
+
+    assert [meta.factor_id for meta, _ in descending] == ["bias_5", "rs_board_5d", "bias_20"]
+    assert [meta.factor_id for meta, _ in ascending] == ["rs_board_5d", "bias_5", "bias_20"]
+
+    link = str(
+        factors_overview._sort_header(
+            "RankIC",
+            "rank_ic",
+            query="bias",
+            group_filter="",
+            sort_key="rank_ic",
+            sort_dir="desc",
+        )
+    )
+    assert "sort=rank_ic" in link
+    assert "dir=asc" in link
+    assert "q=bias" in link
+    assert "按RankIC排序" in link
+
+
+def test_factor_overview_row_hides_refresh_without_admin() -> None:
+    from quantide.web.pages import factors
+
+    meta = FACTOR_METADATA["bias_5"]
+    view = _tracking_view("normal", 0.1)
+
+    readonly_html = str(factors._overview_row(meta, view, is_admin=False))
+    admin_html = str(factors._overview_row(meta, view, is_admin=True))
+
+    assert "查看" in readonly_html
+    assert "刷新" not in readonly_html
+    assert "刷新" in admin_html
+    assert "刷新已提交" in admin_html
+    assert "px-4 py-3 whitespace-nowrap" in readonly_html
 
 
 def test_factor_detail_renders_card_and_report_tabs(client, isolated_tracking) -> None:

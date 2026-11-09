@@ -386,6 +386,7 @@ class MainLayout(BaseLayout):
         self.sidebar_search: str | None = None
         self._sidebar_active_url: str = "/"
         self._main_block_override: Any = None
+        self.content_max_width = "max-w-[1280px]"
 
     def set_sidebar_active(self, url: str) -> None:
         """设置当前高亮的 sidebar 菜单项。"""
@@ -573,7 +574,7 @@ class MainLayout(BaseLayout):
                         fragment_navigation_enabled=fragment_navigation_enabled,
                     ),
                     self._build_main_container(),
-                    cls="flex max-w-[1280px] mx-auto w-full flex-1",
+                    cls=f"flex {self.content_max_width} mx-auto w-full flex-1",
                 ),
                 cls="flex flex-col min-h-screen",
             ),
