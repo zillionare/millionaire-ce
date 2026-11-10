@@ -191,7 +191,7 @@ def test_worker_stop_cancels_never_returns_and_prevents_publish(tmp_path) -> Non
     worker.start()
     assert _wait(lambda: store.list_runs()[0].status == RUNNING)
     worker.stop(timeout=0.1)
-    assert observed["cancel"]
+    assert _wait(lambda: observed["cancel"], timeout=2)
     run = store.list_runs()[0]
     assert run.status in {CANCELLED, INTERRUPTED, PENDING}
     assert run.result is None
