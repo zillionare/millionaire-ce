@@ -21,13 +21,13 @@ FACTOR_VERSION: str = hashlib.sha1(Path(__file__).read_bytes()).hexdigest()[:12]
 
 #: 因子分组（顺序即 :data:`FEATURE_COLS` 的顺序），供 UI 分组展示。
 FEATURE_GROUPS: dict[str, list[str]] = {
-    "板块与市场相对强弱": [
+    "相对强弱": [
         "rs_board_5d",
         "rs_board_20d",
         "rs_market_rank",
         "downside_resilience",
     ],
-    "短线 K 线博弈形态": [
+    "短线形态": [
         "upper_shadow",
         "lower_shadow",
         "upper_shadow_atr",
@@ -40,21 +40,19 @@ FEATURE_GROUPS: dict[str, list[str]] = {
         "high_open_bear",
         "low_open_bull",
         "intraday_vs_overnight_5d",
+        "ma20_support_bounce",
     ],
-    "均线支撑与均线斜率": [
+    "资金推动": [
+        "clv_money_flow",
+        "pv_sync_10d",
+        "limit_up_gene",
+    ],
+    "动量与反转": [
         "ma10_slope",
         "ma20_slope",
         "ma_alignment",
         "bias_5",
         "bias_20",
-        "ma20_support_bounce",
-    ],
-    "资金推动与量价特征": [
-        "clv_money_flow",
-        "pv_sync_10d",
-        "limit_up_gene",
-    ],
-    "动量与反转交叉特征": [
         "sharpe_mom_20d",
         "rev_5d_shrink_vol",
         "shadow_bias_reversal",
@@ -228,17 +226,16 @@ def compute_alpha_features(
     特征分组（与 :data:`FEATURE_COLS` 一一对应，每个特征的「计算方法 / 含义 /
     示例」见 :data:`FEATURE_DOCS`）：
 
-    1. 板块与市场相对强弱：``rs_board_5d`` ``rs_board_20d`` ``rs_market_rank``
+    1. 相对强弱：``rs_board_5d`` ``rs_board_20d`` ``rs_market_rank``
        ``downside_resilience``
-    2. 短线 K 线博弈形态：``upper_shadow`` ``lower_shadow``（当日振幅比例口径）
+    2. 短线形态：``upper_shadow`` ``lower_shadow``（当日振幅比例口径）
        ``upper_shadow_atr`` ``lower_shadow_atr``（ATR 归一）
        ``upper_shadow_limit`` ``lower_shadow_limit``（涨跌停限归一）
        ``overnight_gap`` ``intraday_ret`` ``vol_ratio_5_20`` ``high_open_bear``
-       ``low_open_bull`` ``intraday_vs_overnight_5d``
-    3. 均线支撑与斜率：``ma10_slope`` ``ma20_slope`` ``ma_alignment`` ``bias_5``
-       ``bias_20`` ``ma20_support_bounce``
-    4. 资金推动与量价：``clv_money_flow`` ``pv_sync_10d`` ``limit_up_gene``
-    5. 动量与反转交互：``sharpe_mom_20d`` ``rev_5d_shrink_vol``
+       ``low_open_bull`` ``intraday_vs_overnight_5d`` ``ma20_support_bounce``
+    3. 资金推动：``clv_money_flow`` ``pv_sync_10d`` ``limit_up_gene``
+    4. 动量与反转：``ma10_slope`` ``ma20_slope`` ``ma_alignment`` ``bias_5``
+       ``bias_20`` ``sharpe_mom_20d`` ``rev_5d_shrink_vol``
        ``shadow_bias_reversal``
 
     影线族的三种口径（同一根 K 线同时给出，便于模型区分「形态」与「量级」）：

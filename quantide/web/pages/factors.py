@@ -681,7 +681,6 @@ def index(req: Request) -> Any:
         sort_key,
         sort_dir,
     )
-    is_admin = bool(req.scope.get("user_is_admin"))
     rows = [_overview_row(item, view) for item, view in entries]
     layout = _layout("因子", "/factors/")
     content = Div(
@@ -693,7 +692,7 @@ def index(req: Request) -> Any:
             ),
         ),
         _overview_summary(entries),
-        _tracking_onboarding(entries, is_admin=is_admin),
+        _tracking_onboarding(entries),
         Div(
             _overview_toolbar(
                 query=query,
@@ -702,7 +701,6 @@ def index(req: Request) -> Any:
                 sort_dir=sort_dir,
                 result_count=len(entries),
                 total_count=len(all_definitions),
-                is_admin=is_admin,
             ),
             cls="rounded-xl border border-gray-100 bg-white p-4 shadow-sm",
         ),

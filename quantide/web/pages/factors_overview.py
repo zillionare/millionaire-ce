@@ -16,29 +16,20 @@ from quantide.factors.alpha import FEATURE_GROUPS
 from quantide.factors.metadata import FactorDefinition
 from quantide.service.factor_tracking import TrackingView
 from quantide.web.components.data_tables import DatasetTable
-from quantide.web.pages.factors_ui import fmt_number, fmt_percent, fmt_time, status_badge
+from quantide.web.pages.factors_ui import fmt_number, fmt_percent, fmt_time
 
 _SORTABLE_COLUMNS = {
     "rank_ic": "RankIC",
     "annual": "多空年化",
+    "annual_long": "纯多年化",
     "t": "t 值",
     "days": "有效日",
     "d1d10": "D1-D10",
 }
-_ATTENTION_STATUSES = {
-    "stale_config",
-    "stale_data",
-    "source_unavailable",
-    "failed",
-    "insufficient",
-    "interrupted",
-}
-_UNINITIALIZED_STATUSES = {"uninitialized", "disabled"}
 _TRADING_DAYS = 252
 
 
-def annualized_long_short(view: TrackingView) -> float | None:
-    """Estimate annualized D10-minus-D1 return from the holding-period spread."""
+def _primary_deciles(view: TrackingView) -> tuple[dict[str, Any], int | None]:
     current = view.current or {}
     primary = current.get("primary_metrics") or {}
     deciles = primary.get("deciles") or {}
@@ -46,8 +37,14 @@ def annualized_long_short(view: TrackingView) -> float | None:
     try:
         holding_days = int(holding)
     except (TypeError, ValueError):
-        return None
-    if holding_days < 1:
+        return deciles, None
+    return deciles, holding_days if holding_days >= 1 else None
+
+
+def annualized_long_short(view: TrackingView) -> float | None:
+    """Estimate annualized D10-minus-D1 return from the holding-period spread."""
+    deciles, holding_days = _primary_deciles(view)
+    if holding_days is None:
         return None
     d1 = deciles.get("d1_mean_common")
     d10 = deciles.get("d10_mean_common")
@@ -62,16 +59,30 @@ def annualized_long_short(view: TrackingView) -> float | None:
     return annualized if math.isfinite(annualized) else None
 
 
-def _annualized_sort_value(view: TrackingView) -> float | None:
-    annualized = annualized_long_short(view)
-    return annualized if annualized is not None else None
+def annualized_long_only(view: TrackingView) -> float | None:
+    """Estimate annualized D10-only return from the holding-period mean."""
+    deciles, holding_days = _primary_deciles(view)
+    if holding_days is None:
+        return None
+    d10 = deciles.get("d10_mean_common")
+    if d10 is None:
+        for bucket in deciles.get("buckets") or []:
+            if bucket.get("bucket") == 10:
+                d10 = bucket.get("mean_forward")
+                break
+    if d10 is None:
+        return None
+    annualized = float(d10) * _TRADING_DAYS / holding_days
+    return annualized if math.isfinite(annualized) else None
 
 
 def _sort_value(view: TrackingView, key: str) -> float | None:
     current = view.current or {}
     primary = current.get("primary_metrics") or {}
     if key == "annual":
-        return _annualized_sort_value(view)
+        return annualized_long_short(view)
+    if key == "annual_long":
+        return annualized_long_only(view)
     if key == "rank_ic":
         return (primary.get("rank_ic") or {}).get("mean")
     if key == "t":
@@ -159,14 +170,13 @@ def _summary_card(label: str, value: str, *, tone: str = "text-gray-900") -> Div
 
 
 def overview_summary(entries: list[tuple[FactorDefinition, TrackingView]]) -> Div:
-    total = len(entries)
-    normal = sum(1 for _, view in entries if view.status == "normal")
-    attention = sum(1 for _, view in entries if view.status in _ATTENTION_STATUSES)
-    uninitialized = sum(1 for _, view in entries if view.status in _UNINITIALIZED_STATUSES)
+    computed = sum(1 for _, view in entries if view.current)
     annualized = [
         value for _, view in entries if (value := annualized_long_short(view)) is not None
     ]
+    long_only = [value for _, view in entries if (value := annualized_long_only(view)) is not None]
     median_annualized = fmt_percent(median(annualized)) if annualized else "—"
+    median_long_only = fmt_percent(median(long_only)) if long_only else "—"
     updates = [
         fmt_time((view.current or {}).get("computed_at"))
         for _, view in entries
@@ -174,32 +184,12 @@ def overview_summary(entries: list[tuple[FactorDefinition, TrackingView]]) -> Di
     ]
     latest_update = max(updates) if updates else "—"
     return Div(
-        _summary_card("因子总数", str(total)),
-        _summary_card("正常", str(normal), tone="text-green-700"),
-        _summary_card("待处理", str(attention), tone="text-amber-700"),
-        _summary_card("未建立", str(uninitialized), tone="text-gray-500"),
+        _summary_card("因子总数", str(len(entries))),
+        _summary_card("已有结果", str(computed)),
         _summary_card("多空年化中位数", median_annualized),
+        _summary_card("纯多年化中位数", median_long_only),
         _summary_card("最近更新", latest_update),
-        cls="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6",
-    )
-
-
-def _refresh_form(action: str, label: str) -> Form:
-    return Form(
-        ActionButton(
-            label,
-            type="submit",
-            cls="q-btn h-9 px-3",
-            aria_label=label,
-            onclick=(
-                "this.disabled=true;"
-                f"this.textContent='{label}已提交';"
-                "this.form.submit();return false;"
-            ),
-        ),
-        method="post",
-        action=action,
-        cls="inline-flex",
+        cls="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5",
     )
 
 
@@ -211,44 +201,51 @@ def overview_toolbar(
     sort_dir: str,
     result_count: int,
     total_count: int,
-    is_admin: bool,
 ) -> Div:
     filter_form = Form(
-        TextInput(
-            type="search",
-            name="q",
-            value=query,
-            placeholder="筛选结果：名称或 ID",
-            aria_label="筛选结果：名称或 ID",
-            cls="q-input h-9 w-64",
+        Div(
+            P("关键词", cls="mb-1 text-xs text-gray-500"),
+            TextInput(
+                type="search",
+                name="q",
+                value=query,
+                placeholder="名称或 ID",
+                aria_label="按名称或 ID 筛选",
+                cls="q-input h-9 w-56",
+            ),
         ),
-        PlainSelect(
-            Option("全部分组", value="", selected=not group_filter),
-            *[
-                Option(group, value=group, selected=group_filter == group)
-                for group in FEATURE_GROUPS
-            ],
-            name="group",
-            aria_label="按因子分组筛选",
-            cls="q-input h-9 w-56",
+        Div(
+            P("分组", cls="mb-1 text-xs text-gray-500"),
+            PlainSelect(
+                Option("全部分组", value="", selected=not group_filter),
+                *[
+                    Option(group, value=group, selected=group_filter == group)
+                    for group in FEATURE_GROUPS
+                ],
+                name="group",
+                aria_label="按因子分组筛选",
+                cls="q-input h-9 w-56",
+            ),
         ),
         TextInput(type="hidden", name="sort", value=sort_key),
         TextInput(type="hidden", name="dir", value=sort_dir),
-        ActionButton("筛选", type="submit", cls="q-btn q-btn--primary h-9 px-3"),
-        (
-            A(
-                "清除筛选",
-                href="/factors/",
-                cls="text-sm text-gray-500 hover:text-[#e41815]",
-            )
-            if query or group_filter
-            else None
+        Div(
+            ActionButton("应用筛选", type="submit", cls="q-btn q-btn--primary h-9 px-3"),
+            (
+                A(
+                    "清除",
+                    href="/factors/",
+                    cls="px-2 text-sm text-gray-500 hover:text-[#e41815]",
+                )
+                if query or group_filter
+                else None
+            ),
+            cls="flex items-center gap-2",
         ),
         method="get",
-        cls="flex flex-wrap items-center gap-2",
+        cls="flex flex-wrap items-end gap-3",
         aria_label="因子筛选",
     )
-    refresh = _refresh_form("/factors/refresh-all", "刷新全部跟踪") if is_admin else None
     return Div(
         Div(
             P("因子列表", cls="text-base font-semibold text-gray-900"),
@@ -257,24 +254,20 @@ def overview_toolbar(
                 cls="mt-1 text-xs text-gray-500",
             ),
         ),
-        Div(filter_form, refresh, cls="flex flex-wrap items-center gap-3"),
+        filter_form,
         cls="flex flex-wrap items-end justify-between gap-4",
     )
 
 
-def tracking_onboarding(
-    entries: list[tuple[FactorDefinition, TrackingView]], *, is_admin: bool
-) -> Any:
+def tracking_onboarding(entries: list[tuple[FactorDefinition, TrackingView]]) -> Any:
     if not entries or any(view.current for _, view in entries):
         return None
-    action_text = (
-        "点击右上角“刷新全部跟踪”，系统会建立首批因子快照。"
-        if is_admin
-        else "当前还没有跟踪结果；请联系管理员建立首批因子快照。"
-    )
     return Div(
         P("还没有因子跟踪结果", cls="text-sm font-medium text-gray-900"),
-        P(action_text, cls="mt-1 text-sm text-gray-600"),
+        P(
+            "系统会在每日 18:45 自动更新；错过后会在服务启动时补查。",
+            cls="mt-1 text-sm text-gray-600",
+        ),
         cls="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4",
     )
 
@@ -312,6 +305,7 @@ def overview_row(meta: FactorDefinition, view: TrackingView) -> Any:
     diagnostics = primary.get("diagnostics") or {}
     deciles = primary.get("deciles") or {}
     annualized = annualized_long_short(view)
+    long_only = annualized_long_only(view)
     return Tr(
         Td(
             A(
@@ -341,6 +335,13 @@ def overview_row(meta: FactorDefinition, view: TrackingView) -> Any:
             ),
         ),
         Td(
+            fmt_percent(long_only),
+            cls=(
+                "px-4 py-3 text-right font-medium tabular-nums whitespace-nowrap "
+                + _return_tone(long_only)
+            ),
+        ),
+        Td(
             fmt_number(rank_ic.get("t_naive"), 2),
             cls="px-4 py-3 text-right tabular-nums whitespace-nowrap",
         ),
@@ -352,7 +353,6 @@ def overview_row(meta: FactorDefinition, view: TrackingView) -> Any:
             fmt_percent(deciles.get("d1_minus_d10")),
             cls="px-4 py-3 text-right tabular-nums whitespace-nowrap",
         ),
-        Td(status_badge(view.status), cls="px-4 py-3 whitespace-nowrap"),
         Td(
             f"{view.profile.primary_holding_days} 日",
             cls="px-4 py-3 text-right tabular-nums whitespace-nowrap",
@@ -379,13 +379,16 @@ def metric_guide() -> Details:
             "按 D10-D1 的持有期平均收益线性年化（×252/持有期），用于横向比较，"
             "不是可直接交易的组合收益。",
         ),
+        (
+            "纯多年化",
+            "按 D10 组合的持有期平均收益线性年化；包含市场 beta，不能与多空收益直接比较。",
+        ),
         ("t 值", "RankIC 均值的普通 t 值；越大越显著，但未校正自相关和多重检验。"),
         ("有效日", "参与统计的有效交易日数量，过少时结论不稳定。"),
         (
             "D1-D10",
             "D1 减 D10 的持有期平均前瞻收益差，保持原始持有期，未年化；符号与多空年化相反。",
         ),
-        ("状态", "跟踪快照的生成状态，不代表因子本身优劣。"),
         ("持有期", "评价使用的前瞻收益窗口；不同持有期的结果不能直接横向比较。"),
         ("数据 / 更新", "评价数据截至日期与快照生成时间，用于判断结果是否过期。"),
     ]
@@ -440,6 +443,14 @@ def overview_table(
             **sort_args,
         ),
         _sort_header(
+            "纯多年化",
+            "annual_long",
+            description=(
+                "按 D10 组合的持有期平均收益线性年化；包含市场 beta，不能与多空收益直接比较。"
+            ),
+            **sort_args,
+        ),
+        _sort_header(
             "t 值",
             "t",
             description="RankIC 均值的普通 t 值；越大越显著，但未校正自相关与多重检验。",
@@ -459,7 +470,6 @@ def overview_table(
             ),
             **sort_args,
         ),
-        _header_label("状态", "跟踪快照的生成状态，不代表因子本身优劣。"),
         _header_label("持有期", "当前评价使用的前瞻收益窗口。"),
         _header_label("数据 / 更新", "评价数据截至日期与快照生成时间。"),
     ]
@@ -475,7 +485,7 @@ def overview_table(
                 "text-right",
                 "text-right",
                 "text-right",
-                "",
+                "text-right",
                 "text-right",
                 "text-right",
             ],
