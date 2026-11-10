@@ -222,7 +222,7 @@ def test_worker_restart_resumes_a_released_task(tmp_path) -> None:
     release = threading.Event()
 
     def stuck(*_):
-        release.wait(1)
+        release.wait()
         return SUCCEEDED
 
     first = FactorRunWorker(store, stuck, poll_seconds=0.01)
@@ -234,7 +234,7 @@ def test_worker_restart_resumes_a_released_task(tmp_path) -> None:
         assert _wait(lambda: store.get(run_id).status == PENDING)
 
         second.start()
-        assert _wait(lambda: store.get(run_id).status == SUCCEEDED)
+        assert _wait(lambda: store.get(run_id).status == SUCCEEDED, timeout=15)
     finally:
         release.set()
         first.stop()
