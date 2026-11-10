@@ -97,12 +97,16 @@
 
     /* ---------------- 表单 ---------------- */
     .q-input {
-      height: 36px;
+      box-sizing: border-box;
+      height: 36px !important;
+      min-height: 36px !important;
+      margin: 0 !important;
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
       background: var(--bg);
-      padding: 0 var(--space-3);
+      padding: 0 var(--space-3) !important;
       font-size: 14px;
+      line-height: normal;
       color: var(--fg);
       outline: none;
       transition: border-color 0.15s, box-shadow 0.15s;
@@ -117,7 +121,8 @@
     /* ---------------- 按钮 ---------------- */
     .q-btn {
       display: inline-flex; align-items: center; justify-content: center;
-      height: 36px; padding: 0 var(--space-3); border-radius: var(--radius-md);
+      height: 36px; margin-top: 0 !important; margin-bottom: 0 !important;
+      padding: 0 var(--space-3); border-radius: var(--radius-md);
       font-size: 14px; font-weight: 500; cursor: pointer;
       border: 1px solid var(--border); background: var(--bg); color: var(--fg);
       transition: background 0.15s, color 0.15s, border-color 0.15s;
