@@ -42,7 +42,6 @@ def isolated_tracking(monkeypatch, tmp_path):
     monkeypatch.setattr(factor_tracking, "_PENDING_REFRESH", set())
     monkeypatch.setattr(factor_tracking, "_source_versions", lambda **_: _source())
     monkeypatch.setattr(factor_tracking, "trading_days", _days)
-    monkeypatch.setattr(factor_tracking, "_expected_data_cutoff", lambda now: None)
     monkeypatch.setattr(factor_tracking, "_latest_market_day", lambda: None)
     yield
 
@@ -109,6 +108,8 @@ def test_refresh_writes_snapshot_with_horizons(monkeypatch) -> None:
     assert snapshot["common_cohort"]["n_days"] > 0
     assert snapshot["coverage"]["latest_symbols"] == 120
     assert snapshot["coverage"]["sufficient"] is True
+    assert snapshot["data_cutoff"] == "2024-01-13"
+    assert state["last_attempt"]["status"] == "succeeded"
     assert factor_tracking.tracking_view("bias_5").status == "normal"
 
 
@@ -167,7 +168,7 @@ def test_profile_change_during_refresh_does_not_publish(monkeypatch) -> None:
     assert factor_tracking.load_profile("bias_5").revision == 1
 
 
-def test_stale_profile_marks_snapshot_stale(monkeypatch) -> None:
+def test_profile_change_keeps_latest_result_visible_for_automatic_refresh(monkeypatch) -> None:
     monkeypatch.setattr(factor_tracking, "load_factor_panel", lambda start, end: _panel())
     factor_tracking.refresh_factor("bias_5")
     factor_tracking.save_profile(
@@ -177,7 +178,11 @@ def test_stale_profile_marks_snapshot_stale(monkeypatch) -> None:
         comparison_holding_days=[1, 3, 5],
         price_field="open",
     )
-    assert factor_tracking.tracking_view("bias_5").status == "stale_config"
+
+    view = factor_tracking.tracking_view("bias_5")
+    assert view.status == "normal"
+    assert isinstance(view.current, dict)
+    assert factor_tracking._config_changed(view.profile, view.current)
 
 
 def test_snapshot_records_data_and_calendar_fingerprints(monkeypatch) -> None:

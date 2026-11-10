@@ -359,12 +359,13 @@ def overview_row(meta: FactorDefinition, view: TrackingView) -> Any:
         ),
         Td(
             Div(
-                P(str(diagnostics.get("as_of_date") or "—"), cls="text-sm text-gray-700"),
+                P(str(current.get("data_cutoff") or "—"), cls="text-sm text-gray-700"),
                 P(
                     fmt_time(current.get("computed_at")),
                     cls="mt-0.5 text-xs text-gray-400",
                 ),
             ),
+            title=f"评价截至 {diagnostics.get('as_of_date') or '—'}",
             cls="px-4 py-3 text-right whitespace-nowrap",
         ),
     )
@@ -390,7 +391,11 @@ def metric_guide() -> Details:
             "D1 减 D10 的持有期平均前瞻收益差，保持原始持有期，未年化；符号与多空年化相反。",
         ),
         ("持有期", "评价使用的前瞻收益窗口；不同持有期的结果不能直接横向比较。"),
-        ("数据 / 更新", "评价数据截至日期与快照生成时间，用于判断结果是否过期。"),
+        (
+            "数据 / 更新",
+            "数据截至是参与计算的最后交易日；更新是快照生成时间。"
+            "评价截至（最后成熟信号日）见因子详情页。",
+        ),
     ]
     return Details(
         Summary("字段说明", cls="cursor-pointer text-sm font-medium text-gray-700"),

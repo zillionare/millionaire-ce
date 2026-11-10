@@ -86,6 +86,7 @@ def _tracking_view(status: str, rank_ic: float | None = None):
     current = None
     if rank_ic is not None:
         current = {
+            "data_cutoff": "2024-01-10",
             "computed_at": dt.datetime(2024, 1, 5, 15, 30),
             "primary_metrics": {
                 "holding_days": 5,
@@ -106,14 +107,16 @@ def _tracking_view(status: str, rank_ic: float | None = None):
     )
 
 
-def test_stale_config_badge_requests_recompute_without_claiming_user_changed_config() -> None:
-    from quantide.web.pages.factors_ui import status_badge
+def test_overview_uses_raw_data_cutoff_and_keeps_evaluation_date_in_tooltip() -> None:
+    from quantide.web.pages import factors_overview
 
-    html = str(status_badge("stale_config"))
+    html = str(
+        factors_overview.overview_row(FACTOR_METADATA["bias_5"], _tracking_view("normal", 0.1))
+    )
 
-    assert "待重新检验" in html
-    assert "配置已变更" not in html
-    assert "自动更新" in html
+    assert "2024-01-10" in html
+    assert "评价截至 2024-01-05" in html
+    assert "待重新检验" not in html
 
 
 def test_factor_overview_summary_counts_computed_factors() -> None:

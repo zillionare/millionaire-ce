@@ -181,7 +181,6 @@ def _status_strip(meta: FactorDefinition, view: TrackingView) -> Div:
     current = view.current or {}
     primary = current.get("primary_metrics") or {}
     rank_ic = primary.get("rank_ic") or {}
-    diagnostics = primary.get("diagnostics") or {}
     right = (
         f"RankIC {_fmt_number(rank_ic.get('mean'))} · t {_fmt_number(rank_ic.get('t_naive'), 2)}"
         if current
@@ -202,7 +201,7 @@ def _status_strip(meta: FactorDefinition, view: TrackingView) -> Div:
             _status_badge(view.status),
             P(right, cls="mt-1 text-sm font-medium text-gray-900"),
             P(
-                f"数据截至 {diagnostics.get('as_of_date') or '—'} · "
+                f"数据截至 {current.get('data_cutoff') or '—'} · "
                 f"更新 {_fmt_time(current.get('computed_at'))}",
                 cls="mt-1 text-xs text-gray-400",
             ),

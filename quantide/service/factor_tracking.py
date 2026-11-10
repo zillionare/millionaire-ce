@@ -299,8 +299,6 @@ def _view_status(
         return "disabled"
     if not isinstance(current, dict):
         return _pending_status(refreshing, last_attempt)
-    if _config_changed(profile, current):
-        return "stale_config"
     if refreshing:
         return "calculating"
     status = _attempt_status(last_attempt)
@@ -333,20 +331,6 @@ def _attempt_payload(
         "computed_at": now.isoformat(),
         "error": error,
     }
-
-
-def _expected_data_cutoff(now: datetime.datetime) -> datetime.date | None:
-    try:
-        days = trading_days(datetime.date(2005, 1, 1), now.date())
-    except Exception as exc:
-        logger.warning("Trading calendar unavailable; skipping readiness check: {}", exc)
-        return None
-    if not days:
-        return None
-    expected = days[-1]
-    if expected == now.date() and now.time() < datetime.time(15, 0):
-        expected = days[-2] if len(days) > 1 else expected
-    return expected
 
 
 def _load_panel(
@@ -639,10 +623,7 @@ def _refresh_attempt(context: _RefreshContext) -> dict[str, Any]:
     started_at = _begin_attempt(context.factor_id, run_id, context.now)
     try:
         _check_cancel(context.should_cancel)
-        expected = _expected_data_cutoff(context.now)
         panel, data_cutoff, days = _load_panel(context.profile, context.now.date())
-        if expected is not None and data_cutoff < expected:
-            raise RuntimeError(f"daily data not ready: latest {data_cutoff}, expected {expected}")
         if callable(context.checkpoint):
             context.checkpoint("panel", {"factor": context.factor_id, "rows": panel.height})
         _check_cancel(context.should_cancel)
@@ -737,11 +718,7 @@ def _begin_group_runs(
 def _load_group_panel(
     profile: TrackingProfile, now: datetime.datetime
 ) -> tuple[Any, datetime.date, tuple[datetime.date, ...]]:
-    expected = _expected_data_cutoff(now)
-    panel, data_cutoff, days = _load_panel(profile, now.date())
-    if expected is not None and data_cutoff < expected:
-        raise RuntimeError(f"daily data not ready: latest {data_cutoff}, expected {expected}")
-    return panel, data_cutoff, days
+    return _load_panel(profile, now.date())
 
 
 def _fail_group(
@@ -934,7 +911,12 @@ def _recover_interrupted() -> None:
 def _needs_backfill() -> bool:
     for factor_id in FACTOR_METADATA:
         profile = load_profile(factor_id)
-        if profile.enabled and tracking_view(factor_id).status != "normal":
+        if not profile.enabled:
+            continue
+        view = tracking_view(factor_id)
+        if view.status != "normal":
+            return True
+        if isinstance(view.current, dict) and _config_changed(profile, view.current):
             return True
     return False
 
