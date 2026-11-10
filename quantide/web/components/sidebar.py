@@ -109,14 +109,14 @@ def _menu_text_class(active: bool) -> Any:
 def _child_item(child: Mapping[str, Any]) -> Any:
     return A(
         Div(
-            _menu_icon(child, "file", "w-4 h-4 mr-2"),
-            Span(child.get("title", "")),
+            _menu_icon(child, "file", "w-4 h-4 shrink-0"),
+            Span(child.get("title", ""), cls="min-w-0 break-words"),
             cls="flex items-center gap-2",
         ),
         href=child.get("url", "#"),
         data_sidebar_entry="true",
         data_search=str(child.get("search") or child.get("title", "")).lower(),
-        cls="block px-3 py-2 rounded-lg text-sm transition-colors "
+        cls="block px-3 py-2 rounded-lg text-xs leading-5 transition-colors "
         + _menu_text_class(child.get("active", False)),
     )
 
