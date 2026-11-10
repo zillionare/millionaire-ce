@@ -14,13 +14,18 @@ STATUS_LABELS = {
     "normal": "正常",
     "uninitialized": "未建立",
     "calculating": "计算中",
-    "stale_config": "配置已变更",
+    "stale_config": "待重新检验",
     "stale_data": "行情已更新，待跟踪",
     "source_unavailable": "来源版本不可用，待跟踪",
     "failed": "计算失败",
     "insufficient": "数据不足",
     "interrupted": "已中断",
     "disabled": "已关闭",
+}
+
+
+STATUS_HINTS = {
+    "stale_config": "当前结果由旧版因子代码或跟踪设置生成；每日检验成功后会自动更新。",
 }
 
 
@@ -35,7 +40,11 @@ def status_badge(status: str) -> Span:
         "insufficient": "bg-amber-50 text-amber-700",
         "disabled": "bg-gray-100 text-gray-600",
     }.get(status, "bg-gray-100 text-gray-600")
-    return Span(STATUS_LABELS.get(status, status), cls=f"rounded-full px-2 py-1 text-xs {tone}")
+    return Span(
+        STATUS_LABELS.get(status, status),
+        cls=f"rounded-full px-2 py-1 text-xs {tone}",
+        title=STATUS_HINTS.get(status),
+    )
 
 
 def fmt_number(value: Any, digits: int = 4) -> str:

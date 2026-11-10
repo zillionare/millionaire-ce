@@ -106,6 +106,16 @@ def _tracking_view(status: str, rank_ic: float | None = None):
     )
 
 
+def test_stale_config_badge_requests_recompute_without_claiming_user_changed_config() -> None:
+    from quantide.web.pages.factors_ui import status_badge
+
+    html = str(status_badge("stale_config"))
+
+    assert "待重新检验" in html
+    assert "配置已变更" not in html
+    assert "自动更新" in html
+
+
 def test_factor_overview_summary_counts_computed_factors() -> None:
     from quantide.web.pages import factors
 
