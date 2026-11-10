@@ -303,13 +303,16 @@ def _config_modal_html(scan_dir: str, is_error: bool = False, error_message: str
                     Button(
                         "取消",
                         type="button",
-                        cls="px-4 py-2 text-gray-600 hover:text-gray-800",
+                        cls=(
+                            "px-4 py-2 bg-transparent border border-gray-300 "
+                            "text-gray-600 rounded-lg hover:bg-transparent hover:text-gray-900"
+                        ),
                         onclick=STRATEGY_MODAL_CLOSE_JS,
                     ),
                     Button(
                         "保存",
                         type="button",
-                        cls="px-4 py-2 bg-[#e41815] text-white rounded-lg hover:bg-[#c91412] ml-2",
+                        cls="q-btn--outline-brand px-4 py-2 rounded-lg ml-2",
                         hx_post="/strategy/scan/config",
                         hx_include="#scan-dir-input",
                         hx_target="#modal-container",

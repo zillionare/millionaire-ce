@@ -116,7 +116,8 @@
       box-shadow: 0 0 0 3px var(--brand-light);
     }
     .q-input::placeholder { color: var(--fg-subtle); }
-    .q-input--search { padding-left: 2.5rem !important; }
+    .q-input--search,
+    input.q-input[type="search"] { padding-left: 2.5rem !important; }
     .q-label { font-size: 12px; font-weight: 500; color: var(--fg-muted); display: block; margin-bottom: var(--space-1); }
 
     /* ---------------- 按钮 ---------------- */
@@ -153,6 +154,15 @@
     .q-btn--ghost:hover { background: var(--bg-subtle); color: var(--fg); }
     .q-btn--danger { background: var(--brand); border-color: var(--brand); color: #fff; }
     .q-btn--danger:hover { background: var(--brand-dark); }
+    .q-btn--outline-brand {
+      background: transparent !important;
+      border: 1px solid var(--brand) !important;
+      color: var(--brand) !important;
+    }
+    .q-btn--outline-brand:hover {
+      background: var(--brand-light) !important;
+      color: var(--brand-dark) !important;
+    }
     .q-btn--success { background: var(--success); border-color: var(--success); color: #fff; }
     .q-btn--success:hover { background: var(--success-dark); }
     .q-btn--buy { background: var(--brand); border-color: var(--brand); color: #fff; }
