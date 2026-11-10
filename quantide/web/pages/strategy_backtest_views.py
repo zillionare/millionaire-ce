@@ -89,13 +89,22 @@ def _backtest_parameters_text(
     return params_text
 
 
-def _build_backtest_name_cell(name: str, portfolio_id: str) -> Any:
+def _build_backtest_name_cell(
+    name: str,
+    portfolio_id: str,
+    start: object = None,
+    end: object = None,
+) -> Any:
     """构建回测报告列表中的策略名单元格。"""
     return Td(
         A(
             name,
             href=f"/strategy/backtest/{portfolio_id}",
             cls="text-[#e41815] font-medium hover:underline",
+        ),
+        P(
+            _format_range(start, end),
+            cls="mt-1 mb-0 text-xs text-gray-500 whitespace-nowrap",
         ),
         cls="text-gray-900",
     )
@@ -688,10 +697,9 @@ def _backtest_report_row(
     )
 
     return Tr(
-        _build_backtest_name_cell(name, portfolio_id),
+        _build_backtest_name_cell(name, portfolio_id, row.get("start"), row.get("end")),
         Td(_strategy_version(strategy_cls), cls="text-gray-600"),
         _foldable_cell(params_text),
-        Td(_format_range(row.get("start"), row.get("end")), cls="text-gray-600"),
         Td(_format_percent(annual_return), cls=f"{annual_cls} font-medium"),
         Td(_format_number(metrics_payload.get("sharpe")), cls="text-gray-900"),
         Td(_format_percent(max_drawdown), cls=drawdown_cls),

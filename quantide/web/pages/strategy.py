@@ -468,7 +468,6 @@ def index(req: Request, session: SessionData) -> Any:
                 Th("策略名", cls="px-6 py-3 font-medium"),
                 Th("版本", cls="px-6 py-3 font-medium"),
                 Th("参数", cls="px-6 py-3 font-medium"),
-                Th("回测区间", cls="px-6 py-3 font-medium"),
                 Th("年化收益", cls="px-6 py-3 font-medium"),
                 Th("夏普", cls="px-6 py-3 font-medium"),
                 Th("最大回撤", cls="px-6 py-3 font-medium"),
@@ -524,8 +523,8 @@ def index(req: Request, session: SessionData) -> Any:
                             Input(
                                 type="text",
                                 placeholder="按策略名过滤...",
-                                cls="q-input text-gray-900",
-                                style="padding-left: 2.5rem; width: 16rem;",
+                                cls="q-input q-input--search text-gray-900",
+                                style="width: 16rem;",
                             ),
                             Svg(
                                 SvgPath(

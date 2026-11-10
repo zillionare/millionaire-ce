@@ -116,6 +116,7 @@
       box-shadow: 0 0 0 3px var(--brand-light);
     }
     .q-input::placeholder { color: var(--fg-subtle); }
+    .q-input--search { padding-left: 2.5rem !important; }
     .q-label { font-size: 12px; font-weight: 500; color: var(--fg-muted); display: block; margin-bottom: var(--space-1); }
 
     /* ---------------- 按钮 ---------------- */
@@ -127,6 +128,20 @@
       border: 1px solid var(--border); background: var(--bg); color: var(--fg);
       transition: background 0.15s, color 0.15s, border-color 0.15s;
       user-select: none; white-space: nowrap;
+    }
+    button.btn-sm,
+    a.btn-sm {
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 32px !important;
+      min-height: 32px !important;
+      margin: 0 !important;
+      padding: 0 var(--space-3) !important;
+      font-size: 14px !important;
+      line-height: 1 !important;
+      white-space: nowrap;
     }
     .q-btn:hover { background: var(--bg-subtle); border-color: var(--border-strong); }
     .q-btn--sm { height: 28px; padding: 0 var(--space-2); font-size: 12px; }
