@@ -116,9 +116,10 @@ def _build_backtest_deploy_button(
     *,
     is_available: bool,
     unavailable_reason: str,
+    tone_cls: str = "",
 ) -> Any:
     """构建回测报告列表中的投放按钮。"""
-    button_cls = "btn btn-secondary btn-sm"
+    button_cls = " ".join(filter(None, ("btn btn-secondary btn-sm", tone_cls)))
     if is_available:
         return Button(
             label,
@@ -172,6 +173,7 @@ def _build_backtest_action_cell(
                 f"/strategy/backtest/{portfolio_id}/deploy/paper/modal",
                 is_available=paper_available,
                 unavailable_reason=paper_unavailable_reason,
+                tone_cls="q-btn--paper",
             )
         )
 

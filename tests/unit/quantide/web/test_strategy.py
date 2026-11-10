@@ -390,6 +390,7 @@ def test_build_backtest_rows_keeps_missing_metrics_blank(
     assert 'hx-get="/strategy/backtest/demo-pf/deploy/paper/modal"' in html
     assert 'hx-get="/strategy/backtest/demo-pf/deploy/live/modal"' in html
     assert "btn btn-secondary btn-sm" in html
+    assert "q-btn--paper" in html
     assert "btn btn-primary btn-sm" not in html
 
 
