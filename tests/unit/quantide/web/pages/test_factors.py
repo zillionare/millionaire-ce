@@ -66,9 +66,11 @@ def test_factor_index_opens_from_header(client, isolated_tracking) -> None:
     assert "筛选左侧因子目录" in response.text
     assert "筛选结果：名称或 ID" in response.text
     assert "因子总数" in response.text
+    assert "多空年化中位数" in response.text
     assert "当前 28 / 共 28 个因子" in response.text
     assert "还没有因子跟踪结果" in response.text
     assert "点击数值列标题可切换排序" in response.text
+    assert "字段说明" in response.text
     assert 'aria-label="因子总览列表"' in response.text
     assert "sticky top-0" in response.text
     assert "sort=rank_ic" in response.text
@@ -82,9 +84,14 @@ def _tracking_view(status: str, rank_ic: float | None = None):
         current = {
             "computed_at": dt.datetime(2024, 1, 5, 15, 30),
             "primary_metrics": {
+                "holding_days": 5,
                 "rank_ic": {"mean": rank_ic, "t_naive": 1.2, "n_days": 3},
                 "diagnostics": {"as_of_date": "2024-01-05"},
-                "deciles": {"d1_minus_d10": 0.02},
+                "deciles": {
+                    "d1_mean_common": 0.0,
+                    "d10_mean_common": 0.02,
+                    "d1_minus_d10": -0.02,
+                },
             },
         }
     return factor_tracking.TrackingView(
@@ -109,9 +116,11 @@ def test_factor_overview_summary_counts_statuses() -> None:
     assert "正常" in html
     assert "待处理" in html
     assert "未建立" in html
+    assert "多空年化中位数" in html
     assert "最近更新" in html
     assert ">3<" in html
     assert ">1<" in html
+    assert "+100.80%" in html
 
 
 def test_factor_overview_sorting_and_direction() -> None:
@@ -145,20 +154,19 @@ def test_factor_overview_sorting_and_direction() -> None:
     assert "按RankIC排序" in link
 
 
-def test_factor_overview_row_hides_refresh_without_admin() -> None:
-    from quantide.web.pages import factors
+def test_factor_overview_row_links_factor_and_shows_annualized_return() -> None:
+    from quantide.web.pages import factors, factors_overview
 
     meta = FACTOR_METADATA["bias_5"]
     view = _tracking_view("normal", 0.1)
+    html = str(factors._overview_row(meta, view))
 
-    readonly_html = str(factors._overview_row(meta, view, is_admin=False))
-    admin_html = str(factors._overview_row(meta, view, is_admin=True))
-
-    assert "查看" in readonly_html
-    assert "刷新" not in readonly_html
-    assert "刷新" in admin_html
-    assert "刷新已提交" in admin_html
-    assert "px-4 py-3 whitespace-nowrap" in readonly_html
+    assert 'href="/factors/bias_5"' in html
+    assert "刷新" not in html
+    assert "操作" not in html
+    assert "+100.80%" in html
+    assert "px-4 py-3 whitespace-nowrap" in html
+    assert factors_overview.annualized_long_short(view) == pytest.approx(1.008)
 
 
 def test_factor_detail_renders_card_and_report_tabs(client, isolated_tracking) -> None:

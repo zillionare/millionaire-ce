@@ -71,6 +71,9 @@ from quantide.web.pages.factors_overview import (
     _sort_entries,
 )
 from quantide.web.pages.factors_overview import (
+    metric_guide as _metric_guide,
+)
+from quantide.web.pages.factors_overview import (
     overview_row as _overview_row,
 )
 from quantide.web.pages.factors_overview import (
@@ -679,7 +682,7 @@ def index(req: Request) -> Any:
         sort_dir,
     )
     is_admin = bool(req.scope.get("user_is_admin"))
-    rows = [_overview_row(item, view, is_admin=is_admin) for item, view in entries]
+    rows = [_overview_row(item, view) for item, view in entries]
     layout = _layout("因子", "/factors/")
     content = Div(
         Div(
@@ -710,6 +713,7 @@ def index(req: Request) -> Any:
             sort_key=sort_key,
             sort_dir=sort_dir,
         ),
+        _metric_guide(),
         cls="space-y-4",
     )
     layout.set_main_block(content)
