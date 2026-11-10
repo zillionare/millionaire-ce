@@ -361,7 +361,7 @@ def overview_row(meta: FactorDefinition, view: TrackingView) -> Any:
             Div(
                 P(str(diagnostics.get("as_of_date") or "—"), cls="text-sm text-gray-700"),
                 P(
-                    f"更新 {fmt_time(current.get('computed_at'))}",
+                    fmt_time(current.get("computed_at")),
                     cls="mt-0.5 text-xs text-gray-400",
                 ),
             ),
