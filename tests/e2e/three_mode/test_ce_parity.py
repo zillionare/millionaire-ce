@@ -574,6 +574,7 @@ async def test_backtest_runner_monthly_signal_does_not_fill_before_next_open(tmp
     db.init(tmp_path / "runner-monthly.db")
     month_ends, execution_day = _monthly_days()
     first_day = month_ends[0]
+    backtest_start = calendar.day_shift(first_day, 1)
     dates = list(calendar.get_trade_dates(first_day, execution_day))
     frame = pl.DataFrame(
         [
@@ -617,7 +618,7 @@ async def test_backtest_runner_monthly_signal_does_not_fill_before_next_open(tmp
             "transfer_fee": 0.0,
             "stamp_duty": 0.0,
         },
-        start_date=first_day,
+        start_date=backtest_start,
         end_date=execution_day,
         frame_type=FrameType.MONTH,
         initial_cash=10000,

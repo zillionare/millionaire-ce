@@ -541,7 +541,14 @@ class BacktestRunner:
                 calendar.last_min_frame(end_date, frame_type),
                 frame_type,
             )
-        return self._clock.iter_frames(start_date, end_date, frame_type)
+        frames = self._clock.iter_frames(start_date, end_date, frame_type)
+        if frame_type is FrameType.MONTH:
+            return [
+                frame
+                for frame in frames
+                if (frame.date() if isinstance(frame, datetime.datetime) else frame) >= start_date
+            ]
+        return frames
 
     def _next_open_settings(
         self,
