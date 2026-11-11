@@ -225,8 +225,8 @@ def test_worker_restart_resumes_a_released_task(tmp_path) -> None:
         release.wait()
         return SUCCEEDED
 
-    first = FactorRunWorker(store, stuck, poll_seconds=0.01)
-    second = FactorRunWorker(store, lambda *_: SUCCEEDED, poll_seconds=0.01)
+    first = FactorRunWorker(store, stuck, poll_seconds=0.01, concurrency=1)
+    second = FactorRunWorker(store, lambda *_: SUCCEEDED, poll_seconds=0.01, concurrency=1)
     try:
         first.start()
         assert _wait(lambda: store.get(run_id).status == RUNNING)
