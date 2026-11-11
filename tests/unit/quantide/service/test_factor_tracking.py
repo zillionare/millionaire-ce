@@ -13,6 +13,7 @@ import pytest
 
 from quantide.service import factor_tracking
 from quantide.service.factor_runs import FactorRunStore, RunBudget, RunFence
+from quantide.service.factor_tracking_summary import summary_path, tracking_summary
 
 _DAYS = [dt.date(2024, 1, 2) + dt.timedelta(days=index) for index in range(12)]
 
@@ -653,3 +654,65 @@ def test_invalid_profile_file_falls_back_to_defaults() -> None:
     path.write_text(json.dumps({"bias_5": {"revision": 1}}), encoding="utf-8")
     profile = factor_tracking.load_profile("bias_5")
     assert profile == factor_tracking.default_profile("bias_5")
+
+
+def test_tracking_summary_keeps_overview_fields_only() -> None:
+    current = {
+        "status": "ok",
+        "data_cutoff": "2024-01-13",
+        "computed_at": "2024-01-14T09:00:00",
+        "profile_revision": 0,
+        "profile_hash": "hash-1",
+        "factor_version": "factor-1",
+        "statistics_version": "stats-1",
+        "input_revision": 3,
+        **_source(),
+        "primary_metrics": {
+            "holding_days": 5,
+            "rank_ic": {
+                "mean": 0.12,
+                "t_naive": 2.4,
+                "n_days": 120,
+                "daily_ic": [1, 2, 3],
+            },
+            "deciles": {
+                "d1_mean_common": 0.01,
+                "d10_mean_common": 0.03,
+                "d1_minus_d10": -0.02,
+                "buckets": [{"bucket": 1, "mean_forward": 0.01}],
+            },
+            "diagnostics": {"as_of_date": "2024-01-12", "n_rows": 999},
+        },
+        "common_cohort": {"daily": [1, 2, 3]},
+    }
+    factor_tracking._write_state(
+        "bias_5", {"current": current, "last_attempt": {"status": "succeeded"}}
+    )
+
+    view = tracking_summary(
+        "bias_5",
+        source=_source(),
+        latest_day=dt.date(2024, 1, 13),
+        revision=3,
+    )
+
+    assert view.current is not None
+    assert view.current["primary_metrics"]["rank_ic"] == {
+        "mean": 0.12,
+        "t_naive": 2.4,
+        "n_days": 120,
+    }
+    assert view.current["primary_metrics"]["diagnostics"] == {"as_of_date": "2024-01-12"}
+    assert "common_cohort" not in view.current
+    assert set(view.current["primary_metrics"]) == {
+        "holding_days",
+        "rank_ic",
+        "deciles",
+        "diagnostics",
+    }
+    assert view.status == "normal"
+    summary_file = summary_path(factor_tracking._root(), "bias_5")
+    assert summary_file.exists()
+    assert len(summary_file.read_text(encoding="utf-8")) < len(
+        factor_tracking._state_path("bias_5").read_text(encoding="utf-8")
+    )

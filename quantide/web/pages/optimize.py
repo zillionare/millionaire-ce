@@ -801,7 +801,7 @@ def optimize_page(req: Request, session: SessionData, name: str) -> Any:
             )
         )
     )
-    return layout.render()
+    return layout.render(req)
 
 
 @rt("/{name}/optimize/run", methods=["POST"])

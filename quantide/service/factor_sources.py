@@ -25,40 +25,42 @@ _SOURCE_TTL_SECONDS = 30.0
 _SOURCE_CACHE: tuple[float, dict[str, Any]] | None = None
 
 
+def _dates_index_path() -> Path:
+    from quantide.data.models.daily_bars import daily_bars
+
+    return daily_bars._dates_file_path()
+
+
 def _store_token() -> tuple[float, str] | None:
+    """Use the committed date index instead of walking every partition."""
     try:
         from quantide.data.models.daily_bars import daily_bars
 
         end = daily_bars.end
         if not isinstance(end, datetime.date):
             return None
-        root = Path(daily_bars._store_path)
-        if root.is_file():
-            latest = root.stat().st_mtime_ns
-        elif root.exists():
-            latest = max(
-                (path.stat().st_mtime_ns for path in root.rglob("*.parquet")),
-                default=0,
-            )
-        else:
+        index = _dates_index_path()
+        if not index.is_file():
             return None
-        return (float(latest), end.isoformat())
+        return (float(index.stat().st_mtime_ns), end.isoformat())
     except Exception:
         return None
 
 
 def _market_version(token: tuple[float, str] | None) -> str | None:
-    """Fingerprint the committed daily-bar storage, not a research window."""
+    """Read the storage signature maintained beside the daily date index."""
     if token is None:
         return None
     try:
-        from quantide.data.models.daily_bars import daily_bars
-
-        signature = daily_bars._storage_signature()
+        index = _dates_index_path()
+        marker = index.with_suffix(".signature.json")
+        signature = str(json.loads(marker.read_text(encoding="utf-8")).get("sha256") or "")
+        if marker.stat().st_mtime_ns < index.stat().st_mtime_ns:
+            signature = ""
     except Exception:
-        return None
+        signature = ""
     if not signature:
-        return None
+        signature = f"{token[0]:.0f}"
     return f"{signature}:{token[1]}"
 
 

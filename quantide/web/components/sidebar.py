@@ -44,6 +44,7 @@ def sidebar_component(
             "hx_boost": "true",
             "hx_target": "#layout-main-content",
             "hx_swap": "outerHTML show:none",
+            "hx_select": "#layout-main-content",
             "hx_push_url": "true",
         }
 

@@ -44,6 +44,7 @@ def _nav_link(
                 "hx_get": url,
                 "hx_target": "#layout-main-content",
                 "hx_swap": "outerHTML show:none",
+                "hx_select": "#layout-main-content",
                 "hx_push_url": "true",
             }
         )

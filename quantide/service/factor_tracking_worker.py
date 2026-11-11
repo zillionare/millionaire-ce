@@ -10,12 +10,23 @@ from quantide.factors.metadata import FACTOR_METADATA
 from quantide.service import factor_tracking as ft
 from quantide.service.factor_runs import (
     CANCELLED,
+    SUCCEEDED,
     FactorRun,
     FactorRunStore,
     FactorRunWorker,
     RunBudget,
     RunFence,
 )
+from quantide.service.process_runner import (
+    CANCELLED as PROCESS_CANCELLED,
+)
+from quantide.service.process_runner import (
+    FAILED as PROCESS_FAILED,
+)
+from quantide.service.process_runner import (
+    TIMEOUT as PROCESS_TIMEOUT,
+)
+from quantide.service.process_runner import run_isolated
 from quantide.service.worker_slot import WorkerSlot
 
 BUDGET = RunBudget()
@@ -32,55 +43,62 @@ def run_store() -> FactorRunStore:
         return _STORE
 
 
+def _tracking_target(run: FactorRun) -> dict[str, Any]:
+    """Run the long numeric refresh in a child process, not the web process."""
+    from quantide.config.settings import get_data_home
+    from quantide.data import init_data
+
+    init_data(get_data_home(), init_db=False)
+    factor_ids = list(run.factor_ids)
+    fence = RunFence(run_store(), run.run_id, run.owner)
+    if run.scope == "factor" and len(factor_ids) == 1:
+        state = ft.refresh_factor(factor_ids[0], fence=fence)
+        status = ft._attempt_status(state.get("last_attempt")) or "failed"
+    else:
+        ft._refresh_group(factor_ids, run.lookback, fence=fence)
+        statuses = [
+            ft._attempt_status(ft.load_state(factor_id).get("last_attempt"))
+            for factor_id in factor_ids
+        ]
+        if "cancelled" in statuses or "superseded" in statuses:
+            status = "cancelled"
+        elif "failed" in statuses:
+            status = "failed"
+        elif "insufficient" in statuses:
+            status = "insufficient"
+        else:
+            status = SUCCEEDED
+    return {"status": status, "pending": ft._take_pending(factor_ids)}
+
+
 def _execute_run(
     run: FactorRun,
     cancel: threading.Event,
     checkpoint: Any,
 ) -> str:
     factor_ids = list(run.factor_ids)
-
-    fence = RunFence(run_store(), run.run_id, run.owner)
-
     with ft._REFRESH_LOCK:
         ft._REFRESHING.update(factor_ids)
     try:
         if callable(checkpoint):
             checkpoint("start", {"factors": factor_ids, "lookback": run.lookback})
-        if run.scope == "factor" and len(factor_ids) == 1:
-            state = ft.refresh_factor(
-                factor_ids[0],
-                should_cancel=cancel.is_set,
-                checkpoint=checkpoint,
-                fence=fence,
-            )
-            status = ft._attempt_status(state.get("last_attempt")) or "failed"
-        else:
-            ft._refresh_group(
-                factor_ids,
-                run.lookback,
-                should_cancel=cancel.is_set,
-                checkpoint=checkpoint,
-                fence=fence,
-            )
-            statuses = [
-                ft._attempt_status(ft.load_state(factor_id).get("last_attempt"))
-                for factor_id in factor_ids
-            ]
-            if "cancelled" in statuses or "superseded" in statuses:
-                status = "cancelled"
-            elif "failed" in statuses:
-                status = "failed"
-            elif "insufficient" in statuses:
-                status = "insufficient"
-            else:
-                status = "succeeded"
+        outcome = run_isolated(_tracking_target, run, timeout=BUDGET.max_seconds, cancel=cancel)
+        if outcome.status == PROCESS_TIMEOUT:
+            raise TimeoutError(outcome.error or "factor tracking exceeded its time budget")
+        if outcome.status == PROCESS_FAILED:
+            raise RuntimeError(outcome.error or "factor tracking failed")
+        if outcome.status == PROCESS_CANCELLED or cancel.is_set():
+            return CANCELLED
+        if not isinstance(outcome.value, dict):
+            return "failed"
+        pending = outcome.value.get("pending")
+        if isinstance(pending, list):
+            ft._release_pending([str(factor_id) for factor_id in pending])
+        status = outcome.value.get("status")
+        return status if status in {SUCCEEDED, "failed", "insufficient", CANCELLED} else "failed"
     finally:
         with ft._REFRESH_LOCK:
             ft._REFRESHING.difference_update(factor_ids)
-        ft._release_pending(factor_ids)
-    if cancel.is_set():
-        return CANCELLED
-    return status if status in {"succeeded", "failed", "insufficient"} else "failed"
 
 
 _SLOT = WorkerSlot(

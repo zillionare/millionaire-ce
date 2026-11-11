@@ -9,7 +9,8 @@ import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -138,8 +139,17 @@ class FactorRunStore:
         connection.execute("PRAGMA busy_timeout=30000")
         return connection
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS factor_runs (
@@ -292,7 +302,7 @@ class FactorRunStore:
                 }
             )
             stamp = (now or market_now()).isoformat()
-            with self._connect() as connection:
+            with self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 active = connection.execute(
                     "SELECT run_id FROM factor_runs WHERE status IN (?, ?) AND idempotency_key = ?",
@@ -336,7 +346,7 @@ class FactorRunStore:
                 raise ValueError("task requires at least one factor")
             key = idempotency_key({"scope": scope, "factors": factors, "payload": payload})
             stamp = (now or market_now()).isoformat()
-            with self._connect() as connection:
+            with self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 existing = connection.execute(
                     "SELECT run_id FROM factor_runs WHERE idempotency_key = ? AND status IN (?, ?)",
@@ -360,7 +370,7 @@ class FactorRunStore:
             return run_id
 
     def set_result(self, run_id: str, result: dict[str, Any], *, owner: str) -> bool:
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE factor_runs SET result = ? "
                 "WHERE run_id = ? AND owner = ? AND status = ? AND lease_until > ?",
@@ -370,7 +380,7 @@ class FactorRunStore:
             return cursor.rowcount > 0
 
     def get(self, run_id: str) -> FactorRun | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM factor_runs WHERE run_id = ?", (run_id,)
             ).fetchone()
@@ -387,7 +397,7 @@ class FactorRunStore:
         with self._fence():
             stamp = (now or market_now()).isoformat()
             now_seconds = time.time()
-            with self._connect() as connection:
+            with self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     "UPDATE factor_runs SET status = ?, owner = '', lease_until = 0 "
@@ -448,7 +458,7 @@ class FactorRunStore:
         checkpoint: dict[str, Any],
         lease_seconds: float,
     ) -> bool:
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE factor_runs SET phase = ?, checkpoint = ?, lease_until = ? "
                 "WHERE run_id = ? AND owner = ? AND status = ?",
@@ -466,7 +476,7 @@ class FactorRunStore:
 
     def owns(self, run_id: str, owner: str) -> bool:
         """Return whether this owner still holds an uncancelled, unexpired lease."""
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT 1 FROM factor_runs WHERE run_id = ? AND owner = ? AND status = ? "
                 "AND lease_until > ? AND cancel_requested = 0",
@@ -475,7 +485,7 @@ class FactorRunStore:
         return row is not None
 
     def touch(self, run_id: str, owner: str, lease_seconds: float) -> bool:
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE factor_runs SET lease_until = ? "
                 "WHERE run_id = ? AND owner = ? AND status = ?",
@@ -487,7 +497,7 @@ class FactorRunStore:
     def finish(self, run_id: str, owner: str, status: str, error: str = "") -> bool:
         if status not in TERMINAL:
             raise ValueError("invalid terminal run status")
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE factor_runs SET status = ?, error = ?, finished_at = ? "
                 "WHERE run_id = ? AND owner = ? AND status = ? AND lease_until > ?",
@@ -507,7 +517,7 @@ class FactorRunStore:
     def release_owner(self, owner: str) -> int:
         with self._fence():
             """Fence a stopped worker and make its unfinished runs claimable again."""
-            with self._connect() as connection:
+            with self._connection() as connection:
                 cursor = connection.execute(
                     "UPDATE factor_runs SET status = ?, owner = '', lease_until = 0, "
                     "finished_at = '' WHERE owner = ? AND status = ?",
@@ -518,7 +528,7 @@ class FactorRunStore:
 
     def request_cancel(self, run_id: str) -> bool:
         with self._fence():
-            with self._connect() as connection:
+            with self._connection() as connection:
                 pending = connection.execute(
                     "UPDATE factor_runs SET status = ?, finished_at = ? "
                     "WHERE run_id = ? AND status = ?",
@@ -534,7 +544,7 @@ class FactorRunStore:
     def cancel_factors(self, factor_ids: Iterable[str]) -> list[str]:
         targets = set(factor_ids)
         cancelled: list[str] = []
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT run_id, factor_ids FROM factor_runs WHERE status IN (?, ?)",
                 ACTIVE,
@@ -546,7 +556,7 @@ class FactorRunStore:
         return cancelled
 
     def cancelled(self, run_id: str) -> bool:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT cancel_requested FROM factor_runs WHERE run_id = ?", (run_id,)
             ).fetchone()
@@ -554,7 +564,7 @@ class FactorRunStore:
 
     def recover(self) -> int:
         with self._fence():
-            with self._connect() as connection:
+            with self._connection() as connection:
                 cursor = connection.execute(
                     "UPDATE factor_runs SET status = ?, owner = '', lease_until = 0, "
                     "finished_at = '' WHERE status = ? AND lease_until < ?",
@@ -571,7 +581,7 @@ class FactorRunStore:
             parameters = (status,)
         query += " ORDER BY created_at DESC LIMIT ?"
         parameters += (limit,)
-        with self._connect() as connection:
+        with self._connection() as connection:
             return [self._row(row) for row in connection.execute(query, parameters).fetchall()]
 
 

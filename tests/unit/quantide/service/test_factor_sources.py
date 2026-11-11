@@ -80,12 +80,29 @@ def test_source_versions_are_cached_until_refreshed(monkeypatch) -> None:
     assert len(calls) == 2
 
 
-def test_market_version_binds_storage_signature_and_cutoff(monkeypatch) -> None:
-    from quantide.data.models.daily_bars import daily_bars
-
-    monkeypatch.setattr(daily_bars, "_storage_signature", lambda: "sig-1")
+def test_market_version_reads_dates_signature_and_cutoff(monkeypatch, tmp_path) -> None:
+    index = tmp_path / "daily-dates.pq"
+    index.write_bytes(b"")
+    marker = tmp_path / "daily-dates.signature.json"
+    marker.write_text('{"sha256": "sig-1"}', encoding="utf-8")
+    monkeypatch.setattr(factor_sources, "_dates_index_path", lambda: index)
     assert factor_sources._market_version((1.0, "2024-01-13")) == "sig-1:2024-01-13"
+    marker.unlink()
+    assert factor_sources._market_version((2.0, "2024-01-13")) == "2:2024-01-13"
     assert factor_sources._market_version(None) is None
+
+
+def test_store_token_uses_dates_index_instead_of_walking_partitions(monkeypatch, tmp_path) -> None:
+    class _Bars:
+        end = dt.date(2024, 1, 13)
+
+        def _dates_file_path(self):
+            return index
+
+    index = tmp_path / "daily-dates.pq"
+    index.write_bytes(b"")
+    monkeypatch.setattr("quantide.data.models.daily_bars.daily_bars", _Bars())
+    assert factor_sources._store_token() == (float(index.stat().st_mtime_ns), "2024-01-13")
 
 
 def test_latest_market_day_comes_from_the_source_token(monkeypatch) -> None:

@@ -29,6 +29,7 @@ from quantide.factors.research import (
     common_cohort,
     study_horizon,
 )
+from quantide.service import factor_tracking_summary as _summary
 from quantide.service.factor_profiles import (
     PROFILE_LOCK as _PROFILE_LOCK,
 )
@@ -155,9 +156,19 @@ def load_state(factor_id: str) -> dict[str, Any]:
         }
 
 
+def _load_summary_state(factor_id: str) -> dict[str, Any]:
+    with _STATE_LOCK:
+        payload = read_json_dict(_summary.summary_path(_root(), factor_id))
+        if payload.get("version") != _summary.SUMMARY_VERSION:
+            payload = _summary.summary_payload(read_json_dict(_state_path(factor_id)))
+            write_json(_summary.summary_path(_root(), factor_id), payload)
+        return {"current": payload.get("current"), "last_attempt": payload.get("last_attempt")}
+
+
 def _write_state(factor_id: str, state: dict[str, Any]) -> None:
     with _STATE_LOCK:
         write_json(_state_path(factor_id), state)
+        write_json(_summary.summary_path(_root(), factor_id), _summary.summary_payload(state))
 
 
 def is_refreshing(factor_id: str) -> bool:
@@ -866,11 +877,15 @@ def _cancel_group(
         _record_cancelled(profile.factor_id, now, run_id=run_id, started_at=started_at)
 
 
-def _release_pending(factor_ids: list[str]) -> None:
+def _take_pending(factor_ids: list[str]) -> list[str]:
     with _REFRESH_LOCK:
         pending = [factor_id for factor_id in factor_ids if factor_id in _PENDING_REFRESH]
         _PENDING_REFRESH.difference_update(pending)
-    for factor_id in pending:
+    return pending
+
+
+def _release_pending(factor_ids: list[str]) -> None:
+    for factor_id in _take_pending(factor_ids):
         trigger_refresh(factor_id)
 
 
@@ -921,6 +936,15 @@ def _needs_backfill() -> bool:
     return False
 
 
+def _warm_summaries() -> None:
+    """Migrate large snapshots to compact overview files before serving."""
+    for factor_id in FACTOR_METADATA:
+        try:
+            _load_summary_state(factor_id)
+        except Exception as exc:
+            logger.warning("因子跟踪摘要预热失败 {}: {}", factor_id, exc)
+
+
 def _startup_catch_up() -> None:
     try:
         _recover_interrupted()
@@ -954,6 +978,7 @@ class FactorTrackingService:
         from quantide.service.factor_study_worker import ensure_worker as ensure_study_worker
         from quantide.service.factor_tracking_worker import ensure_worker
 
+        _warm_summaries()
         ensure_worker()
         ensure_study_worker()
         if recover:

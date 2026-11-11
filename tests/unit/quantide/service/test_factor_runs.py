@@ -14,11 +14,14 @@ from quantide.service.factor_runs import (
     PENDING,
     RUNNING,
     SUCCEEDED,
+    FactorRun,
     FactorRunStore,
     FactorRunWorker,
     RunBudget,
     _heartbeat_loop,
 )
+from quantide.service.process_runner import SUCCEEDED as PROCESS_SUCCEEDED
+from quantide.service.process_runner import ProcessOutcome
 
 
 @pytest.fixture(autouse=True)
@@ -281,3 +284,47 @@ def test_expired_lease_requeues_with_remaining_attempts(tmp_path) -> None:
         connection.execute("UPDATE factor_runs SET lease_until = 0 WHERE run_id = ?", (run_id,))
     assert store.claim("owner-c", budget=budget) is None
     assert store.get(run_id).status == INTERRUPTED
+
+
+def test_store_closes_each_connection(tmp_path, monkeypatch) -> None:
+    store = _store(tmp_path)
+    opened: list[sqlite3.Connection] = []
+    original_connect = store._connect
+
+    def tracking_connect() -> sqlite3.Connection:
+        connection = original_connect()
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(store, "_connect", tracking_connect)
+    store.list_runs()
+    assert opened
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_tracking_executor_runs_in_isolation(monkeypatch) -> None:
+    from quantide.service import factor_tracking_worker
+
+    run = FactorRun(
+        run_id="run-1",
+        idempotency_key="key-1",
+        scope="factor",
+        factor_ids=("bias_5",),
+        lookback="3y",
+        status=PENDING,
+        owner="worker-1",
+        phase="pending",
+    )
+    calls = []
+
+    def fake_run_isolated(target, *args, **kwargs):
+        calls.append((target, args, kwargs))
+        return ProcessOutcome(PROCESS_SUCCEEDED, {"status": "succeeded", "pending": []})
+
+    monkeypatch.setattr(factor_tracking_worker, "run_isolated", fake_run_isolated)
+    assert factor_tracking_worker._execute_run(run, threading.Event(), None) == "succeeded"
+    assert calls
+    assert calls[0][0] is factor_tracking_worker._tracking_target
+    assert calls[0][1] == (run,)

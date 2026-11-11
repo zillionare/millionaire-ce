@@ -250,7 +250,7 @@ def backtest_result(req: Request, session: SessionData, portfolio_id: str) -> An
         trade_page_param = 1
     _render_backtest_report(query_params, portfolio_id, active_tab, layout, trade_page_param)
 
-    return layout.render()
+    return layout.render(req)
 
 
 REPORT_METRICS = [

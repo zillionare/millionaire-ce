@@ -48,6 +48,8 @@ def test_top_factor_tab_htmx_returns_main_oob_sidebar_header_and_title():
     assert 'id="page-title"' in text
     assert 'hx-get="/strategy"' in text
     assert 'hx-target="#layout-main-content"' in text
+    assert 'hx-select="#layout-main-content"' in text
+    assert 'flex flex-col min-h-screen' not in text
     assert "<!doctype" not in text.lower()
 
 
@@ -63,4 +65,5 @@ def test_top_strategy_tab_htmx_returns_header_oob():
     assert 'id="layout-main-content"' in text
     assert 'id="layout-header"' in text
     assert 'hx-get="/factors"' in text
+    assert 'flex flex-col min-h-screen' not in text
     assert "<!doctype" not in text.lower()

@@ -568,7 +568,7 @@ def index(req: Request, session: SessionData) -> Any:
         )
     )
 
-    return layout.render()
+    return layout.render(req)
 
 
 @rt("/{name}")
@@ -661,7 +661,7 @@ def strategy_detail(req: Request, session: SessionData, name: str) -> Any:
         )
     )
 
-    return layout.render()
+    return layout.render(req)
 
 
 def _backtest_form_values(

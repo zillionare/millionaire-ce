@@ -63,6 +63,7 @@ from quantide.service.factor_tracking import (
     trigger_refresh,
     trigger_refresh_all,
 )
+from quantide.service.factor_tracking_summary import tracking_summaries
 from quantide.web.application import fast_app
 from quantide.web.layouts.main import MainLayout
 from quantide.web.pages.factors_custom import custom_form as _custom_form
@@ -675,8 +676,9 @@ def index(req: Request) -> Any:
             for item in definitions
             if query in item.factor_id.lower() or query in item.display_name.lower()
         ]
+    summaries = tracking_summaries([item.factor_id for item in definitions])
     entries = _sort_entries(
-        [(item, tracking_view(item.factor_id)) for item in definitions],
+        [(item, summaries[item.factor_id]) for item in definitions],
         sort_key,
         sort_dir,
     )
