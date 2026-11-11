@@ -550,11 +550,9 @@ class MainLayout(BaseLayout):
 
         accounts, active_account = self._resolve_accounts()
         alert_context = self._build_alert_context()
-        from quantide.web.theme import AppTheme
 
         return (
             Title(self.title),
-            *AppTheme.headers(),
             Div(
                 header_component(
                     logo="/static/logo.png",

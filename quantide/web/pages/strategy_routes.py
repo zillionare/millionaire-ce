@@ -4,8 +4,9 @@ from fasthtml.common import *
 from monsterui.all import *
 
 from quantide.web.application import fast_app
+from quantide.web.theme import AppTheme
 
-strategy_app, rt = fast_app()
+strategy_app, rt = fast_app(hdrs=AppTheme.headers())
 
 
 BENCHMARK_ASSET = "000300.SH"

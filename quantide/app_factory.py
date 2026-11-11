@@ -14,11 +14,7 @@ from fasthtml.common import Mount, Route
 from fasthtml.core import FastHTML
 from loguru import logger
 
-# fasthtml 默认注入 htmx@2.0.7；AppTheme.headers() 又显式注入了 htmx@1.9.12。
-# 两个版本同时加载会让同一份 hx-* 属性被两套监听器重复绑定，浏览器侧触发
-# ``htmx:afterRequest``/``htmx:sendAbort`` 互相打断死循环（用户报告：点击
-# “实盘”进入 /trade 后整页 frozen）。把 fasthtml 的默认 htmx URL 改到 1.9.12，
-# 两份就是同源，浏览器会自动去重，冲突消失。
+# 统一使用 1.9.12，避免 fasthtml 默认版本与页面依赖行为不一致。
 _fasthtml_core.htmxsrc = _fasthtml_core.Script(src="https://unpkg.com/htmx.org@1.9.12")
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware

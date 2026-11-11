@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fasthtml.common import Script, Style
+from fasthtml.common import Style
 from monsterui.all import Theme
 
 from quantide.web.design_system import (
@@ -63,10 +63,7 @@ class AppTheme:
             #layout-sidebar summary::after { content: none !important; display: none !important; }
         """)
 
-        # HTMX
-        htmx_script = Script(src="https://unpkg.com/htmx.org@1.9.12")
-
-        return list(base_headers) + [design_css, override_css, htmx_script]
+        return list(base_headers) + [design_css, override_css]
 
 
 __all__ = ["AppTheme"]
