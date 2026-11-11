@@ -15,6 +15,6 @@ def test_primary_pages_include_shared_assets_once(path: str) -> None:
     assert response.status_code == 200
     html = response.text
     assert html.count("cdn.tailwindcss.com") == 1
-    assert html.count("unpkg.com/htmx.org") == 1
+    assert html.count("htmx.org") == 1
     assert html.count("franken-ui@2.0.0/dist/css/core.min.css") == 1
     assert html.count("--brand: #e41815") == 1
