@@ -59,6 +59,7 @@ from quantide.web.pages.strategy_trade_report import (
 )
 from quantide.web.session_data import SessionData
 from quantide.web.template_assets import render_asset
+from quantide.web.theme import ECHARTS_SRC
 
 
 def _trade_and_position_tables(
@@ -138,7 +139,7 @@ def _render_backtest_report(
     }[active_tab]
     layout.set_main_block(
         lambda: Div(
-            Script(src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"),
+            Script(src=ECHARTS_SRC),
             Div(
                 Div(
                     A(

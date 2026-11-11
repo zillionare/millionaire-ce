@@ -4,13 +4,36 @@ import secrets
 from collections.abc import Callable
 from typing import Any, Protocol, TypeVar, overload
 
+from fasthtml import common as _fasthtml_common
+from fasthtml import core as _fasthtml_core
+from fasthtml import fastapp as _fasthtml_fastapp
+from fasthtml.common import Link, Script, Style
 from fasthtml.common import fast_app as _fast_app
 from filelock import FileLock
 
 from quantide.config.paths import ensure_app_config_dir
 from quantide.core.atomic_files import atomic_path
+from quantide.web.theme import VENDOR_PREFIX
 
 _Handler = TypeVar("_Handler", bound=Callable[..., Any])
+
+
+def _use_local_default_headers() -> None:
+    """Replace FastHTML's CDN defaults before any application is created."""
+    for module in (_fasthtml_core, _fasthtml_common):
+        module.htmxsrc = Script(src=f"{VENDOR_PREFIX}/htmx-1.9.12.min.js")
+        module.fhjsscr = Script(src=f"{VENDOR_PREFIX}/fasthtml-1.0.12.js")
+        module.surrsrc = Script(src=f"{VENDOR_PREFIX}/surreal.js")
+        module.scopesrc = Script(src=f"{VENDOR_PREFIX}/css-scope-inline.js")
+    picolink = (
+        Link(rel="stylesheet", href=f"{VENDOR_PREFIX}/pico-2.1.1.min.css"),
+        Style(":root { --pico-font-size: 100%; }"),
+    )
+    _fasthtml_common.picolink = picolink
+    _fasthtml_fastapp.picolink = picolink
+
+
+_use_local_default_headers()
 
 
 class _RouteDecorator(Protocol):

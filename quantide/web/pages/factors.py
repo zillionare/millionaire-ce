@@ -107,7 +107,7 @@ from quantide.web.pages.factors_ui import (
 from quantide.web.pages.factors_ui import (
     status_badge as _status_badge,
 )
-from quantide.web.theme import AppTheme
+from quantide.web.theme import ECHARTS_SRC, AppTheme
 
 factor_app, rt = fast_app(hdrs=AppTheme.headers())
 
@@ -547,7 +547,7 @@ def _report_tab(
         ),
         _report_details(rows, primary.get("daily_ic") or []),
         _reading_guide(),
-        Script(src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"),
+        Script(src=ECHARTS_SRC),
         Script(_chart_script(meta.factor_id, current)),
     )
 

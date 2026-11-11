@@ -30,7 +30,7 @@ from starlette.responses import HTMLResponse, RedirectResponse
 from quantide.service.strategy_tracking import tracking_store
 from quantide.web.application import fast_app
 from quantide.web.layouts.main import MainLayout
-from quantide.web.theme import AppTheme
+from quantide.web.theme import ECHARTS_SRC, AppTheme
 
 tracking_app, rt = fast_app(hdrs=AppTheme.headers())
 
@@ -155,7 +155,7 @@ def tracking_page(req: Request) -> Any:
         Div(
             summary,
             Div(id=f"tracking_chart_{portfolio_id}", cls="mt-4 h-[320px] w-full"),
-            Script(src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"),
+            Script(src=ECHARTS_SRC),
             chart_script,
             Div(
                 Table(

@@ -266,8 +266,8 @@ SIDEBAR_MENUS: dict[str, list[dict[str, Any]]] = {
 }
 
 STATIC_HEADER_ITEMS: list[dict[str, object]] = [
-    {"title": "因子", "url": "/factors"},
-    {"title": "策略", "url": "/strategy"},
+    {"title": "因子", "url": "/factors", "boost": True},
+    {"title": "策略", "url": "/strategy", "boost": True},
     {"title": "系统维护", "url": "/system"},
     {"title": "实盘", "url": "/trade/live/"},
 ]
@@ -506,8 +506,17 @@ class MainLayout(BaseLayout):
         """Render the default page body; subclasses may extend it via super()."""
         return Div(H1(self.title), P("这是页面的主要内容区域。"), cls="p-4")
 
-    def _fragment_navigation_enabled(self) -> bool:
-        return self._resolve_header_active() == "系统维护"
+    @staticmethod
+    def _request_path(req: Request | None) -> str:
+        url = getattr(req, "url", None)
+        return str(getattr(url, "path", "") or "")
+
+    def _top_tab_navigation(self, req: Request | None) -> bool:
+        path = self._request_path(req)
+        return path.startswith("/factors") or path.startswith("/strategy")
+
+    def _fragment_navigation_enabled(self, req: Request | None = None) -> bool:
+        return self._resolve_header_active() == "系统维护" or self._top_tab_navigation(req)
 
     def _resolve_main_content(self) -> Any:
         override = self._main_block_override
@@ -536,37 +545,46 @@ class MainLayout(BaseLayout):
             search_placeholder=self.sidebar_search,
         )
 
+    def _build_header(self, req: Request | None, *, hx_swap_oob: bool = False) -> Any:
+        accounts, active_account = self._resolve_accounts()
+        alert_context = self._build_alert_context()
+        return header_component(
+            logo="/static/logo.png",
+            brand=get_branding().product_name,
+            nav_items=build_header_menu(self._trade_entries_enabled(), req=req),
+            user=self.user,
+            accounts=accounts,
+            active_account=active_account,
+            active_title=self._resolve_header_active(),
+            unread_count=int(alert_context["unread_count"]),
+            risk_summary=alert_context["risk_summary"],
+            recent_risk_events=alert_context["recent_risk_events"],
+            runtime_summary=alert_context["runtime_summary"],
+            hx_swap_oob=hx_swap_oob,
+        )
+
     def render(self, req: Request | None = None) -> Any:
         """渲染主页面。"""
-        fragment_navigation_enabled = self._fragment_navigation_enabled()
+        fragment_navigation_enabled = self._fragment_navigation_enabled(req)
         if _is_htmx_request(req) and fragment_navigation_enabled:
-            return (
+            fragments: tuple[Any, ...] = (
                 self._build_main_container(),
                 self._build_sidebar(
                     fragment_navigation_enabled=fragment_navigation_enabled,
                     hx_swap_oob=True,
                 ),
             )
-
-        accounts, active_account = self._resolve_accounts()
-        alert_context = self._build_alert_context()
+            if self._top_tab_navigation(req):
+                fragments += (
+                    Title(self.title, id="page-title", hx_swap_oob="true"),
+                    self._build_header(req, hx_swap_oob=True),
+                )
+            return fragments
 
         return (
-            Title(self.title),
+            Title(self.title, id="page-title"),
             Div(
-                header_component(
-                    logo="/static/logo.png",
-                    brand=get_branding().product_name,
-                    nav_items=build_header_menu(self._trade_entries_enabled(), req=req),
-                    user=self.user,
-                    accounts=accounts,
-                    active_account=active_account,
-                    active_title=self._resolve_header_active(),
-                    unread_count=int(alert_context["unread_count"]),
-                    risk_summary=alert_context["risk_summary"],
-                    recent_risk_events=alert_context["recent_risk_events"],
-                    runtime_summary=alert_context["runtime_summary"],
-                ),
+                self._build_header(req),
                 Div(
                     self._build_sidebar(
                         fragment_navigation_enabled=fragment_navigation_enabled,

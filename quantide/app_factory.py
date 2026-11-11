@@ -1,6 +1,7 @@
 """Application factory for Quantide."""
 
-# Import order is intentional: htmx is configured before page modules load.
+# Import order is intentional: local asset headers are configured before page
+# modules load.
 # ruff: noqa: E402
 
 from __future__ import annotations
@@ -9,13 +10,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fasthtml import core as _fasthtml_core
 from fasthtml.common import Mount, Route
 from fasthtml.core import FastHTML
 from loguru import logger
-
-# 统一使用 1.9.12，避免 fasthtml 默认版本与页面依赖行为不一致。
-_fasthtml_core.htmxsrc = _fasthtml_core.Script(src="https://unpkg.com/htmx.org@1.9.12")
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request

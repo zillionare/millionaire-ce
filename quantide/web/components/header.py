@@ -38,6 +38,16 @@ def _nav_link(
     attrs: dict[str, Any] = {}
     display_text = str(item.get("label_override") or title)
 
+    if item.get("boost"):
+        attrs.update(
+            {
+                "hx_get": url,
+                "hx_target": "#layout-main-content",
+                "hx_swap": "outerHTML show:none",
+                "hx_push_url": "true",
+            }
+        )
+
     if children:
         menu_id = f"header-menu-{index}"
         return Div(
@@ -343,6 +353,7 @@ def header_component(
     risk_summary: dict[str, int] | None = None,
     recent_risk_events: list[dict[str, Any]] | None = None,
     runtime_summary: dict[str, int] | None = None,
+    hx_swap_oob: bool = False,
 ) -> Any:
     """构建主导航栏。
 
@@ -435,6 +446,8 @@ def header_component(
         ),
         Div(id="global-reset-password-modal-container"),
         _header_script(),
+        id="layout-header",
+        **({"hx_swap_oob": "true"} if hx_swap_oob else {}),
         cls=(
             "sticky top-0 z-50 h-16 border-b border-black/5 bg-white "
             "shadow-[0_4px_15px_rgba(0,0,0,0.1)]"

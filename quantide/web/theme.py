@@ -20,6 +20,17 @@ from quantide.web.design_system import (
     DesignSystem,
 )
 
+VENDOR_PREFIX = "/static/vendor"
+ECHARTS_SRC = f"{VENDOR_PREFIX}/echarts-5.4.3.min.js"
+LIGHTWEIGHT_CHARTS_SRC = f"{VENDOR_PREFIX}/lightweight-charts-4.1.0.standalone.production.js"
+LOCAL_HEADER_URLS = {
+    "franken_css": f"{VENDOR_PREFIX}/franken-ui-2.0.0-core.min.css",
+    "franken_js_core": f"{VENDOR_PREFIX}/franken-ui-2.0.0-core.iife.js",
+    "franken_icons": f"{VENDOR_PREFIX}/franken-ui-2.0.0-icon.iife.js",
+    "tailwind": f"{VENDOR_PREFIX}/tailwindcss-3.4.17.js",
+    "daisyui": f"{VENDOR_PREFIX}/daisyui-4.12.24-full.min.css",
+}
+
 #: 兼容旧代码从 theme 直接导入
 PRIMARY_COLOR = BRAND
 PRIMARY_DARK = BRAND_DARK
@@ -35,8 +46,9 @@ class AppTheme:
     @staticmethod
     def headers() -> list[Any]:
         """获取主题 headers（CSS 和脚本）"""
-        # 使用 monsterui 默认主题（黑白灰），禁用 Theme.red 的红色渐变背景
-        base_headers = Theme.neutral.headers()
+        # 使用 monsterui 默认主题（黑白灰），禁用 Theme.red 的红色渐变背景。
+        # 资源全部指向本地固定版本，避免页面切换依赖外部 CDN。
+        base_headers = Theme.neutral._create_headers(LOCAL_HEADER_URLS)
 
         # 设计系统全局样式（黑白灰 + 品牌红强调）
         design_css = DesignSystem.css()

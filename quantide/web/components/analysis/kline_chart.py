@@ -8,6 +8,8 @@ from fasthtml.common import (
     Script,
 )
 
+from quantide.web.theme import LIGHTWEIGHT_CHARTS_SRC
+
 
 class KlineChart:
     """K线图组件
@@ -183,10 +185,7 @@ class KlineChart:
 
     def render(self) -> FT:
         """渲染组件"""
-        # Lightweight Charts CDN
-        chart_lib = Script(
-            src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"
-        )
+        chart_lib = Script(src=LIGHTWEIGHT_CHARTS_SRC)
 
         # 图表容器
         chart_container = Div(

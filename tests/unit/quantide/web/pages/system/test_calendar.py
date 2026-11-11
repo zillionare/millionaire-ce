@@ -55,7 +55,7 @@ class TestCalendarPage:
     def test_calendar_has_layout(self, client):
         """页面包含布局元素（header, sidebar）"""
         resp = client.get("/system/calendar/", follow_redirects=True)
-        assert "<title>" in resp.text.lower()
+        assert '<title id="page-title">' in resp.text
         assert "<nav" in resp.text.lower()
         assert "<aside" in resp.text.lower()
 
