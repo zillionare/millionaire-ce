@@ -642,7 +642,7 @@ def _build_backtest_footer(name: str, supports_feature_selection: bool) -> list[
         Button(
             "开始运行",
             type="button",
-            cls="btn btn-primary",
+            cls="q-btn",
             onclick="this.disabled=true;this.setAttribute('aria-busy','true');this.textContent='启动中...';",
             hx_post=f"/strategy/{name}/backtest/run",
             hx_target="#modal-container",
