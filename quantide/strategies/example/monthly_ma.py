@@ -28,8 +28,9 @@ class MonthlyMAStrategy(BaseStrategy):
     BAR_INTERVAL = "1M"
     VERSION = "1.0.0"
     fill_timing = "next_open"
+    HISTORY_TRADING_DAYS = 800
     PARAMS: dict[str, Any] = {
-        "signal_asset": "000001.SH",
+        "signal_asset": "000001.SZ",
         "invest_amount": 100_000,
         "short_window": 3,
         "long_window": 12,
@@ -53,7 +54,7 @@ class MonthlyMAStrategy(BaseStrategy):
             raise ValueError("MonthlyMAStrategy only supports the 1M interval")
         if int(config.get("short_window", 3)) != 3 or int(config.get("long_window", 12)) != 12:
             raise ValueError("MonthlyMAStrategy windows are fixed at 3/12 months")
-        self.asset = str(config.get("signal_asset", "000001.SH"))
+        self.asset = str(config.get("signal_asset", "000001.SZ"))
         self.invest_amount = float(config.get("invest_amount", 100_000))
         kind = getattr(broker, "kind", "")
         kind_value = str(getattr(kind, "value", kind))
@@ -79,6 +80,7 @@ class MonthlyMAStrategy(BaseStrategy):
         )
         self._store = store or monthly_intent_store
         self._history_loader = history_loader or self._daily_history
+        self._history_warned = False
 
     async def init(self) -> None:
         self.log(f"MonthlyMAStrategy initialized for {self.asset} (3/12 months)")
@@ -89,14 +91,25 @@ class MonthlyMAStrategy(BaseStrategy):
         await self._execute_due(day)
         if isinstance(tm, datetime.datetime) and tm.time() < datetime.time(15):
             return
-        days = tuple(calendar.get_trade_dates(calendar.day_shift(day, -420), day))
+        days = tuple(
+            calendar.get_trade_dates(calendar.day_shift(day, -self.HISTORY_TRADING_DAYS), day)
+        )
         if not days or days[-1] != day:
             return
         full_days = tuple(
-            calendar.get_trade_dates(calendar.day_shift(day, -420), calendar.day_shift(day, 40))
+            calendar.get_trade_dates(
+                calendar.day_shift(day, -self.HISTORY_TRADING_DAYS),
+                calendar.day_shift(day, 40),
+            )
         )
         daily = self._history_loader(day)
         if daily.is_empty():
+            if not self._history_warned:
+                self.log(
+                    f"No daily bars for {self.asset}; check signal_asset",
+                    level="WARNING",
+                )
+                self._history_warned = True
             return
         series = aggregate_monthly(daily, full_days, as_of=day)
         asset_series = series.get(self.asset)
@@ -110,6 +123,9 @@ class MonthlyMAStrategy(BaseStrategy):
         if self._store.seen(key):
             return
         shares = position_shares(self.broker, self.asset) if signal.direction == "sell" else 0
+        if signal.direction == "sell" and shares <= 0:
+            self.log(f"sell {self.asset} at {signal.signal_date} ignored: no position")
+            return
         intent = {
             "key": key,
             "order_id": f"monthly:{key}",
@@ -134,6 +150,12 @@ class MonthlyMAStrategy(BaseStrategy):
         )
 
     async def _submit(self, intent: dict[str, Any], day: datetime.date) -> None:
+        if (
+            intent["direction"] == "sell"
+            and position_shares(self.broker, str(intent["asset"])) <= 0
+        ):
+            self._store.complete(str(intent["key"]))
+            return
         execute_date = max(datetime.date.fromisoformat(str(intent["execute_date"])), day)
         order_time = datetime.datetime.combine(
             execute_date, datetime.time(9, 30), tzinfo=get_timezone()
@@ -154,7 +176,7 @@ class MonthlyMAStrategy(BaseStrategy):
     def _daily_history(self, day: datetime.date) -> Any:
         from quantide.data.models.daily_bars import daily_bars
 
-        start = calendar.day_shift(day, -500)
+        start = calendar.day_shift(day, -self.HISTORY_TRADING_DAYS)
         return daily_bars.get_bars_in_range(
             start, day, assets=[self.asset], adjust=None, eager_mode=True
         )

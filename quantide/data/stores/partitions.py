@@ -180,6 +180,8 @@ class PartitionOperations:
         if self._partition_by == "partition_key_year":
             return v.year if v is not None else None
         elif self._partition_by == "partition_key_month":
+            if self._partition_levels and len(self._partition_levels) > 1:
+                return v.month if v is not None else None
             return v.strftime("%Y-%m") if v is not None else None
         elif self._partition_by == "partition_key_day":
             return v.strftime("%Y-%m-%d") if v is not None else None

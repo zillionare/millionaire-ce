@@ -114,6 +114,19 @@ def test_cross_requires_thirteen_closed_months_and_executes_next_day() -> None:
     assert signals[-1].execute_date == dt.date(2024, 1, 29)
 
 
+def test_strategy_defaults_to_a_tradable_stock_asset() -> None:
+    class _Broker:
+        portfolio_id = "p"
+
+        @property
+        def positions(self):
+            return {}
+
+    strategy = MonthlyMAStrategy(_Broker(), {})
+
+    assert strategy.asset == "000001.SZ"
+
+
 def test_strategy_rejects_interval_override_and_fixed_windows() -> None:
     class _Broker:
         portfolio_id = "p"
@@ -285,6 +298,27 @@ async def test_strategy_defers_to_next_session_and_recovery_is_idempotent(tmp_pa
         assert len(broker.calls) == 2
     finally:
         monkeypatch.undo()
+
+
+@pytest.mark.asyncio
+async def test_sell_intent_without_position_is_completed(tmp_path) -> None:
+    class _Broker:
+        portfolio_id = "p"
+        positions: dict[str, object] = {}
+
+    store = MonthlyIntentStore(tmp_path / "intents.json")
+    strategy = MonthlyMAStrategy(_Broker(), {"signal_asset": "A"}, store=store)
+    intent = {
+        "key": "stale-sell",
+        "asset": "A",
+        "direction": "sell",
+        "execute_date": "2024-01-02",
+    }
+    store.enqueue(intent)
+
+    await strategy._submit(intent, dt.date(2024, 1, 2))
+
+    assert store.pending() == []
 
 
 def test_monthly_history_uses_future_calendar_to_keep_midmonth_forming(monkeypatch) -> None:
