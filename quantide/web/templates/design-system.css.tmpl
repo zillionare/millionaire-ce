@@ -238,7 +238,7 @@
     }
     .backtest-dialog__header {
       display: flex; align-items: center; flex-wrap: wrap; flex-shrink: 0;
-      padding: 14px 20px; border-bottom: 1px solid var(--border);
+      padding: 14px 20px; border-bottom: 1px solid var(--brand);
     }
     .backtest-dialog__header h3 { margin: 0; overflow-wrap: anywhere; }
     .backtest-dialog__form { display: flex; flex: 1; flex-direction: column; min-height: 0; margin: 0; }
@@ -247,7 +247,13 @@
       display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px;
       flex-shrink: 0; padding: 10px 20px; border-top: 1px solid var(--border);
     }
-    .backtest-dialog__footer button { margin: 0; }
+    .backtest-dialog__footer button {
+      box-sizing: border-box;
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 36px !important; min-height: 36px !important;
+      margin: 0; padding: 0 12px !important;
+      line-height: 1 !important; text-align: center;
+    }
 
     /* ---------------- 面包屑 ---------------- */
     .q-breadcrumb { display: flex; align-items: center; gap: var(--space-2); font-size: 14px; color: var(--fg-muted); }
