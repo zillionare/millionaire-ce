@@ -2,8 +2,10 @@
 
 The source-tree package is the Community Edition (CE), distributed as
 `millionaire-ce` and identified at runtime as the `millionaire-ce` edition.
-Shared adapter boundaries may also be used by a separately maintained private
-edition; that edition is outside this package and can still enable live
+The product name `millionaire` covers both CE and `millionaire pro`. Pro-only
+features are explicitly named as such in product documentation.
+Shared adapter boundaries may also be used by the separately maintained
+millionaire pro edition; that edition is outside this package and can enable live
 trading through the edition gate.
 
 ## CE behavior
@@ -20,7 +22,9 @@ trading through the edition gate.
   gateway fields cannot enable a live gateway in CE.
 - Paper/simulation accounts and strategy runtimes remain available after
   initialization. Their quotes continue to come from `MarketDataHub`,
-  including the existing Tencent quote publisher path.
+  including explicitly enabled user quote extensions or the single, fixed 30-day
+  Tencent demonstration. Tencent is disabled by default and cannot be renewed
+  after expiry.
 - A persisted `live` runtime mode is not resumed: persisted live strategy
   runtimes are marked `status=blocked`, with `block_scope=edition`, and the
   gateway broker is never started. Generic gateway and live adapter modules
@@ -38,11 +42,12 @@ The edition gate is implemented in `quantide.config.features`; use
 `supports_live_trading()` or `require_live_trading()` at application/runtime
 boundaries instead of deleting shared gateway internals.
 
-## Private-edition contract tests
+## Pro-edition contract tests
 
 Gateway adapter and private live-runtime internals remain testable in the
 shared source tree, but those tests must explicitly enable the development
-edition override:
+edition override. The existing internal edition identifier and test marker are
+compatibility contracts and retain their current spelling:
 
 ```bash
 QUANTIDE_ENABLE_EDITION_OVERRIDE=1 \

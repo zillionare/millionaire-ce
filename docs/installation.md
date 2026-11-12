@@ -1,12 +1,11 @@
-# Installation
+# 源码安装（开发者）
 
-This page describes the current Community Edition (CE) local setup. It is a
-developer setup and a first pass at an installation contract; native Windows,
-macOS, and Linux installers are not part of this release groundwork.
+End users should use the [native installers and service controller](native-installation.md).
+This page describes source-checkout installation for contributors.
 
 ## Requirements
 
-- Python 3.13 or newer
+- Python 3.13 (the supported development and CI version)
 - A local Python virtual environment
 - Network access to install the Python dependencies
 
@@ -35,7 +34,7 @@ Install them explicitly when needed:
 python3 scripts/install.py --ml30m
 ```
 
-The equivalent package extra is `ml30m` (`lightgbm` and `baostock`). With an
+The equivalent package extra is `ml30m` (`lightgbm` and `scikit-learn`). With an
 already active environment, the package form is:
 
 ```bash
@@ -95,30 +94,16 @@ administrator-password step creates or updates the `admin` account. Until that
 step is completed, login is unavailable, and no `admin`/`admin123` account is
 created by default.
 
-The bundled launch paths bind to `127.0.0.1` by default. Set `--host` or
-`QUANTIDE_HOST` explicitly to expose the UI on another interface. A persisted
-non-localhost `app_host` remains honored by settings consumers; it is not
-silently rewritten to localhost.
+The listener defaults to `127.0.0.1:8130`. The wizard's saved address and port
+take effect when the service restarts. Administrators can change them later at
+System Maintenance → System Settings → Service Access. Explicit `--host` and
+`--port` arguments or `QUANTIDE_HOST` and `QUANTIDE_PORT` override saved values.
 
-## Service-manager hook
+## Background service
 
-The supported service-manager boundary is the same foreground command used
-above. A service manager should invoke the environment's Python executable,
-set its working directory to the checkout, and use a persistent data/config
-directory appropriate for the host. For example, a systemd unit can use:
-
-```ini
-[Service]
-WorkingDirectory=/srv/millionaire
-ExecStart=/srv/millionaire/.venv/bin/python /srv/millionaire/scripts/serve.py
-Restart=on-failure
-Environment=QUANTIDE_HOST=127.0.0.1
-Environment=QUANTIDE_PORT=8000
-```
-
-Windows Task Scheduler, launchd, and other supervisors can use the analogous
-`.venv` Python command. No OS-specific service registration or native
-installer is claimed by this repository yet.
+Standalone installations use native launchd, systemd or Windows services and a separate
+foreground controller. See [native installation](native-installation.md) for installation,
+upgrade, data locations and service commands. Source-checkout development runs in the foreground.
 
 ## Release artifact check
 
@@ -126,7 +111,7 @@ Build and inspect both release formats before publishing:
 
 ```bash
 poetry build
-python3 scripts/validate_release_artifacts.py dist
+python -m scripts.validate_release_artifacts
 ```
 
 The validation rejects the private risk source names (including the

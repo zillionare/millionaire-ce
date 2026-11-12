@@ -3,7 +3,8 @@
 CE retains the generic `RiskStrategy` contract and the broker-level
 backtest-risk-overlay lifecycle. It ships no built-in triple-barrier,
 pullback-sell, or cost-stop program, and the default registry is empty.
-Host-owned learner programs are maintained outside the CE source tree and are
+Built-in triple-barrier programs belong to millionaire pro. Host-owned learner
+programs are maintained outside the CE source tree and are
 excluded from CE discovery, runner fallbacks, and selection UI.
 
 Backtest configuration stores an ordered `risk_programs` array. Each item has
