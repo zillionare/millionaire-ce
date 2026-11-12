@@ -156,6 +156,8 @@ class MLMomentumReversalStrategy(MLRebalance, MLExplanation, BaseStrategy):
     BAR_INTERVAL = "1d"
     #: 声明本策略支持逐次预测归因（web 层据此动态加载 SHAP 面板）
     ATTRIBUTION = "shap"
+    #: 声明回测向导应展示“选择因子”步骤。
+    SUPPORTS_FEATURE_SELECTION = True
     PARAMS: dict[str, Any] = {
         "top_k": 5,
         "universe_size": 2000,

@@ -1,12 +1,3 @@
-from quantide.core.enums import BrokerKind
-from quantide.web.pages import strategy_backtest_views
-from quantide.web.pages import strategy_deploy_views
-from quantide.web.pages import strategy_log_views
-from quantide.web.pages import strategy_metrics
-from quantide.web.pages import strategy_report_views
-from quantide.web.pages import strategy_trade_report
-
-from tests.web_assets import script_sources
 import datetime
 from types import SimpleNamespace
 
@@ -15,10 +6,20 @@ import polars as pl
 import pytest
 from fasthtml.common import Div, to_xml
 
+from quantide.core.enums import BrokerKind
 from quantide.data.models import Portfolio
 from quantide.factors import FEATURE_COLS
 from quantide.web.pages import strategy as strategy_page
+from quantide.web.pages import (
+    strategy_backtest_views,
+    strategy_deploy_views,
+    strategy_log_views,
+    strategy_metrics,
+    strategy_report_views,
+    strategy_trade_report,
+)
 from tests.e2e.support.system_settings_session import system_settings_e2e_session
+from tests.web_assets import script_sources
 
 
 class FakeRequest:
@@ -1208,6 +1209,8 @@ def test_trade_kline_modal_title_exposes_prev_next_arrows(monkeypatch):
 class _ModalDemoStrategy:
     """演示用策略：同时包含策略参数与交易参数。"""
 
+    SUPPORTS_FEATURE_SELECTION = True
+
     @staticmethod
     def default_config():
         return {
@@ -1221,8 +1224,8 @@ class _ModalDemoStrategy:
         }
 
 
-def test_backtest_modal_is_two_step_wizard_with_factor_selection(monkeypatch):
-    """回测弹窗为两步向导：参数 + 因子勾选。"""
+def test_backtest_modal_shows_feature_step_for_feature_strategy(monkeypatch):
+    """支持特征选择的策略显示参数、因子、风控三步。"""
     monkeypatch.setattr(
         strategy_page.strategy_loader,
         "load_from_cache",
@@ -1233,13 +1236,40 @@ def test_backtest_modal_is_two_step_wizard_with_factor_selection(monkeypatch):
 
     assert 'data-bt-step="1"' in html
     assert 'data-bt-step="2"' in html
+    assert 'data-bt-step="3"' in html
     assert "选择因子" in html
     # 因子勾选项：全部因子默认勾选
     assert html.count('name="param_features"') == len(FEATURE_COLS)
     assert 'value="bias_5"' in html
     # 步骤切换脚本
     assert "showBacktestStep" in html
+    assert "第 1 / 3 步" in html
     assert "下一步：选择因子" in html
+    assert "q-btn--outline-brand" in html
+    assert "开始运行" in html
+
+
+def test_backtest_modal_skips_feature_step_for_non_feature_strategy(monkeypatch):
+    """均线等不使用因子的策略只显示参数、风控两步。"""
+    from quantide.strategies.example.monthly_ma import MonthlyMAStrategy
+
+    monkeypatch.setattr(
+        strategy_page.strategy_loader,
+        "load_from_cache",
+        lambda: {"MonthlyMAStrategy": MonthlyMAStrategy},
+    )
+
+    html = to_xml(strategy_page.backtest_modal("MonthlyMAStrategy"))
+
+    assert 'data-bt-step="1"' in html
+    assert 'data-bt-step="2"' in html
+    assert 'data-bt-step="3"' not in html
+    assert "选择因子" not in html
+    assert 'name="param_features"' not in html
+    assert "第 1 / 2 步" in html
+    assert "下一步：选择风控" in html
+    assert "下一步：选择因子" not in html
+    assert "q-btn--outline-brand" in html
     assert "开始运行" in html
 
 

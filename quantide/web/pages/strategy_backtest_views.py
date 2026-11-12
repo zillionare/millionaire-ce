@@ -361,8 +361,8 @@ def _build_param_inputs(
         inputs.append(
             Div(
                 Span(label, cls="text-sm font-medium text-gray-500 w-48 shrink-0"),
-                Input(name=f"param_{k}", value=str(value), cls="input input-sm w-full"),
-                cls="flex items-center gap-3 mb-3",
+                Input(name=f"param_{k}", value=str(value), cls="q-input w-full"),
+                cls="flex items-center gap-2 mb-2",
             )
         )
     return inputs
@@ -396,7 +396,7 @@ def _build_feature_selection_panel() -> Any:
             Div(
                 Div(group, cls="text-xs font-semibold text-gray-600 mb-1"),
                 Div(*items, cls="grid grid-cols-2 gap-x-3"),
-                cls="mb-3",
+                cls="mb-2",
             )
         )
     return Div(
@@ -404,7 +404,7 @@ def _build_feature_selection_panel() -> Any:
             H4("选择因子", cls="text-sm font-semibold text-gray-600 mb-1"),
             P(
                 "取消勾选即不参与训练与打分（全部取消表示使用全部因子）。鼠标悬停因子名可查看计算方法、含义与示例。",
-                cls="text-xs text-gray-500 mb-3",
+                cls="text-xs text-gray-500 mb-2",
             ),
             *groups,
         )
@@ -435,7 +435,7 @@ def _build_risk_selection_panel(
         param_inputs = [
             Div(
                 Span(key, cls="text-xs text-gray-500 w-32 shrink-0"),
-                RiskParameterInput(index, key, value, "input input-xs w-full"),
+                RiskParameterInput(index, key, value, "q-input w-full"),
                 cls="flex items-center gap-2 mb-1",
             )
             for key, value in params.items()
@@ -451,7 +451,7 @@ def _build_risk_selection_panel(
                         value=str(priority),
                         type="number",
                         min="0",
-                        cls="input input-xs w-24",
+                        cls="q-input w-24",
                     ),
                     cls="flex items-center gap-2 mt-2 mb-1",
                 ),
@@ -466,7 +466,7 @@ def _build_risk_selection_panel(
         H4("选择风控程序", cls="text-sm font-semibold text-gray-600 mb-1"),
         P(
             "可不选，也可选择多个；优先级越小越先执行。只有提供了明确回测适配器的风控程序会显示。",
-            cls="text-xs text-gray-500 mb-3",
+            cls="text-xs text-gray-500 mb-2",
         ),
         *cards,
         fh.Label(
@@ -487,6 +487,172 @@ def _build_risk_selection_panel(
     )
 
 
+def _build_backtest_step1(cls: Any, interval: str, prefill: dict[str, Any]) -> Any:
+    """Build the date, cash, strategy and trade parameter step."""
+    default_params = _get_strategy_default_params(cls)
+    strategy_params, trade_params = _split_backtest_params(default_params)
+    prefill_params = prefill.get("params") or {}
+    param_inputs = _build_param_inputs(strategy_params, labeled=False, overrides=prefill_params)
+    trade_param_inputs = _build_param_inputs(trade_params, labeled=True)
+    return Div(
+        Div(
+            Span("开始日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            Input(
+                name="start_date",
+                type="date",
+                value=str(prefill.get("start_date") or "2024-01-01"),
+                required=True,
+                cls="q-input w-full",
+            ),
+            cls="flex items-center gap-2 mb-2",
+        ),
+        Div(
+            Span("结束日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            Input(
+                name="end_date",
+                type="date",
+                value=str(prefill.get("end_date") or arrow.now().format("YYYY-MM-DD")),
+                required=True,
+                cls="q-input w-full",
+            ),
+            cls="flex items-center gap-2 mb-2",
+        ),
+        Div(
+            Span("初始资金", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            Input(
+                name="initial_cash",
+                type="number",
+                value="1000000",
+                cls="q-input w-full",
+            ),
+            cls="flex items-center gap-2 mb-2",
+        ),
+        Div(
+            Span("周期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            Input(type="hidden", name="interval", value=interval),
+            Span(
+                {"1d": "日线", "30m": "30分钟线", "1M": "月线"}.get(interval, interval),
+                cls="text-sm text-gray-700",
+            ),
+            Span("（由策略固定）", cls="text-xs text-gray-500"),
+            cls="flex items-center gap-2 mb-2",
+        ),
+        Div(
+            Span("日志保存", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
+            fh.Label(
+                fh.Input(name="save_logs", type="checkbox", cls="checkbox checkbox-sm"),
+                Span("保存回测日志到本地文件", cls="text-sm text-gray-700"),
+                cls="flex items-center gap-2",
+            ),
+            cls="flex items-center gap-3 mb-1",
+        ),
+        P(
+            "开启后会在回测运行时同步写入本地 backtest_logs 目录，报告页可反复加载。",
+            cls="ml-[6.75rem] mb-2 text-xs text-gray-500",
+        ),
+        Div(H4("策略参数", cls="text-sm font-semibold text-gray-600 mt-3 mb-2"), *param_inputs),
+        Details(
+            Summary(
+                "交易参数（风险程序 / 滑点 / 手续费，一般无需修改）",
+                cls="cursor-pointer text-sm font-semibold text-gray-600",
+            ),
+            P(
+                "这些参数决定风险程序、成交与费用口径，默认按上次使用的值。",
+                cls="text-xs text-gray-500 mt-2 mb-2",
+            ),
+            *trade_param_inputs,
+            cls="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2",
+        ),
+        data_bt_step="1",
+    )
+
+
+def _build_backtest_steps(
+    step1: Any,
+    cls: Any,
+    interval: str,
+    supports_feature_selection: bool,
+) -> list[Any]:
+    """Build only the steps relevant to the selected strategy."""
+    steps: list[Any] = [step1]
+    if supports_feature_selection:
+        steps.append(Div(_build_feature_selection_panel(), data_bt_step="2", cls="hidden"))
+    steps.append(
+        Div(
+            _build_risk_selection_panel(cls, interval),
+            data_bt_step="3" if supports_feature_selection else "2",
+            cls="hidden",
+        )
+    )
+    return steps
+
+
+def _build_backtest_footer(name: str, supports_feature_selection: bool) -> list[Any]:
+    """Build wizard navigation controls for the available steps."""
+    controls: list[Any] = [
+        strategy_close_button("取消", data_bt_show="1"),
+        Button(
+            "上一步",
+            type="button",
+            cls="btn btn-ghost",
+            onclick="showBacktestStep(1)",
+            data_bt_show="2",
+        ),
+    ]
+    next_class = "q-btn q-btn--outline-brand"
+    if supports_feature_selection:
+        controls.extend(
+            [
+                Button(
+                    "上一步",
+                    type="button",
+                    cls="btn btn-ghost",
+                    onclick="showBacktestStep(2)",
+                    data_bt_show="3",
+                ),
+                Button(
+                    "下一步：选择因子",
+                    type="button",
+                    cls=next_class,
+                    onclick="showBacktestStep(2)",
+                    data_bt_show="1",
+                ),
+                Button(
+                    "下一步：选择风控",
+                    type="button",
+                    cls=next_class,
+                    onclick="showBacktestStep(3)",
+                    data_bt_show="2",
+                ),
+            ]
+        )
+        start_step = "3"
+    else:
+        controls.append(
+            Button(
+                "下一步：选择风控",
+                type="button",
+                cls=next_class,
+                onclick="showBacktestStep(2)",
+                data_bt_show="1",
+            )
+        )
+        start_step = "2"
+    controls.append(
+        Button(
+            "开始运行",
+            type="button",
+            cls="btn btn-primary",
+            onclick="this.disabled=true;this.setAttribute('aria-busy','true');this.textContent='启动中...';",
+            hx_post=f"/strategy/{name}/backtest/run",
+            hx_target="#modal-container",
+            hx_include="closest form",
+            data_bt_show=start_step,
+        )
+    )
+    return controls
+
+
 @rt("/{name}/backtest/modal")
 def backtest_modal(name: str, req: Request | None = None) -> Any:
     """运行回测向导：参数、因子和显式风控程序选择。
@@ -501,153 +667,29 @@ def backtest_modal(name: str, req: Request | None = None) -> Any:
         return "Strategy not found"
 
     interval = BacktestRunner.strategy_interval(cls)
-    default_params = _get_strategy_default_params(cls)
-    strategy_params, trade_params = _split_backtest_params(default_params)
-
     prefill = _decode_backtest_prefill(req)
-    prefill_params = prefill.get("params") or {}
-    param_inputs = _build_param_inputs(strategy_params, labeled=False, overrides=prefill_params)
-    trade_param_inputs = _build_param_inputs(trade_params, labeled=True)
-
-    step1 = Div(
-        Div(
-            Span("开始日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-            Input(
-                name="start_date",
-                type="date",
-                value=str(prefill.get("start_date") or "2024-01-01"),
-                required=True,
-                cls="input input-sm w-full",
-            ),
-            cls="flex items-center gap-3 mb-3",
-        ),
-        Div(
-            Span("结束日期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-            Input(
-                name="end_date",
-                type="date",
-                value=str(prefill.get("end_date") or arrow.now().format("YYYY-MM-DD")),
-                required=True,
-                cls="input input-sm w-full",
-            ),
-            cls="flex items-center gap-3 mb-3",
-        ),
-        Div(
-            Span("初始资金", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-            Input(
-                name="initial_cash",
-                type="number",
-                value="1000000",
-                cls="input input-sm w-full",
-            ),
-            cls="flex items-center gap-3 mb-3",
-        ),
-        Div(
-            Span("周期", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-            Input(type="hidden", name="interval", value=interval),
-            Span(
-                {"1d": "日线", "30m": "30分钟线", "1M": "月线"}.get(interval, interval),
-                cls="text-sm text-gray-700",
-            ),
-            Span("（由策略固定）", cls="text-xs text-gray-500"),
-            cls="flex items-center gap-3 mb-3",
-        ),
-        Div(
-            Span("日志保存", cls="text-sm font-medium text-gray-500 w-24 shrink-0"),
-            fh.Label(
-                fh.Input(name="save_logs", type="checkbox", cls="checkbox checkbox-sm"),
-                Span("保存回测日志到本地文件", cls="text-sm text-gray-700"),
-                cls="flex items-center gap-2",
-            ),
-            cls="flex items-center gap-3 mb-1",
-        ),
-        P(
-            "开启后会在回测运行时同步写入本地 backtest_logs 目录，报告页可反复加载。",
-            cls="ml-[6.75rem] mb-3 text-xs text-gray-500",
-        ),
-        Div(H4("策略参数", cls="text-sm font-semibold text-gray-600 mt-4 mb-2"), *param_inputs),
-        Details(
-            Summary(
-                "交易参数（风险程序 / 滑点 / 手续费，一般无需修改）",
-                cls="cursor-pointer text-sm font-semibold text-gray-600",
-            ),
-            P(
-                "这些参数决定风险程序、成交与费用口径，默认按上次使用的值。",
-                cls="text-xs text-gray-500 mt-2 mb-3",
-            ),
-            *trade_param_inputs,
-            cls="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2",
-        ),
-        data_bt_step="1",
+    supports_feature_selection = bool(getattr(cls, "SUPPORTS_FEATURE_SELECTION", False))
+    steps = _build_backtest_steps(
+        _build_backtest_step1(cls, interval, prefill),
+        cls,
+        interval,
+        supports_feature_selection,
     )
-
-    step2 = Div(
-        _build_feature_selection_panel(),
-        data_bt_step="2",
-        cls="hidden",
-    )
-
-    step3 = Div(
-        _build_risk_selection_panel(cls, interval),
-        data_bt_step="3",
-        cls="hidden",
-    )
-
+    footer_controls = _build_backtest_footer(name, supports_feature_selection)
     return Div(
         Div(
             Div(
                 H3(f"运行回测 - {name}", cls="text-lg font-bold"),
                 Span(
-                    "第 1 / 3 步",
+                    f"第 1 / {len(steps)} 步",
                     id="backtest-step-indicator",
                     cls="text-xs text-gray-500 ml-2",
                 ),
                 cls="backtest-dialog__header",
             ),
             Form(
-                Div(step1, step2, step3, cls="backtest-dialog__body"),
-                Div(
-                    strategy_close_button("取消", data_bt_show="1"),
-                    Button(
-                        "上一步",
-                        type="button",
-                        cls="btn btn-ghost",
-                        onclick="showBacktestStep(1)",
-                        data_bt_show="2",
-                    ),
-                    Button(
-                        "上一步",
-                        type="button",
-                        cls="btn btn-ghost",
-                        onclick="showBacktestStep(2)",
-                        data_bt_show="3",
-                    ),
-                    Button(
-                        "下一步：选择因子",
-                        type="button",
-                        cls="btn btn-primary",
-                        onclick="showBacktestStep(2)",
-                        data_bt_show="1",
-                    ),
-                    Button(
-                        "下一步：选择风控",
-                        type="button",
-                        cls="btn btn-primary hidden",
-                        onclick="showBacktestStep(3)",
-                        data_bt_show="2",
-                    ),
-                    Button(
-                        "开始运行",
-                        type="button",
-                        cls="btn btn-primary",
-                        onclick="this.disabled=true;this.setAttribute('aria-busy','true');this.textContent='启动中...';",
-                        hx_post=f"/strategy/{name}/backtest/run",
-                        hx_target="#modal-container",
-                        hx_include="closest form",
-                        data_bt_show="3",
-                    ),
-                    cls="backtest-dialog__footer",
-                ),
+                Div(*steps, cls="backtest-dialog__body"),
+                Div(*footer_controls, cls="backtest-dialog__footer"),
                 cls="backtest-dialog__form",
             ),
             cls="backtest-dialog",
